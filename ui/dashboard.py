@@ -423,8 +423,7 @@ _msgs    = len(state["mqtt_messages"])
 st.markdown(
     f'<div style="background:#1a1d2e;border-radius:8px;padding:5px 16px;'
     f'display:flex;gap:24px;align-items:center;font-size:0.8rem;color:#cbd5e1;margin-bottom:8px">'
-    f'<span><span style="color:{"#22c55e" if _mqtt_ok else "#f87171"}">●</span>'
-    f' MQTT {"已连接" if _mqtt_ok else "断开"}</span>'
+    f'<span><span style="color:{"#22c55e" if _mqtt_ok else "#f87171"}">●</span> MQTT</span>'
     f'<span><span style="color:{"#22c55e" if _llm_ok else "#f59e0b"}">●</span>'
     f' LLM {"就绪" if _llm_ok else "离线"}</span>'
     f'<span style="color:#64748b">ID: {_cid}</span>'
@@ -435,11 +434,46 @@ st.markdown(
 
 st.divider()
 
-# ── 视频墙 ────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+# 区块1: Node-RED 控制面板 (顶部，像浏览器地址栏一样可填URL)
+# ═══════════════════════════════════════════════════════════════════════
+st.markdown("### 🖥️ Ai数字孪生")
+
+# URL输入框（类似浏览器地址栏）
+nodered_cols = st.columns([6, 1])
+with nodered_cols[0]:
+    nodered_url_input = st.text_input(
+        "Node-RED 地址",
+        value="http://localhost:1880/dashboard/creator-dash",
+        placeholder="http://localhost:1880/dashboard/creator-dash",
+        label_visibility="collapsed",
+    )
+with nodered_cols[1]:
+    st.markdown("")  # 占位
+    open_btn = st.button("🌐", help="在浏览器新标签页打开")
+
+if open_btn and nodered_url_input:
+    import webbrowser
+    webbrowser.open_new_tab(nodered_url_input)
+
+# iframe嵌入Node-RED
+if nodered_url_input:
+    st.markdown(
+        f'<iframe src="{nodered_url_input}" width="100%" height="320" '
+        f'style="border:1px solid #2d3748;border-radius:8px;"></iframe>',
+        unsafe_allow_html=True
+    )
+st.caption("编辑流程: http://localhost:1880 | 如需登录先在浏览器打开完成认证")
+
+st.divider()
+
+# ═══════════════════════════════════════════════════════════════════════
+# 区块2: 视频监控墙 (中部)
+# ═══════════════════════════════════════════════════════════════════════
+st.markdown("### 📹 视觉分析")
 
 active_sources = [s for s in video.sources if s.get("enabled", True)]
 if active_sources:
-    st.markdown("### 📹 视频监控")
     frames = video.get_all_frames()
     stream_status = video.get_stream_status()
     with state["lock"]:
@@ -453,13 +487,12 @@ if active_sources:
         s      = vstats.get(name, {})
         count  = s.get("count", 0)
         last_t = s.get("last_time", "—")
-        labels = "、".join(s.get("last_labels", [])) or "无"
-        if status == "ok" or frames.get(name) is not None:
-            dot_color, status_txt = "#22c55e", "在线"
-        elif status.startswith("error"):
-            dot_color, status_txt = "#f87171", "失败"
-        else:
-            dot_color, status_txt = "#f59e0b", "连接中"
+        labels = "、".join(s.get("last_labels", []) or "无")
+        dot_color, status_txt = (
+            ("#22c55e", "在线") if status == "ok" or frames.get(name) is not None
+            else ("#f87171", "失败") if status.startswith("error")
+            else ("#f59e0b", "连接中")
+        )
         status_bar = (
             f'<div style="border-top:1px solid #2d3748;padding:4px 8px;font-size:0.72rem;'
             f'color:#94a3b8;background:#1a1d2e;display:flex;gap:12px;align-items:center">'
@@ -470,8 +503,6 @@ if active_sources:
         with vcols[i % n_cols]:
             frame = frames.get(name)
             if frame is not None:
-                # video_processor 存储的帧已是 RGB（results.plot() 返回 RGB）
-                # 直接编码，不再做 BGR→RGB 转换
                 _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                 b64 = base64.b64encode(buf).decode()
                 st.markdown(
@@ -502,9 +533,17 @@ if active_sources:
                     f'</div>{status_bar}</div>',
                     unsafe_allow_html=True
                 )
-    st.divider()
+else:
+    st.info("暂无启用摄像头")
 
-# 主内容区
+st.divider()
+
+# ═══════════════════════════════════════════════════════════════════════
+# 区块3: 语音控制 + 语义理解 (底部)
+# ═══════════════════════════════════════════════════════════════════════
+st.markdown("### 🕹️ 语意理解")
+
+# 主内容区：左侧语义理解 + 右侧日志
 left, right = st.columns([3, 2], gap="large")
 
 with left:
@@ -673,48 +712,6 @@ with right:
         else:
             st.info("暂无日志")
 
-    st.divider()
-
-    # 手动控制 — 基于真实设备指令表
-    st.markdown("### 🎮 手动控制")
-
-    all_locations = sorted(set(d["location"] for d in DEVICE_COMMANDS if d["location"]))
-    all_types     = sorted(set(d["type"].strip() for d in DEVICE_COMMANDS if d["type"].strip()))
-
-    fc1, fc2 = st.columns(2)
-    sel_loc  = fc1.selectbox("位置", ["全部"] + all_locations, key="ctrl_loc")
-    sel_type = fc2.selectbox("设备类型", ["全部"] + all_types, key="ctrl_type")
-
-    filtered = [
-        d for d in DEVICE_COMMANDS
-        if (sel_loc  == "全部" or d["location"] == sel_loc)
-        and (sel_type == "全部" or d["type"].strip() == sel_type)
-    ]
-
-    if filtered:
-        cmd_options = [f"{d['name']}" for d in filtered]
-        sel_name = st.selectbox("指令", cmd_options, key="ctrl_cmd")
-        sel_dev  = next((d for d in filtered if d["name"] == sel_name), None)
-
-        if sel_dev:
-            st.caption(f"指令码: `{sel_dev['cmd']}`  →  {CTRL_HOST}:{CTRL_PORT}")
-            if st.button("发送指令", type="primary", use_container_width=True):
-                ok, msg = send_tcp_command(sel_dev["cmd"])
-                status_str = "已发送" if ok else f"失败:{msg}"
-                with state["lock"]:
-                    state["cmd_log"].append({
-                        "time":   datetime.now().strftime("%H:%M:%S"),
-                        "source": "手动",
-                        "text":   sel_dev["name"],
-                        "cmd":    {"cmd": sel_dev["cmd"], "target": f"{CTRL_HOST}:{CTRL_PORT}"},
-                        "status": status_str
-                    })
-                if ok:
-                    st.success(f"✓ {sel_dev['name']}  →  `{sel_dev['cmd']}`")
-                else:
-                    st.error(f"✗ TCP失败: {msg}")
-    else:
-        st.info("无匹配指令")
 
 # 自动刷新（录音中或有视频流时）
 has_video = bool([s for s in video.sources if s.get("enabled", True)])

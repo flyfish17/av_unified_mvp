@@ -6,8 +6,8 @@ audio:
     url: ws://127.0.0.1:10095
 llm:
   ollama:
-    model_fast: qwen3.5:9b
-    model_smart: qwen3.5:9b
+    model_fast: gemma-4-e4b-it-mxfp8
+    model_smart: gemma-4-e4b-it-mxfp8
     timeout: 30
     url: http://127.0.0.1:11434/api/generate
 mqtt:
@@ -19,6 +19,27 @@ mqtt:
     control: av/control
     discovery: av/discovery
     video_detect: av/video/detect
+# Router配置 - 消息路由规则
+router:
+  rules:
+    # 音频转写事件 -> LLM处理
+    - source_topic: "av/audio/event"
+      target_topics: ["av/llm/command"]
+      condition: "payload.get('payload', {}).get('event_type') == 'transcription'"
+    # LLM响应 -> 控制指令 + Dashboard显示
+    - source_topic: "av/llm/event"
+      target_topics: ["av/control/command", "av/dashboard/display"]
+      condition: "payload.get('payload', {}).get('command') is not None"
+    # 视频检测事件 -> Dashboard显示 + Node-RED孪生
+    - source_topic: "av/video/event"
+      target_topics: ["av/dashboard/display", "av/node_red/input"]
+      condition: "payload.get('payload', {}).get('event_type') == 'detection'"
+    # Dashboard手动控制 -> 控制指令
+    - source_topic: "av/dashboard/command"
+      target_topics: ["av/control/command"]
+    # Node-RED控制 -> 控制指令
+    - source_topic: "av/node_red/command"
+      target_topics: ["av/control/command"]
 system:
   log_level: INFO
   max_cpu_percent: 70
