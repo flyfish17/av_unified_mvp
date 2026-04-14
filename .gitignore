@@ -1,0 +1,41 @@
+# API Keys
+*API_KEY*.txt
+ANTHROPIC_API_KEY*.txt
+OPENAI_API_KEY*.txt
+
+# Models
+*.pt
+*.pth
+*.onnx
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# Config with secrets (keep template)
+# config/secrets.yaml

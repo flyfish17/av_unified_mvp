@@ -1,0 +1,30 @@
+# CREATOR Ai视听理解系统 — Python 依赖
+# Python 3.14 | 测试平台：macOS (Apple Silicon)
+# 安装：pip install -r requirements.txt
+
+# 视频处理
+opencv-python==4.13.0.92
+ultralytics==8.4.35
+
+# 音频 / 语音识别
+sounddevice==0.5.5
+websockets==16.0
+funasr==1.3.1
+modelscope==1.35.3
+
+# AI 推理（PyTorch — Apple Silicon 用 MPS 加速）
+torch==2.11.0
+torchaudio==2.11.0
+torchvision==0.26.0
+
+# MQTT
+paho-mqtt==2.1.0
+
+# Web 界面
+streamlit==1.56.0
+streamlit-autorefresh==1.0.1
+
+# 工具
+numpy==2.4.4
+requests==2.33.1
+PyYAML>=6.0

@@ -1,0 +1,50 @@
+audio:
+  funasr:
+    sample_rate: 16000
+    silence_duration_ms: 600
+    silence_threshold: 0.008
+    url: ws://127.0.0.1:10095
+llm:
+  ollama:
+    model_fast: qwen3.5:9b
+    model_smart: qwen3.5:9b
+    timeout: 30
+    url: http://127.0.0.1:11434/api/generate
+mqtt:
+  broker: test.mosquitto.org
+  client_id: av_box_001
+  port: 1883
+  topics:
+    audio_command: av/audio/command
+    control: av/control
+    discovery: av/discovery
+    video_detect: av/video/detect
+system:
+  log_level: INFO
+  max_cpu_percent: 70
+video:
+  sources:
+  - enabled: true
+    name: 本机摄像头
+    url: '0'
+  - enabled: true
+    name: 监控
+    url: rtsp://admin:a12345678@192.168.5.181:554/Streaming/Channels/801
+  - enabled: true
+    name: 分布式
+    url: rtsp://192.168.5.31:554/live/chn2
+  - enabled: true
+    name: 财务监控
+    url: rtsp://admin:a12345678@192.168.5.181:554/Streaming/Channels/1101
+  yolo:
+    confidence: 0.5
+    inference_fps: 2
+    model: yolov8n.pt
+    target_classes:
+    - 0
+    - 67
+    - 73
+web:
+  host: 0.0.0.0
+  mdns_name: avbox1
+  port: 8501

@@ -1,0 +1,81 @@
+序号,中控功能,接收指令（ASCII）,地点,,设备
+2,吧台窗帘合,BarCounter_Curtain_Close,吧台,BarCounter,窗帘
+1,吧台窗帘开,BarCounter_Curtain_Open,吧台,,窗帘
+3,吧台窗帘停,BarCounter_Curtain_Stop,吧台,,窗帘
+25,吧台灯带关,BarCounter_Light_Off,吧台,,灯光
+24,吧台灯带开,BarCounter_Light_On,吧台,,灯光
+51,财务室灯带关,FinanceOffice_Light_Off,财务室,,灯光
+50,财务室灯带开,FinanceOffice_Light_On,财务室,,灯光
+43,餐桌灯带1关,DiningTable_Light1_Off,餐桌,,灯光
+42,餐桌灯带1开,DiningTable_Light1_On,餐桌,,灯光
+45,餐桌灯带2关,DiningTable_Light2_Off,餐桌,,灯光
+44,餐桌灯带2开,DiningTable_Light2_On,餐桌,,灯光
+,二楼餐桌空调关,2FDiningTable_AirConditioner_Off,二楼餐桌,, 中央空调
+,二楼餐桌空调开,2FDiningTable_AirConditioner_On,二楼餐桌,, 中央空调
+,二楼餐桌空调温度-,2FDiningTable_AirConditioner_TempDown,二楼餐桌,, 中央空调
+,二楼餐桌空调温度+,2FDiningTable_AirConditioner_TempUp,二楼餐桌,, 中央空调
+49,工程部轨道灯关,EngineeringDepartment_TrackLight_Off,工程部,,灯光
+48,工程部轨道灯开,EngineeringDepartment_TrackLight_On,工程部,,灯光
+47,会客室轨道灯关,ReceptionRoom_Light_Off,会客室,,灯光
+46,会客室轨道灯开,ReceptionRoom_Light_On,会客室,,灯光
+21,会客室轨道灯关,ReceptionRoom_TrackLight_Off,会客室,,灯光
+20,会客室轨道灯开,ReceptionRoom_TrackLight_On,会客室,,灯光
+8,会议室1窗帘合,MeetingRoom1_Curtain_Close,会议室1,,窗帘
+7,会议室1窗帘开,MeetingRoom1_Curtain_Open,会议室1,,窗帘
+9,会议室1窗帘停,MeetingRoom1_Curtain_Stop,会议室1,,窗帘
+31,会议室1灯带关,MeetingRoom1_Light_Off,会议室1,,灯光
+30,会议室1灯带开,MeetingRoom1_Light_On,会议室1,,灯光
+11,会议室2窗帘合,MeetingRoom2_Curtain_Close,会议室2,,窗帘
+10,会议室2窗帘开,MeetingRoom2_Curtain_Open,会议室2,,窗帘
+12,会议室2窗帘停,MeetingRoom2_Curtain_Stop,会议室2,,窗帘
+23,会议室2灯带关,MeetingRoom2_Light_Off,会议室2,,灯光
+22,会议室2灯带开,MeetingRoom2_Light_On,会议室2,,灯光
+,机房空调关,EngineRoom_AirConditioner_Off,机房,, 中央空调
+,机房空调开,EngineRoom_AirConditioner_On,机房,, 中央空调
+,机房空调温度-,EngineRoom_AirConditioner_TempDown,机房,, 中央空调
+,机房空调温度+,EngineRoom_AirConditioner_TempUp,机房,, 中央空调
+35,鲲景观关,KunScenery_Off,鲲景,,灯光
+34,鲲景观开,KunScenery_On,鲲景,,灯光
+27,洽谈室轨道灯关,NegotiationRoom_TrackLight_Off,洽谈室,,灯光
+26,洽谈室轨道灯开,NegotiationRoom_TrackLight_On,洽谈室,,灯光
+41,小楼梯轨道灯关,SmallStairs_TrackLight_Off,小楼梯,,灯光
+40,小楼梯轨道灯开,SmallStairs_TrackLight_On,小楼梯,,灯光
+,研发部空调关,RDDepartment_AirConditioner_Off,研发部,, 中央空调
+,研发部空调开,RDDepartment_AirConditioner_On,研发部,, 中央空调
+,研发部空调温度-,RDDepartment_AirConditioner_TempDown,研发部,, 中央空调
+,研发部空调温度+,RDDepartment_AirConditioner_TempUp,研发部,, 中央空调
+5,研发部窗帘合,RDDepartment_Curtain_Close,研发部,,窗帘
+4,研发部窗帘开,RDDepartment_Curtain_Open,研发部,,窗帘
+6,研发部窗帘停,RDDepartment_Curtain_Stop,研发部,,窗帘
+37,研发部轨道灯关,RDDepartment_TrackLight_Off,研发部,,灯光
+36,研发部轨道灯开,RDDepartment_TrackLight_On,研发部,,灯光
+,运营中心空调关,OperateCentre_AirConditioner_Off,运营中心,, 中央空调
+,运营中心空调开,OperateCentre_AirConditioner_On,运营中心,, 中央空调
+,运营中心空调温度-,OperateCentre_AirConditioner_TempDown,运营中心,, 中央空调
+,运营中心空调温度+,OperateCentre_AirConditioner_TempUp,运营中心,, 中央空调
+14,运营中心窗帘合,OperateCentre_Curtain_Close,运营中心,,窗帘
+13,运营中心窗帘开,OperateCentre_Curtain_Open,运营中心,,窗帘
+15,运营中心窗帘停,OperateCentre_Curtain_Stop,运营中心,,窗帘
+57,运营中心筒灯关,OperateCentre_Downlight_Off,运营中心,,灯光
+56,运营中心筒灯开,OperateCentre_Downlight_On,运营中心,,灯光
+55,运营中心灯带关,OperateCentre_Light_Off,运营中心,,灯光
+54,运营中心灯带开,OperateCentre_Light_On,运营中心,,灯光
+16,运营中心开始会议,OperateCentre_Meeting_Begin,运营中心,,窗帘
+17,运营中心结束会议,OperateCentre_Meeting_End,运营中心,,窗帘
+,月会(触发语音),OperateCentre_Monthly Meeting,运营中心,, 语音
+,研发会(触发语音),OperateCentre_Research And Development Meeting,运营中心,, 语音
+53,运营中心虚光关,OperateCentre_VirtualLight_Off,运营中心,,灯光
+52,运营中心虚光开,OperateCentre_VirtualLight_On,运营中心,,灯光
+,周会(触发语音),OperateCentre_Weekly Meeting,运营中心,, 语音
+33,走廊灯带关,Corridor_Light_Off,走廊,,灯光
+32,走廊灯带开,Corridor_Light_On,走廊,,灯光
+29,走廊发光字灯带关,Corridor_LuminousWordLight_Off,走廊,,灯光
+28,走廊发光字灯带开,Corridor_LuminousWordLight_On,走廊,,灯光
+19,走廊轨道灯关,Corridor_TrackLight_Off,走廊,,灯光
+18,走廊轨道灯开,Corridor_TrackLight_On,走廊,,灯光
+39,发光字关,LuminousWord_Off,,,灯光
+38,发光字开,LuminousWord_On,,,灯光
+50,场景3,Sence_03,,,
+51,场景4,Sence_04,,,
+52,场景5,Sence_05,,,
+53,场景6,Sence_06,,,
