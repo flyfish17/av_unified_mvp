@@ -34,7 +34,7 @@ class BaseModule(ABC):
         module.start()
     """
 
-    VERSION = "1.0"
+    VERSION = "1.1"
 
     def __init__(
         self,
