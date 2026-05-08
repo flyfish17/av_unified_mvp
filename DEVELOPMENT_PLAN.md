@@ -331,6 +331,30 @@ ping -c 2 baidu.com        # 互联网，仍通（默认网关 .5.1 不变）
 - 真实生产凭据：admin / 123456 / TCP :12121
 - 实测被 user 工具阻塞，**driver 实施暂停**，等 user 自己再测过 / 让出 session 后再启动
 
+#### 🔬 Creator 分布式协议 三次测试（user 让出 session 后做的纯只读探查）
+
+User 给关键 hint：先 `logout` 释放 session 再 `login`，**token 不变**（admin 永久 token `a66abb5684c45962d887564f08346e8d`）。
+
+| 测试 | 请求 | 响应 | 结论 |
+|---|---|---|---|
+| logout | `{"cmd":"logout","token":"a66abb5684..."}` | `{"cmd":"logout","code":0}` | ✅ 释放 session |
+| login | `{"cmd":"login","user":"admin","password":"123456"}` | `{"cmd":"login","code":0,"token":"a66abb5684..."}` | ✅ token 与 user 提示一致**完全不变** |
+| queryVersion | `{"cmd":"queryVersion","token":...}` | `{"cmd":"closeAudio","code":0,"version":"V3.2.0"}` | ✅ code 0，⚠️ **响应 cmd 字段是 closeAudio 不是 queryVersion**（server 端 bug，不影响 version 解析） |
+| allDeviceState onoff=1 | `{"cmd":"allDeviceState","token":...,"onoff":1}` | `{"cmd":"allDeviceState","code":0,"device":["192.168.1.10","192.168.1.11"]}` | ⚠️ 仍是 PDF 示例 mock IP |
+| allDeviceState onoff=0 | 同上 onoff=0 | 同上 2 台 | 同上 |
+| deviceStatus 192.168.1.10 | `{"cmd":"deviceStatus","token":...,"deviceIp":"192.168.1.10"}` | `{"cmd":"deviceStatus","code":0,"deviceIp":"192.168.1.10","hdmi":0,"onoff":0}` | ⚠️ 离线 + 无 HDMI 信号 |
+
+**核心结论**：
+1. ✅ **协议链路 100% 通**：logout / login / queryVersion / allDeviceState / deviceStatus 都返 code=0
+2. ✅ **token 永久不变**：admin 的 token 是 `a66abb5684c45962d887564f08346e8d`，driver 实现可以**不用每次拿新 token**（除非重启 server）
+3. ❌ **.16 这台 server 没注册真实分布式拓扑**：返回的 192.168.1.10 / .11 是 PDF 文档示例 IP，物理上离线
+4. 🔶 **真实业务网关在哪**：user 截图当时测通的 openWindow / switchSrc 应该不是发到 .16，而是**别的网关**或**正确的 srcDevIp/outputIp 不是 .1.10/.11**
+
+**Sprint B 启动前置（user 提供以下任一即可）**：
+- 真实生产网关 IP（如果不是 .16）+ 凭据
+- user 截图当时测过的 `srcDevIp` 和 `outputIp` 实际值（多半是某个真实拓扑设备的 IP）
+- 或者：user 在 .16 网关 admin 后台**注册分布式拓扑**让 allDeviceState 返真实设备
+
 **如果开始做 modules/creator_distributed**：
 - 仿 husion_distributed 模式：BaseModule + TCP poll + 暴露 endpoints
 - 关键 endpoint：login / queryVersion / allDeviceState / openWindow / switchSrc / cleanScreen / callPlan
