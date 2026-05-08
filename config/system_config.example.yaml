@@ -1,0 +1,92 @@
+audio:
+  funasr:
+    mode: websocket_2pass
+    sample_rate: 16000
+    chunk_size:
+    - 5
+    - 10
+    - 5
+    chunk_interval: 10
+    chunk_interval_ms: 60
+    hotwords: ''
+    use_itn: true
+    silence_duration_ms: 600
+    silence_threshold: 0.008
+    url: ws://127.0.0.1:10095
+llm:
+  ollama:
+    model_fast: qwen3.5:9b
+    model_smart: qwen3.5:9b
+    timeout: 30
+    url: http://127.0.0.1:11434/api/generate
+mqtt:
+  broker: 127.0.0.1
+  client_id: av_box_001
+  port: 1883
+  topics:
+    audio_command: av/audio/command
+    audio_partial: av/audio/partial
+    control: av/control
+    discovery: av/discovery
+    video_detect: av/video/detect
+router:
+  rules:
+  - source_topic: av/audio/event
+    target_topics:
+    - av/llm/command
+    condition: payload.get('payload', {}).get('event_type') == 'transcription'
+  - source_topic: av/llm/event
+    target_topics:
+    - av/control/command
+    - av/dashboard/display
+    condition: payload.get('payload', {}).get('command') is not None
+  - source_topic: av/video/event
+    target_topics:
+    - av/dashboard/display
+    - av/node_red/input
+    condition: payload.get('payload', {}).get('event_type') == 'detection'
+  - source_topic: av/dashboard/command
+    target_topics:
+    - av/control/command
+  - source_topic: av/node_red/command
+    target_topics:
+    - av/control/command
+system:
+  log_level: INFO
+  max_cpu_percent: 70
+  performance_profile: medium
+video:
+  sources:
+  - enabled: true
+    name: 本机摄像头
+    url: '0'
+  - enabled: true
+    name: 监控
+    url: rtsp://admin:${IPC_PWD}@192.168.5.181:554/Streaming/Channels/801
+  - enabled: true
+    name: 分布式
+    url: rtsp://192.168.5.31:554/live/chn2
+  - enabled: true
+    name: 财务监控
+    url: rtsp://admin:${IPC_PWD}@192.168.5.181:554/Streaming/Channels/1101
+  yolo:
+    confidence: 0.5
+    inference_fps: 2
+    model: yolov8n.pt
+    target_classes:
+    - 0
+    - 67
+    - 73
+web:
+  host: 0.0.0.0
+  mdns_name: avbox1
+  port: 8501
+  transcript_enabled: true
+  transcript_port: 5050
+husion:
+  host: 192.168.5.253
+  port: 6000
+  id_ranges:
+  - - 5001
+    - 5009
+  poll_interval: 30

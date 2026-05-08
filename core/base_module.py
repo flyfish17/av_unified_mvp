@@ -11,7 +11,7 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from threading import Event, Thread
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
 import paho.mqtt.client as mqtt
 
@@ -34,24 +34,36 @@ class BaseModule(ABC):
         module.start()
     """
 
-    VERSION = "1.1"
+    VERSION = "1.2"
+    DISCOVERY_PREFIX = "av/system/discovery"
+    HEARTBEAT_INTERVAL = 30  # 默认心跳秒数；子类可重写
 
     def __init__(
         self,
         name: str,
         config: dict,
         mqtt_config_key: str = "mqtt",
+        streams: Optional[list] = None,
+        endpoints: Optional[list] = None,
     ):
         self.name = name
         self.cfg = config
         self.logger = logging.getLogger(name)
 
+        # 公告内容：模块声明自己提供哪些 stream / endpoint，UI 据此选 renderer
+        self.streams = streams or []
+        self.endpoints = endpoints or []
+
         # MQTT配置
         mqtt_cfg = config.get(mqtt_config_key, {})
         self.broker = mqtt_cfg.get("broker", "127.0.0.1")
         self.port = mqtt_cfg.get("port", 1883)
-        self.client_id = mqtt_cfg.get("client_id", f"{name}_{uuid.uuid4().hex[:8]}")
+        # 每个模块附加唯一后缀，避免和 supervisor / 兄弟模块共用 client_id
+        # 否则 MQTT broker 会踢掉前一个连接，导致所有模块连/断风暴
+        base_cid = mqtt_cfg.get("client_id", "av_box_001")
+        self.client_id = f"{base_cid}_{name}_{uuid.uuid4().hex[:6]}"
         self._keepalive = mqtt_cfg.get("keepalive", 60)
+        self._discovery_topic = f"{self.DISCOVERY_PREFIX}/{name}"
 
         # Paho MQTT v2 API
         self._client = mqtt.Client(
@@ -62,6 +74,15 @@ class BaseModule(ABC):
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
         self._client.on_message = self._on_message
+
+        # LWT：模块崩溃 / 网络断 broker 自动发 offline，retain 让后开 UI 也能看到
+        will_payload = json.dumps(
+            self._discovery_payload("offline"),
+            ensure_ascii=False,
+        )
+        self._client.will_set(
+            self._discovery_topic, will_payload, qos=1, retain=True
+        )
 
         # 状态
         self._connected = False
@@ -182,38 +203,31 @@ class BaseModule(ABC):
         else:
             self.logger.debug(f"发布: {topic}")
 
-    def _publish_discovery(self, event_type: str) -> None:
-        """
-        发布设备发现消息
+    def _discovery_payload(self, event: str) -> dict:
+        """构造公告载荷。event ∈ {online, heartbeat, offline}。"""
+        return {
+            "module": self.name,
+            "client_id": self.client_id,
+            "ip": self._get_local_ip(),
+            "ts": time.time(),
+            "event": event,
+            "heartbeat_interval": self.HEARTBEAT_INTERVAL,
+            "version": self.VERSION,
+            "streams": self.streams,
+            "endpoints": self.endpoints,
+        }
 
-        Args:
-            event_type: "online" 或 "offline"
+    def _publish_discovery(self, event: str) -> None:
         """
-        ip = self._get_local_ip()
-        self.publish(
-            "av/system/discovery",
-            {
-                "event": event_type,
-                "client_id": self.client_id,
-                "module": self.name,
-                "ip": ip,
-                "timestamp": time.time(),
-            },
-        )
-
-    def _publish_status(self) -> None:
-        """发布自身状态心跳"""
-        self.publish(
-            f"av/{self.name}/status",
-            {
-                "topic_type": "status",
-                "payload": {
-                    "module": self.name,
-                    "status": "running" if self._running.is_set() else "stopped",
-                    "uptime_seconds": getattr(self, "_uptime_start", time.time()),
-                    "msg_count": self._msg_count,
-                },
-            },
+        发布公告到 av/system/discovery/<module>。
+        retain=True 保证后开订阅的 UI 立即看到当前所有模块。
+        """
+        payload = self._discovery_payload(event)
+        msg = json.dumps(payload, ensure_ascii=False)
+        # 直接 client.publish 而非 self.publish，避免 BaseModule.publish 的 header 包装。
+        # 公告本身就是 metadata，不该再套一层 header。
+        self._client.publish(
+            self._discovery_topic, msg, qos=1, retain=True
         )
 
     @staticmethod
@@ -240,31 +254,31 @@ class BaseModule(ABC):
         self.logger.info(f"{self.name} 已启动")
 
     def stop(self) -> None:
-        """停止模块"""
+        """停止模块。优雅关闭时主动发 offline，覆盖 LWT 占位。"""
         self.logger.info(f"停止 {self.name}...")
         self._running.clear()
-        self._publish_discovery("offline")
+        try:
+            self._publish_discovery("offline")
+        except Exception as e:
+            self.logger.warning(f"发布 offline 失败: {e}")
         self._client.loop_stop()
         self._client.disconnect()
         self.logger.info(f"{self.name} 已停止")
 
     def run(self) -> None:
         """
-        启动并阻塞主线程，直到收到停止信号
-
-        使用方式:
-            module = MyModule(config)
-            module.run()
+        启动并阻塞主线程，直到收到停止信号。
+        每 HEARTBEAT_INTERVAL 秒重发一次 retain 公告，UI 用它判断模块是否活着。
         """
         self.start()
+        last_heartbeat = time.time()
         try:
             while self._running.is_set():
                 time.sleep(1)
-                # 定期发布状态（每60秒）
-                if hasattr(self, "_uptime_start"):
-                    if time.time() - getattr(self, "_last_status", 0) > 60:
-                        self._publish_status()
-                        self._last_status = time.time()
+                if time.time() - last_heartbeat >= self.HEARTBEAT_INTERVAL:
+                    if self._connected:
+                        self._publish_discovery("heartbeat")
+                    last_heartbeat = time.time()
         except KeyboardInterrupt:
             self.logger.info("收到键盘中断信号")
         finally:

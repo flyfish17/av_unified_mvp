@@ -39,3 +39,30 @@ build/
 
 # Config with secrets (keep template)
 # config/secrets.yaml
+
+# Node-RED runtime state（保留 flows.json + settings.js，忽略其它）
+node-red/node_modules/
+node-red/.config.*
+node-red/.flows.json.backup
+node-red/flows.json.bak.*
+node-red/flows_creator_full.json.bak
+node-red/flows_legacy_creator.json
+node-red/lib/
+node-red/projects/
+node-red/package-lock.json
+
+# Claude / Cursor 个人配置（含 hooks/permissions，不该进仓库）
+.claude/
+.cursor/
+
+# 模型挂载卷（外部）
+funasr-runtime-resources/
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 临时实验
+creator_ai_platform_intro.html
+config/system_config.yaml

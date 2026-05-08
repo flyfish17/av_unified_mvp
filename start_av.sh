@@ -48,6 +48,12 @@ nohup streamlit run ui/dashboard.py --server.port 8501 --browser.gatherUsageStat
 STREAMLIT_PID=$!
 echo $STREAMLIT_PID >> "$PIDFILE"
 
+# 启动Node-RED
+echo "[启动] Node-RED..."
+nohup npx node-red -f "$(dirname "$0")/node-red/flows_template.json" > /tmp/av_nodered.log 2>&1 &
+NR_PID=$!
+echo $NR_PID >> "$PIDFILE"
+
 sleep 2
 echo ""
 echo "=========================================="
@@ -55,6 +61,11 @@ echo "  AV统一系统已启动"
 echo "=========================================="
 echo "  主进程: PID $MAIN_PID"
 echo "  Web界面: http://localhost:8501"
+echo "  Node-RED: http://localhost:1880"
 echo "  日志: $LOGFILE"
 echo "  停止: ./stop_av.sh"
 echo "=========================================="
+
+# 自动打开Streamlit网页
+sleep 2
+open http://localhost:8501

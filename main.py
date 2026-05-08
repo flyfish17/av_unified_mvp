@@ -1,25 +1,42 @@
 #!/usr/bin/env python3
 """
 main.py
-AV统一系统 - 主程序入口
+AV统一系统 - Supervisor 入口 (R2)
+
+职责：
+  1. profile 探测 + 打印启动信息
+  2. 起 web/server.py（SSE 服务，4 路 channel）
+  3. 起 MQTTBridge 旁路订阅：MQTT 各 topic → web SSE 桥接
+  4. subprocess.Popen × 3 拉起独立模块（audio / video / llm）
+  5. 主循环 poll()，崩溃指数退避重拉（5 次后告警继续重拉）
 """
 import logging
+import os
 import signal
+import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
+# 让本机服务（ollama / mosquitto / funasr）请求绕开系统 HTTP 代理。
+# 必须在 import requests 之前设。
+os.environ.setdefault("NO_PROXY", "127.0.0.1,localhost,::1")
+os.environ.setdefault("no_proxy", "127.0.0.1,localhost,::1")
+
+# 离线友好：阻止 modelscope/funasr 库做远端探测。
+# 必须在 import funasr/modelscope 之前设。
+os.environ.setdefault("MODELSCOPE_DOMAIN", "")
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 import yaml
 
-# 添加core目录到路径
 sys.path.insert(0, str(Path(__file__).parent))
 
-from core.audio_processor import AudioProcessor
-from core.llm_engine import LLMEngine
 from core.mqtt_bridge import MQTTBridge
-from core.video_processor import VideoProcessor
+from core.profile import PROFILES, announce, recommend_profile, total_ram_gb
 
-# ── 日志配置 ──────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -27,49 +44,78 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 受 supervisor 管理的独立模块
+MANAGED_MODULES = [
+    "modules.audio_processor.main",
+    "modules.video_processor.main",
+    "modules.llm_engine.main",
+    # R6：系统/网络观测模块
+    "modules.system_info.main",
+    "modules.network_info.main",
+    "modules.network_scanner.main",
+    # 跨品牌桥接：husion HDC900 一体机分布式终端发现
+    "modules.husion_distributed.main",
+]
 
-class AVUnifiedSystem:
+MAX_RETRY_DELAY = 60   # 最大退避秒数
+WARN_AFTER_FAILS = 5   # 连续失败几次后升级为 ERROR 告警
+
+
+class AVSupervisor:
     def __init__(self, config_path: str):
-        # 加载配置
         with open(config_path, "r", encoding="utf-8") as f:
             self.cfg = yaml.safe_load(f)
 
-        # 初始化各模块
-        self.mqtt  = MQTTBridge(self.cfg.get("mqtt", {}))
-        self.llm   = LLMEngine(self.cfg.get("llm", {}))
-        self.video = VideoProcessor(self.cfg.get("video", {}))
-        self.audio = AudioProcessor(self.cfg.get("audio", {}))
+        self._config_path = Path(config_path)
+        # config_path = .../av_unified_mvp/config/system_config.yaml
+        # project_root = .../av_unified_mvp/ （config/ 的上级）
+        self._project_root = self._config_path.parent.parent
 
+        self._apply_profile()
+
+        self.mqtt = MQTTBridge(self.cfg.get("mqtt", {}))
+        self._web_push = lambda *_: None
+
+        # module → {proc, fail_count, retry_delay, next_retry, spawn_time}
+        self._procs: dict = {}
         self._running = False
+
+    def _apply_profile(self) -> None:
+        sys_cfg = self.cfg.setdefault("system", {})
+        # AV_PROFILE_OVERRIDE 由 start.command 在 docker 不可用时设为 light，强制覆盖
+        override = os.environ.get("AV_PROFILE_OVERRIDE")
+        active = override or sys_cfg.get("performance_profile") or recommend_profile(total_ram_gb())
+        sys_cfg["performance_profile"] = active
+        if active in PROFILES:
+            p = PROFILES[active]
+            audio_funasr = self.cfg.setdefault("audio", {}).setdefault("funasr", {})
+            yolo = self.cfg.setdefault("video", {}).setdefault("yolo", {})
+            if override:
+                audio_funasr["mode"] = p["audio_mode"]
+                yolo["model"] = p["video_model"]
+                logger.info(f"profile 被 AV_PROFILE_OVERRIDE 临时切到 {active}（不写回 config）")
+            else:
+                audio_funasr.setdefault("mode", p["audio_mode"])
+                yolo.setdefault("model", p["video_model"])
+        announce(active)
 
     # ── 启动/停止 ─────────────────────────────────────────────────────
 
     def start(self):
         logger.info("=" * 60)
-        logger.info("  AV统一系统启动中...")
+        logger.info("  AV统一系统 Supervisor 启动中...")
         logger.info("=" * 60)
 
-        # 1. 启动MQTT
-        self.mqtt.start()
-        time.sleep(1)
-
-        # 2. 订阅MQTT主题（接收其他盒子的消息）
-        topics = self.cfg.get("mqtt", {}).get("topics", {})
-        self.mqtt.subscribe(topics.get("discovery", "av/discovery"), self._on_discovery)
-        self.mqtt.subscribe(topics.get("control", "av/control"), self._on_control)
-
-        # 3. 启动视频处理
-        self.video.start(callback=self._on_video_event)
-
-        # 4. 启动音频处理
-        self.audio.start(callback=self._on_audio_text)
+        self._start_web()
+        self._start_mqtt()
+        self._spawn_all()
 
         self._running = True
-        logger.info("✓ 系统已启动，按 Ctrl+C 停止\n")
+        logger.info("✓ Supervisor 已启动，按 Ctrl+C 停止\n")
 
-        # 主循环（保持运行）
         try:
             while self._running:
+                self._tick()
                 time.sleep(1)
         except KeyboardInterrupt:
             logger.info("\n收到停止信号")
@@ -77,64 +123,217 @@ class AVUnifiedSystem:
         self.stop()
 
     def stop(self):
-        logger.info("正在停止系统...")
-        self.video.stop()
-        self.audio.stop()
+        logger.info("正在停止 Supervisor...")
+        self._running = False
+        for module, state in self._procs.items():
+            proc = state["proc"]
+            if proc.poll() is None:
+                logger.info(f"  终止 {module} (PID={proc.pid})...")
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+        self.mqtt.stop()
         logger.info("已退出")
 
-    # ── 事件处理 ──────────────────────────────────────────────────────
+    # ── Supervisor 主循环 ─────────────────────────────────────────────
 
-    def _on_video_event(self, event):
-        """视频检测事件回调"""
-        logger.info(f"[视频] {event.camera_name} 检测到: {len(event.detections)} 个目标")
+    def _spawn(self, module: str) -> subprocess.Popen:
+        """启动一个独立模块子进程，继承当前环境变量（含 AV_PROFILE_OVERRIDE）。"""
+        proc = subprocess.Popen(
+            [sys.executable, "-m", module],
+            cwd=str(self._project_root),
+            env=os.environ.copy(),
+        )
+        logger.info(f"[supervisor] 拉起 {module} (PID={proc.pid})")
+        return proc
 
-        # 发布到MQTT
-        topics = self.cfg.get("mqtt", {}).get("topics", {})
-        self.mqtt.publish(topics.get("video_detect", "av/video/detect"), {
-            "camera": event.camera_name,
-            "time": event.timestamp,
-            "detections": event.detections
+    def _spawn_all(self):
+        now = time.time()
+        for module in MANAGED_MODULES:
+            proc = self._spawn(module)
+            self._procs[module] = {
+                "proc": proc,
+                "fail_count": 0,
+                "retry_delay": 1.0,
+                "next_retry": now,
+                "spawn_time": now,
+            }
+
+    def _tick(self):
+        """每秒检查一次各模块是否存活，崩溃则退避重拉。"""
+        now = time.time()
+        for module, state in self._procs.items():
+            if state["proc"].poll() is None:
+                continue  # 还在跑
+
+            if now < state["next_retry"]:
+                continue  # 还在等退避
+
+            # 运行超过 MAX_RETRY_DELAY 秒才崩溃，视为健康运行过，重置退避计数
+            if now - state["spawn_time"] > MAX_RETRY_DELAY:
+                state["fail_count"] = 0
+                state["retry_delay"] = 1.0
+
+            state["fail_count"] += 1
+            fc = state["fail_count"]
+            state["retry_delay"] = min(state["retry_delay"] * 2, MAX_RETRY_DELAY)
+            state["next_retry"] = now + state["retry_delay"]
+
+            if fc >= WARN_AFTER_FAILS:
+                logger.error(
+                    f"[supervisor] ⚠️  {module} 已连续失败 {fc} 次！"
+                    f"下次 {state['retry_delay']:.0f}s 后重试"
+                )
+            else:
+                logger.warning(
+                    f"[supervisor] {module} 已退出，第 {fc} 次重拉"
+                    f"（退避 {state['retry_delay']:.0f}s）"
+                )
+
+            proc = self._spawn(module)
+            state["proc"] = proc
+            state["spawn_time"] = now
+
+    # ── Web SSE 服务 ────────────────────────────────────────────────────
+
+    def _start_web(self):
+        web_cfg = self.cfg.get("web", {})
+        if not web_cfg.get("transcript_enabled", True):
+            return
+        try:
+            from web.server import push as web_push, run as run_web, set_mqtt_publisher
+        except ModuleNotFoundError as e:
+            logger.warning(f"演示页未启动（缺依赖：{e}）")
+            return
+
+        self._web_push = web_push
+        # 让 web 端的 /camera/<name>/(enable|disable) 能通过 MQTT 通知 video_processor
+        set_mqtt_publisher(self.mqtt.publish)
+        host = web_cfg.get("host", "0.0.0.0")
+        port = int(web_cfg.get("transcript_port", 5050))
+
+        threading.Thread(
+            target=run_web, kwargs={"host": host, "port": port}, daemon=True
+        ).start()
+        logger.info(f"演示页: http://{host}:{port}  (SSE 订阅制)")
+
+        # Supervisor 自身宣告：向 discovery SSE 推控制流面板描述
+        # 延迟 1s 等 SSE 注册好再推
+        def _announce():
+            time.sleep(1)
+            self._announce_supervisor()
+        threading.Thread(target=_announce, daemon=True).start()
+
+    def _announce_supervisor(self):
+        """Supervisor 向 discovery SSE channel 推一条伪 discovery，使 UI 生成控制面板。"""
+        self._web_push("discovery", {
+            "module": "supervisor",
+            "client_id": "supervisor",
+            "ip": "127.0.0.1",
+            "ts": time.time(),
+            "event": "online",
+            "heartbeat_interval": 3600,
+            "version": "R2",
+            "streams": [
+                {"topic": "av/control", "channel": "control", "kind": "kv_table", "title": "控制指令"},
+            ],
+            "endpoints": [],
         })
 
-        # LLM场景分析（可选，避免频繁调用）
-        # cmd = self.llm.analyze_scene(event.detections, event.camera_name)
-        # if cmd:
-        #     logger.info(f"[LLM场景] 触发动作: {cmd}")
-        #     self.mqtt.publish(topics.get("control", "av/control"), cmd)
+    # ── MQTT 旁路（MQTT → web SSE 桥接，supervisor 专用） ────────────────
 
-    def _on_audio_text(self, text: str):
-        """语音识别结果回调"""
-        logger.info(f"[语音] {text}")
-
-        # 发布到MQTT
+    def _start_mqtt(self):
+        self.mqtt.start()
+        time.sleep(1)
         topics = self.cfg.get("mqtt", {}).get("topics", {})
-        self.mqtt.publish(topics.get("audio_command", "av/audio/command"), {
-            "text": text,
-            "time": time.time()
-        })
 
-        # 意图识别
-        if self.llm.classify_intent(text):
-            logger.info("[LLM] 检测到控制意图")
-            cmd = self.llm.generate_command(text)
-            if cmd:
-                logger.info(f"[LLM] 生成指令: {cmd}")
-                self.mqtt.publish(topics.get("control", "av/control"), cmd)
-        else:
-            logger.info("[LLM] 非控制指令，忽略")
+        # transcript channel：音频流式转写 + 定稿
+        self.mqtt.subscribe(
+            topics.get("audio_partial", "av/audio/partial"),
+            self._on_audio_partial,
+        )
+        self.mqtt.subscribe(
+            topics.get("audio_command", "av/audio/command"),
+            self._on_audio_command,
+        )
+        # video channel：视频检测事件
+        self.mqtt.subscribe(
+            topics.get("video_detect", "av/video/detect"),
+            self._on_video_detect,
+        )
+        # intent channel：意图识别 / 指令翻译
+        self.mqtt.subscribe("av/llm/event", self._on_llm_event)
+        # control channel：最终控制指令
+        self.mqtt.subscribe(
+            topics.get("control", "av/control"),
+            self._on_control,
+        )
+        # discovery channel：模块上线/心跳/离线公告（通配符订阅，需 MQTTBridge 支持 #）
+        self.mqtt.subscribe("av/system/discovery/#", self._on_discovery_mqtt)
+        # R6：主机指标 / 网络 / LAN 扫描 → 各自 SSE channel
+        self.mqtt.subscribe("av/system/host_stats", self._on_host_stats)
+        self.mqtt.subscribe("av/system/network", self._on_network)
+        self.mqtt.subscribe("av/system/lan_scan/+", self._on_lan_scan)
 
-    def _on_discovery(self, topic: str, payload: dict):
-        """设备发现消息"""
-        if payload.get("event") == "online":
-            logger.info(f"[发现] 设备上线: {payload.get('client_id')} @ {payload.get('ip')}")
+    def _on_audio_partial(self, topic: str, payload: dict):
+        """BaseModule 双层载荷 → 提取内层推到 transcript SSE"""
+        inner = payload.get("payload", payload)
+        self._web_push("transcript", inner)
+
+    def _on_audio_command(self, topic: str, payload: dict):
+        """final 转写 → transcript SSE（与 partial 复用同 seq_id 气泡）"""
+        inner = payload.get("payload", payload)
+        self._web_push("transcript", inner)
+
+    def _on_video_detect(self, topic: str, payload: dict):
+        """BaseModule publish 后字段在顶层（header + camera/time/detections）"""
+        self._web_push("video", payload)
+
+    def _on_llm_event(self, topic: str, payload: dict):
+        """意图识别事件 → intent SSE（dashboard.js 能处理双层或单层）"""
+        self._web_push("intent", payload)
 
     def _on_control(self, topic: str, payload: dict):
-        """接收其他设备的控制指令"""
+        """控制指令 → control SSE；兼容 Node-RED（平层）和 llm_engine（双层）两种格式"""
         logger.info(f"[控制] 收到指令: {payload}")
-        # TODO: 这里可以对接硬件控制逻辑
+        inner = payload.get("payload", payload)
+        source = (payload.get("header") or {}).get("source", "")
+        ts = (payload.get("header") or {}).get("timestamp") or inner.get("ts")
+        ev = {**inner}
+        if source and "source" not in ev:
+            ev["source"] = source
+        if ts and "ts" not in ev:
+            ev["ts"] = ts
+        self._web_push("control", ev)
+
+    def _on_host_stats(self, topic: str, payload: dict):
+        """主机指标 → host_stats SSE channel"""
+        self._web_push("host_stats", payload)
+
+    def _on_network(self, topic: str, payload: dict):
+        """网络状态 → network SSE channel"""
+        self._web_push("network", payload)
+
+    def _on_lan_scan(self, topic: str, payload: dict):
+        """扫描进度 / 结果 → lan_scan SSE channel"""
+        self._web_push("lan_scan", payload)
+
+    def _on_discovery_mqtt(self, topic: str, payload: dict):
+        """MQTT av/system/discovery/# → discovery SSE channel，驱动前端动态面板"""
+        if not isinstance(payload, dict):
+            return
+        event = payload.get("event", "")
+        module = payload.get("module", topic.split("/")[-1])
+        if event == "online":
+            logger.info(f"[发现] 模块上线: {module} @ {payload.get('ip')}")
+        elif event == "offline":
+            logger.info(f"[发现] 模块离线: {module}")
+        self._web_push("discovery", payload)
 
 
-# ── 入口 ──────────────────────────────────────────────────────────────
+# ── 入口 ─────────────────────────────────────────────────────────────────
 
 def main():
     config_path = Path(__file__).parent / "config" / "system_config.yaml"
@@ -142,16 +341,15 @@ def main():
         logger.error(f"配置文件不存在: {config_path}")
         sys.exit(1)
 
-    system = AVUnifiedSystem(str(config_path))
+    supervisor = AVSupervisor(str(config_path))
 
-    # 信号处理
     def handle_signal(sig, frame):
-        system._running = False
+        supervisor._running = False
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 
-    system.start()
+    supervisor.start()
 
 
 if __name__ == "__main__":

@@ -29,13 +29,23 @@ class LLMModule(BaseModule):
         with open(config_path, "r", encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
 
-        super().__init__("llm_engine", cfg)
+        streams = [
+            {
+                "topic": "av/llm/event",
+                "channel": "intent",
+                "kind": "kv_table",
+                "title": "意图识别 / 指令翻译",
+            },
+        ]
+        super().__init__("llm_engine", cfg, streams=streams)
 
         # 创建引擎
         self.engine = LLMEngine(cfg.get("llm", {}))
         self.engine.set_mqtt_publisher(self.publish)
 
-        # 订阅处理指令
+        # 订阅音频定稿（主路径：audio_processor → av/audio/command → 意图识别）
+        self.subscribe(cfg.get("mqtt", {}).get("topics", {}).get("audio_command", "av/audio/command"))
+        # 向后兼容：允许直接向 av/llm/command 注入文本（测试 / 手动调用）
         self.subscribe("av/llm/command")
 
         signal.signal(signal.SIGINT, lambda s, f: self.stop())
@@ -44,8 +54,12 @@ class LLMModule(BaseModule):
         self.logger.info(f"LLM Engine 初始化完成，Ollama: {self.engine.url}")
 
     def _handle_message(self, topic: str, payload: dict) -> None:
-        """处理MQTT消息"""
-        if topic == "av/llm/command":
+        """处理MQTT消息。av/audio/command 和 av/llm/command 都触发 process_command。"""
+        if "audio/command" in topic or "llm/command" in topic:
+            # av/audio/command 只含 final，但做一次防御性检查
+            inner = payload.get("payload", {}) or {}
+            if inner.get("is_final") is False:
+                return
             self.engine.process_command(payload)
 
 

@@ -23,6 +23,7 @@ paho-mqtt==2.1.0
 # Web 界面
 streamlit==1.56.0
 streamlit-autorefresh==1.0.1
+flask==3.0.3
 
 # 工具
 numpy==2.4.4

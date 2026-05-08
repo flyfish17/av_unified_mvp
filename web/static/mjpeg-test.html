@@ -1,0 +1,33 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>MJPEG 测试</title>
+<style>
+  body { margin: 0; background: #111; color: #ccc; font: 14px monospace; padding: 10px }
+  img { width: 480px; height: 270px; object-fit: cover; background: #000;
+        border: 2px solid #58a6ff; margin: 4px; display: block; }
+  .info { margin: 8px 0; }
+  code { color: #58a6ff }
+</style>
+</head><body>
+<div class="info">最简 &lt;img&gt; 直连 MJPEG，本页只为定位"地址栏 OK 但 img 不显示"是不是浏览器问题。</div>
+
+<div class="info">▼ A. 直接绝对 URL（同后端逻辑）</div>
+<img id="a" src="http://127.0.0.1:5051/video_feed/本机摄像头">
+
+<div class="info">▼ B. 同上，URL 编码后</div>
+<img id="b" src="http://127.0.0.1:5051/video_feed/%E6%9C%AC%E6%9C%BA%E6%91%84%E5%83%8F%E5%A4%B4">
+
+<div class="info">▼ C. 加 cache-buster 时间戳</div>
+<img id="c">
+
+<div id="log" class="info" style="white-space:pre-wrap;color:#7ee8e8"></div>
+<script>
+  const log = (...a) => { document.getElementById("log").textContent += a.join(" ") + "\n"; };
+  ["a","b","c"].forEach(id => {
+    const img = document.getElementById(id);
+    img.onload  = () => log(`[${id}] ✓ load   natural=${img.naturalWidth}x${img.naturalHeight}`);
+    img.onerror = () => log(`[${id}] ✗ error`);
+  });
+  document.getElementById("c").src =
+    "http://127.0.0.1:5051/video_feed/%E6%9C%AC%E6%9C%BA%E6%91%84%E5%83%8F%E5%A4%B4?t=" + Date.now();
+</script>
+</body></html>

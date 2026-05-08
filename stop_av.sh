@@ -8,6 +8,7 @@ if [ ! -f "$PIDFILE" ]; then
     # 兜底：杀掉所有相关进程
     pkill -f "python3 main.py" 2>/dev/null
     pkill -f "streamlit run.*dashboard" 2>/dev/null
+    pkill -f "npx node-red" 2>/dev/null
     echo "[提示] 无PID文件，已尝试kill相关进程"
     exit 0
 fi

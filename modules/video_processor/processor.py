@@ -1,11 +1,17 @@
-#!/usr/bin/env python3
 """
 modules/video_processor/processor.py
-视频处理模块 - 独立进程版本
-通过MQTT发布检测事件，同时保留原有callback接口
+视频流处理 + YOLO 检测
+
+支持两种输出方式（可同时启用）：
+  - callback: start(callback=fn)，每个 DetectionEvent 推回主程序
+  - MQTT:     set_mqtt_publisher(fn)，按 §4 协议发布到 av/video/detect
 """
 import logging
+import os
+import queue
+import threading
 import time
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 import cv2
@@ -15,15 +21,16 @@ from ultralytics import YOLO
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class DetectionEvent:
+    """检测事件"""
+    camera_name: str
+    timestamp: float
+    detections: list  # [{"class": "person", "confidence": 0.95, "bbox": [x,y,w,h]}]
+    frame: np.ndarray  # 标注后的帧
+
+
 class VideoProcessor:
-    """
-    视频处理模块
-
-    重构后支持两种模式:
-    1. callback模式 (向后兼容): start(callback=func)
-    2. MQTT模式: set_mqtt_publisher(publish_func)
-    """
-
     def __init__(self, cfg: dict):
         self.sources = cfg.get("sources", [])
         yolo_cfg = cfg.get("yolo", {})
@@ -35,65 +42,58 @@ class VideoProcessor:
 
         self._model = None
         self._threads = []
-        self._stop_event = __import__("threading").Event()
-        self._event_queue = __import__("queue").Queue(maxsize=100)
-        self._callback = None
-        self._mqtt_publisher: Optional[Callable] = None
-        self._latest_frames = {}
-        self._frames_lock = __import__("threading").Lock()
-        self._stream_stop_events = {}
-        self._stream_status = {}
+        self._stop_event = threading.Event()
+        self._event_queue: queue.Queue = queue.Queue(maxsize=100)
+        self._callback: Optional[Callable[[DetectionEvent], None]] = None
+        self._mqtt_publisher: Optional[Callable[[str, dict], None]] = None
+        # 双缓存：原始 vs 标注（YOLO bbox）
+        self._latest_raw_frames: dict[str, np.ndarray] = {}
+        self._latest_annotated_frames: dict[str, np.ndarray] = {}
+        # 预编码 JPEG（http handler 直接返回 bytes，省去每次 imencode 开销）
+        self._latest_raw_jpeg: dict[str, bytes] = {}
+        self._latest_annotated_jpeg: dict[str, bytes] = {}
+        # 推理队列：每路一个，maxsize=1，drop-old 策略，保证只推最新帧
+        self._inference_queues: dict[str, queue.Queue] = {}
+        self._frames_lock = threading.Lock()
+        self._stream_stop_events: dict[str, threading.Event] = {}
+        # 状态: "connecting" | "ok" | "error:<msg>" | "stopped"
+        self._stream_status: dict[str, str] = {}
+        # JPEG 质量
+        self._jpeg_quality = yolo_cfg.get("jpeg_quality", 75)
+        # L3.1：每路摄像头亮度上次发布时间（节流到 10s/次）
+        self._last_brightness_publish: dict[str, float] = {}
+        self._brightness_interval_s = float(yolo_cfg.get("brightness_interval_s", 10))
 
-    # ── MQTT集成 ──────────────────────────────────────────────────────
+    # ── MQTT 集成 ─────────────────────────────────────────────────────
 
     def set_mqtt_publisher(self, publisher_fn: Callable[[str, dict], None]):
-        """
-        设置MQTT发布函数
-
-        Args:
-            publisher_fn: 签名 publish_func(topic: str, payload: dict)
-        """
+        """注入 MQTT publish 函数。签名 publisher(topic: str, payload: dict)"""
         self._mqtt_publisher = publisher_fn
         logger.info("MQTT publisher 已设置")
 
     def _publish_detection(self, camera_name: str, timestamp: float, detections: list):
-        """通过MQTT发布检测事件"""
+        """按 §4 协议发布到 av/video/detect"""
         if self._mqtt_publisher is None:
-            logger.debug("MQTT publisher 未设置，跳过发布")
             return
+        self._mqtt_publisher("av/video/detect", {
+            "camera": camera_name,
+            "time": timestamp,
+            "detections": detections,
+        })
 
-        # 查找摄像头URL
-        source_url = ""
-        for src in self.sources:
-            if src.get("name") == camera_name:
-                source_url = src.get("url", "")
-                break
+    # ── 启动/停止 ─────────────────────────────────────────────────────
 
-        payload = {
-            "topic_type": "event",
-            "payload": {
-                "event_type": "detection",
-                "camera": {
-                    "name": camera_name,
-                    "source": source_url,
-                },
-                "timestamp": timestamp,
-                "detections": detections,
-                "detection_count": len(detections),
-            },
-        }
-
-        self._mqtt_publisher("av/video/event", payload)
-        logger.debug(f"发布视频检测事件: {camera_name}, {len(detections)} 个目标")
-
-    # ── 原有接口（向后兼容）───────────────────────────────────────────
-
-    def start(self, callback: Callable = None):
+    def start(self, callback: Callable[[DetectionEvent], None] = None):
         """启动所有视频流处理"""
         self._callback = callback
 
         logger.info(f"加载 YOLO 模型: {self.model_path}")
-        self._model = YOLO(self.model_path)
+        try:
+            self._model = YOLO(self.model_path)
+        except Exception as e:
+            # 模型加载失败不阻塞整个视频模块：raw MJPEG 流仍可用，仅停发 detection 事件
+            self._model = None
+            logger.error(f"YOLO 加载失败 ({self.model_path}): {e}；raw 流继续，detection 暂停")
 
         for src in self.sources:
             if not src.get("enabled", True):
@@ -103,19 +103,20 @@ class VideoProcessor:
         logger.info(f"已启动 {len(self._threads)} 路视频流")
 
     def _start_stream(self, src: dict):
+        """启动单路视频流线程"""
         name = src.get("name", "未命名")
-        stop_ev = __import__("threading").Event()
+        stop_ev = threading.Event()
         self._stream_stop_events[name] = stop_ev
-        t = __import__("threading").Thread(
+        t = threading.Thread(
             target=self._process_stream,
             args=(src, stop_ev),
-            daemon=True,
+            daemon=True
         )
         t.start()
         self._threads.append(t)
 
     def reload_sources(self, new_sources: list):
-        """热重载摄像头列表"""
+        """热重载摄像头列表，不重启整个系统"""
         old_names = set(self._stream_stop_events.keys())
         new_enabled = {s["name"]: s for s in new_sources if s.get("enabled", True)}
 
@@ -126,7 +127,11 @@ class VideoProcessor:
                 del self._stream_stop_events[name]
                 self._stream_status.pop(name, None)
                 with self._frames_lock:
-                    self._latest_frames.pop(name, None)
+                    self._latest_raw_frames.pop(name, None)
+                    self._latest_annotated_frames.pop(name, None)
+                    self._latest_raw_jpeg.pop(name, None)
+                    self._latest_annotated_jpeg.pop(name, None)
+                self._inference_queues.pop(name, None)
 
         current_names = set(self._stream_stop_events.keys())
 
@@ -137,16 +142,27 @@ class VideoProcessor:
 
         self.sources = new_sources
 
-    def get_stream_status(self) -> dict:
+    def get_stream_status(self) -> dict[str, str]:
         return dict(self._stream_status)
 
-    def get_latest_frame(self, name: str) -> np.ndarray | None:
+    def get_latest_frame(self, name: str, mode: str = "raw") -> np.ndarray | None:
+        """获取指定摄像头的最新帧。mode=raw 是流畅原始帧；mode=annotated 是带 YOLO bbox 的帧"""
         with self._frames_lock:
-            return self._latest_frames.get(name)
+            if mode == "annotated":
+                return self._latest_annotated_frames.get(name) or self._latest_raw_frames.get(name)
+            return self._latest_raw_frames.get(name)
 
-    def get_all_frames(self) -> dict:
+    def get_latest_jpeg(self, name: str, mode: str = "raw") -> bytes | None:
+        """直接拿预编码 JPEG bytes，避免每次 HTTP 请求都重新编码"""
         with self._frames_lock:
-            return dict(self._latest_frames)
+            if mode == "annotated":
+                return self._latest_annotated_jpeg.get(name) or self._latest_raw_jpeg.get(name)
+            return self._latest_raw_jpeg.get(name)
+
+    def get_all_frames(self) -> dict[str, np.ndarray]:
+        """获取所有摄像头最新原始帧"""
+        with self._frames_lock:
+            return dict(self._latest_raw_frames)
 
     def stop(self):
         self._stop_event.set()
@@ -158,12 +174,10 @@ class VideoProcessor:
     # ── 视频流处理 ────────────────────────────────────────────────────
 
     def _open_capture(self, url: str) -> cv2.VideoCapture:
-        """打开视频源"""
-        import os as _os
-
+        """打开视频源，RTSP 自动用 ffmpeg+UDP 参数"""
         is_rtsp = isinstance(url, str) and url.lower().startswith("rtsp://")
         if is_rtsp:
-            _os.environ.setdefault(
+            os.environ.setdefault(
                 "OPENCV_FFMPEG_CAPTURE_OPTIONS",
                 "rtsp_transport;udp|analyzeduration;2000000|probesize;2000000|fflags;+genpts+discardcorrupt",
             )
@@ -171,16 +185,75 @@ class VideoProcessor:
         else:
             try:
                 dev = int(url)
+                # macOS AVFoundation 权限弹窗不能从后台线程触发。
+                os.environ.setdefault("OPENCV_AVFOUNDATION_SKIP_AUTH", "1")
             except (ValueError, TypeError):
                 dev = url
             cap = cv2.VideoCapture(dev)
         return cap
 
-    def _process_stream(self, src: dict, stop_ev):
-        import queue
+    def _encode_jpeg(self, frame: np.ndarray) -> bytes | None:
+        try:
+            ok, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_quality])
+            return jpg.tobytes() if ok else None
+        except Exception:
+            return None
 
+    def _inference_worker(self, name: str, q: queue.Queue, stop_ev: threading.Event):
+        """每路摄像头一个推理线程：从 q 拿最新帧 → YOLO → 缓存标注帧 / JPEG / 发布事件"""
+        frame_interval = 1.0 / max(self.inference_fps, 0.5)
+        last_run = 0.0
+        while not stop_ev.is_set():
+            try:
+                frame = q.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            now = time.time()
+            if now - last_run < frame_interval:
+                continue  # 限速，避免推理速度过快堆积 GPU/CPU
+            last_run = now
+            if self._model is None:
+                continue
+            try:
+                results = self._model(frame, verbose=False)[0]
+                detections = self._parse_results(results)
+                annotated = results.plot()
+            except Exception as e:
+                logger.error(f"推理异常 [{name}]: {e}")
+                continue
+
+            ann_jpeg = self._encode_jpeg(annotated)
+            with self._frames_lock:
+                self._latest_annotated_frames[name] = annotated
+                if ann_jpeg:
+                    self._latest_annotated_jpeg[name] = ann_jpeg
+
+            if detections:
+                self._publish_detection(name, now, detections)
+                if self._callback:
+                    try:
+                        self._callback(DetectionEvent(
+                            camera_name=name, timestamp=now,
+                            detections=detections, frame=annotated,
+                        ))
+                    except Exception as e:
+                        logger.error(f"callback 异常: {e}")
+
+    def _process_stream(self, src: dict, stop_ev: threading.Event = None):
         name = src.get("name", "未命名")
         url = src.get("url", "0")
+        if stop_ev is None:
+            stop_ev = self._stop_event
+
+        # 推理队列 + 推理线程：与 capture 解耦
+        inference_q: queue.Queue = queue.Queue(maxsize=1)
+        self._inference_queues[name] = inference_q
+        inf_t = threading.Thread(
+            target=self._inference_worker,
+            args=(name, inference_q, stop_ev),
+            daemon=True,
+        )
+        inf_t.start()
 
         self._stream_status[name] = "connecting"
         retry_delay = 3
@@ -191,9 +264,10 @@ class VideoProcessor:
             if not cap.isOpened():
                 err = f"error:无法打开 {url[:40]}"
                 self._stream_status[name] = err
-                logger.error(f"无法打开摄像头: {name} ({url})，{retry_delay}s后重试")
+                logger.error(f"无法打开摄像头: {name} ({url})，{retry_delay}s 后重试")
                 for _ in range(retry_delay):
                     if stop_ev.is_set():
+                        self._stream_status[name] = "stopped"
                         return
                     time.sleep(1)
                 retry_delay = min(retry_delay * 2, max_retry_delay)
@@ -203,9 +277,6 @@ class VideoProcessor:
             retry_delay = 3
             logger.info(f"摄像头已连接: {name}")
 
-            frame_interval = 1.0 / self.inference_fps
-            last_inference = 0
-
             while not stop_ev.is_set():
                 ret, frame = cap.read()
                 if not ret:
@@ -214,56 +285,37 @@ class VideoProcessor:
                     cap.release()
                     break
 
-                now = time.time()
-                if now - last_inference < frame_interval:
-                    with self._frames_lock:
-                        if name not in self._latest_frames:
-                            self._latest_frames[name] = frame.copy()
-                    continue
+                # 1. 始终缓存最新原始帧 + 预编码 JPEG（流畅模式下这就是输出）
+                raw_jpeg = self._encode_jpeg(frame)
+                with self._frames_lock:
+                    self._latest_raw_frames[name] = frame
+                    if raw_jpeg:
+                        self._latest_raw_jpeg[name] = raw_jpeg
 
-                last_inference = now
-
+                # 2. 喂给推理线程；drop-old 策略，永远只推理最新帧
                 try:
-                    results = self._model(frame, verbose=False)[0]
-                    detections = self._parse_results(results)
-                    annotated = results.plot()
-                    with self._frames_lock:
-                        self._latest_frames[name] = annotated
+                    inference_q.put_nowait(frame)
+                except queue.Full:
+                    try: inference_q.get_nowait()
+                    except queue.Empty: pass
+                    try: inference_q.put_nowait(frame)
+                    except queue.Full: pass
 
-                    if detections:
-                        # 通过MQTT发布
-                        self._publish_detection(name, now, detections)
-
-                        # 保留callback调用（向后兼容）
-                        if self._callback:
-                            from dataclasses import dataclass
-
-                            @dataclass
-                            class DetectionEvent:
-                                camera_name: str
-                                timestamp: float
-                                detections: list
-                                frame: np.ndarray
-
-                            event = DetectionEvent(
-                                camera_name=name,
-                                timestamp=now,
-                                detections=detections,
-                                frame=annotated,
-                            )
-                            try:
-                                self._callback(event)
-                            except Exception as e:
-                                logger.error(f"callback异常: {e}")
-                        else:
-                            try:
-                                self._event_queue.put_nowait((name, now, detections))
-                            except queue.Full:
-                                pass
-                except Exception as e:
-                    logger.error(f"推理异常 [{name}]: {e}")
-                    with self._frames_lock:
-                        self._latest_frames[name] = frame.copy()
+                # 3. 亮度采样（L3.1）：每 N 秒一次，给 Node-RED 环境自动化用
+                now_ts = time.time()
+                if now_ts - self._last_brightness_publish.get(name, 0) >= self._brightness_interval_s:
+                    if self._mqtt_publisher:
+                        try:
+                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                            brightness = float(gray.mean())  # 0-255
+                            self._mqtt_publisher("av/env/brightness", {
+                                "camera": name,
+                                "brightness": round(brightness, 1),
+                                "ts": now_ts,
+                            })
+                            self._last_brightness_publish[name] = now_ts
+                        except Exception as e:
+                            logger.debug(f"亮度采样失败 [{name}]: {e}")
 
             cap.release()
 
@@ -271,7 +323,7 @@ class VideoProcessor:
         logger.info(f"摄像头已关闭: {name}")
 
     def _parse_results(self, results) -> list:
-        """解析YOLO结果"""
+        """解析 YOLO 结果"""
         detections = []
         boxes = results.boxes
 
@@ -294,9 +346,11 @@ class VideoProcessor:
 
         return detections
 
-    def get_event(self, timeout: float = 1.0):
+    # ── 事件获取 ──────────────────────────────────────────────────────
+
+    def get_event(self, timeout: float = 1.0) -> DetectionEvent | None:
         """从队列获取检测事件（阻塞）"""
         try:
             return self._event_queue.get(timeout=timeout)
-        except __import__("queue").Empty:
+        except queue.Empty:
             return None

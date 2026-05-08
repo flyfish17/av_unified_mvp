@@ -1,0 +1,1129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ai 视听信息理解【CREATOR】</title>
+  <style>
+    :root {
+      --bg:        #0a0e14;
+      --bg-2:      #0d1117;
+      --panel:     #161b22;
+      --panel-2:   #1c2330;
+      --line:      #2a3340;
+      --line-soft: #1e2532;
+      --text:      #e6edf3;
+      --text-2:    #b9c2d0;
+      --dim:       #6b7684;
+      --live:      #f0b429;
+      --final:     #2ea043;
+      --accent:    #58a6ff;
+      --accent-2:  #7ee8e8;
+      --warn:      #f85149;
+      --nav-w:     200px;
+      --header-h:  44px;
+      --ticker-h:  32px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; }
+    body {
+      background: var(--bg); color: var(--text);
+      font: 13px/1.4 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      display: grid;
+      grid-template-rows: var(--header-h) 1fr var(--ticker-h);
+      grid-template-columns: var(--nav-w) 1fr;
+      grid-template-areas:
+        "header header"
+        "nav    stage"
+        "ticker ticker";
+    }
+    a { color: var(--accent); text-decoration: none; }
+    code { color: var(--accent-2); font-family: ui-monospace, SFMono-Regular, monospace; }
+
+    /* ── Header ──────────────────────────────────────────────────── */
+    header {
+      grid-area: header;
+      display: flex; align-items: center; gap: 14px;
+      padding: 0 16px;
+      background: linear-gradient(180deg, #0e131c 0%, #0a0e14 100%);
+      border-bottom: 1px solid var(--line);
+      position: relative;
+    }
+    header::before {
+      content: ""; position: absolute; left: 0; right: 0; bottom: -1px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--accent) 50%, transparent);
+      opacity: 0.5;
+    }
+    .brand {
+      display: flex; align-items: baseline; gap: 8px;
+    }
+    .brand .logo {
+      font-size: 14px; font-weight: 700; color: var(--text);
+      letter-spacing: 0.05em;
+    }
+    .brand .tag {
+      font-size: 10px; color: var(--accent-2);
+      padding: 1px 6px; border: 1px solid var(--accent-2); border-radius: 3px;
+      letter-spacing: 0.1em;
+    }
+    .brand .sub {
+      font-size: 11px; color: var(--dim);
+      font-family: ui-monospace, monospace;
+    }
+    header .spacer { flex: 1; }
+    .pill {
+      font-size: 11px; padding: 2px 8px;
+      border: 1px solid var(--line); border-radius: 999px;
+      color: var(--dim); display: inline-flex; align-items: center; gap: 5px;
+      font-family: ui-monospace, monospace;
+    }
+    .pill::before {
+      content: ""; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--dim);
+    }
+    .pill.ok    { color: var(--final); border-color: var(--final); }
+    .pill.ok::before { background: var(--final); box-shadow: 0 0 6px var(--final); }
+    .pill.warn  { color: var(--live); border-color: var(--live); }
+    .pill.warn::before { background: var(--live); box-shadow: 0 0 6px var(--live); }
+    .pill.error { color: var(--warn); border-color: var(--warn); }
+    .pill.error::before { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+    .clock {
+      font-size: 12px; color: var(--text-2);
+      font-family: ui-monospace, monospace;
+    }
+
+    /* ── Nav ─────────────────────────────────────────────────────── */
+    nav {
+      grid-area: nav;
+      background: var(--bg-2);
+      border-right: 1px solid var(--line);
+      overflow-y: auto;
+      padding: 8px 0;
+    }
+    .nav-group { padding: 8px 0; }
+    .nav-group-title {
+      padding: 4px 14px; font-size: 10px; color: var(--dim);
+      letter-spacing: 0.15em; text-transform: uppercase; font-weight: 600;
+    }
+    .nav-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 14px 6px 18px;
+      cursor: pointer; user-select: none;
+      font-size: 13px; color: var(--text-2);
+      border-left: 2px solid transparent;
+      transition: background 0.1s, border-color 0.1s, color 0.1s;
+    }
+    .nav-item:hover { background: var(--panel); color: var(--text); }
+    .nav-item.active {
+      /* 选中态完全靠背景 + 左 accent border 表达，不依赖图标差异 */
+      background: linear-gradient(90deg, rgba(88, 166, 255, 0.18), rgba(88, 166, 255, 0.04));
+      color: var(--text);
+      border-left-color: var(--accent);
+      font-weight: 600;
+    }
+    .nav-item.active .ico { opacity: 1; color: var(--accent); }
+    .nav-item .ico { font-size: 11px; width: 14px; opacity: 0.7; }
+    .nav-item.sub { padding-left: 36px; font-size: 12px; }
+    .nav-item .badge {
+      margin-left: auto; font-size: 10px;
+      color: var(--dim); font-family: ui-monospace, monospace;
+    }
+    .nav-item.offline { opacity: 0.45; }
+    .nav-item.offline .badge { color: var(--warn); }
+
+    /* ── Stage ───────────────────────────────────────────────────── */
+    main#stage {
+      grid-area: stage;
+      overflow: auto; min-width: 0; min-height: 0;
+      position: relative;
+      background:
+        radial-gradient(1200px 600px at 30% -10%, rgba(88, 166, 255, 0.05), transparent 60%),
+        var(--bg);
+    }
+    .view { display: none; height: 100%; }
+    .view.active { display: flex; flex-direction: column; }
+    .view-head {
+      padding: 10px 18px;
+      border-bottom: 1px solid var(--line);
+      display: flex; align-items: center; gap: 12px;
+      background: var(--bg-2);
+    }
+    .view-head h2 {
+      margin: 0; font-size: 14px; font-weight: 600; color: var(--text);
+      letter-spacing: 0.02em;
+    }
+    .view-head .topic {
+      font-size: 11px; color: var(--dim);
+      font-family: ui-monospace, monospace;
+    }
+    /* P1.2 布局控件 */
+    .layout-trigger {
+      background: transparent; color: var(--text-2);
+      border: 1px solid var(--line); border-radius: 4px;
+      font-size: 11px; padding: 4px 10px; cursor: pointer;
+      font-family: inherit;
+    }
+    .layout-trigger:hover { color: var(--text); border-color: var(--accent); }
+    .layout-popup {
+      position: absolute; top: 44px; right: 18px; z-index: 200;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+      min-width: 240px; padding: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    .layout-popup-title {
+      font-size: 10px; color: var(--dim); padding: 4px 8px 6px;
+      letter-spacing: 0.15em; text-transform: uppercase;
+    }
+    .layout-popup-body { display: flex; flex-direction: column; gap: 2px; }
+    .layout-popup-body label {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 8px; border-radius: 4px; cursor: pointer;
+      font-size: 12px; color: var(--text-2);
+    }
+    .layout-popup-body label:hover { background: var(--panel-2); color: var(--text); }
+    .layout-popup-body input[type="checkbox"] { accent-color: var(--accent); }
+    .layout-popup-foot {
+      display: flex; gap: 6px; margin-top: 8px;
+      padding-top: 8px; border-top: 1px solid var(--line-soft);
+    }
+    .layout-popup-foot button {
+      flex: 1; background: transparent; color: var(--text-2);
+      border: 1px solid var(--line); border-radius: 4px;
+      font-size: 11px; padding: 5px 8px; cursor: pointer;
+      font-family: inherit;
+    }
+    .layout-popup-foot button:hover { color: var(--text); border-color: var(--accent); }
+    .layout-popup-foot button.danger:hover { color: var(--warn); border-color: var(--warn); }
+    /* 隐藏卡按钮（JS 注入到 module-actions） */
+    .module-hide-btn {
+      color: var(--dim) !important; padding: 3px 8px !important;
+      font-size: 14px !important; line-height: 1;
+    }
+    .module-hide-btn:hover { color: var(--warn) !important; border-color: var(--warn) !important; }
+    .view-body {
+      flex: 1; overflow: auto; padding: 14px 18px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .view-body.no-pad { padding: 0; }
+
+    /* ── 总览页：GridStack 接管（回合 27 P1.1）──────────────────────────
+       每个模块卡是独立 grid-stack-item，可拖、可 resize、min-w/min-h 防"碎"。
+       布局保存到 localStorage["av_overview_layout"]，刷新即恢复。 */
+    .modules-stack {
+      padding: 10px;
+      min-height: 100%;
+    }
+    .module-card {
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+      flex-shrink: 0;
+      position: relative;
+    }
+    .module-card::before {
+      content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--accent) 50%, transparent);
+      opacity: 0.5;
+    }
+    .module-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 12px;
+      background: linear-gradient(180deg, rgba(13,17,23,0.6), transparent);
+      border-bottom: 1px solid var(--line-soft);
+      min-height: 36px;
+    }
+    .drag-handle {
+      cursor: grab; user-select: none;
+      color: var(--dim); font-size: 14px;
+      padding: 0 4px; letter-spacing: -2px;
+      opacity: 0.5;
+      transition: opacity 0.15s, color 0.15s;
+    }
+    .drag-handle:hover { opacity: 1; color: var(--accent); }
+    .drag-handle:active { cursor: grabbing; }
+    .module-title {
+      font-size: 12px; font-weight: 600;
+      color: var(--text); letter-spacing: 0.05em;
+    }
+    .module-title .module-sub {
+      font-size: 10px; color: var(--dim); font-weight: 400;
+      margin-left: 8px; font-family: ui-monospace, monospace;
+    }
+    .module-badge {
+      font-size: 10px; padding: 2px 7px; border-radius: 3px;
+      border: 1px solid var(--line); color: var(--dim);
+      font-family: ui-monospace, monospace;
+      text-transform: uppercase; letter-spacing: 0.1em;
+    }
+    .module-badge.ok    { color: var(--final); border-color: var(--final); }
+    .module-badge.warn  { color: var(--live);  border-color: var(--live); }
+    .module-badge.error { color: var(--warn);  border-color: var(--warn); }
+    .module-actions {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .module-actions select {
+      background: rgba(13,17,23,0.85);
+      color: var(--text); border: 1px solid var(--line);
+      font-size: 11px; padding: 3px 8px; border-radius: 4px;
+      font-family: ui-monospace, monospace; outline: none;
+    }
+    .module-actions a, .module-actions button {
+      color: var(--dim);
+      padding: 3px 10px; border: 1px solid var(--line);
+      border-radius: 4px; font-size: 11px;
+      background: transparent; cursor: pointer;
+      font-family: inherit;
+    }
+    .module-actions a:hover, .module-actions button:hover {
+      color: var(--text); border-color: var(--accent);
+    }
+    .module-body {
+      position: relative; flex: 1;
+      min-height: 0;
+      overflow: hidden;  /* iframe / video-wall 不需溢出 */
+    }
+    .module-body.scrollable { overflow-y: auto; }
+    /* GridStack 接管尺寸（回合 27）：用 grid-stack-item 的 gs-h 控制，body 100% 占满 */
+    .module-card .module-body { height: 100%; }
+    .module-card[data-module-id="overview-online-stream"] .module-body { background: #000; }
+
+    /* P1.3 添加视频源表单 */
+    .add-source-form { display: flex; flex-direction: column; gap: 8px; }
+    .add-source-form .row { display: flex; gap: 6px; align-items: center; }
+    .add-source-form label {
+      font-size: 10px; color: var(--dim);
+      display: flex; flex-direction: column; gap: 3px;
+      letter-spacing: 0.05em; text-transform: uppercase;
+    }
+    .add-source-form input, .add-source-form select {
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--line); border-radius: 4px;
+      padding: 5px 8px; font-size: 12px; outline: none;
+      font-family: inherit; min-width: 0;
+    }
+    .add-source-form input:focus, .add-source-form select:focus {
+      border-color: var(--accent);
+    }
+    .add-source-form #src-url-preview {
+      flex: 1; color: var(--accent-2); font-size: 11px;
+      padding: 6px 8px; background: var(--bg); border: 1px solid var(--line);
+      border-radius: 4px; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; font-family: ui-monospace, monospace;
+    }
+    .add-source-form button.primary {
+      background: var(--accent); color: #0d1117; border: 0;
+      padding: 6px 16px; border-radius: 4px; cursor: pointer;
+      font-size: 12px; font-weight: 600; font-family: inherit;
+      white-space: nowrap;
+    }
+    .add-source-form button.primary:hover { opacity: 0.85; }
+    .add-source-form button.secondary {
+      background: transparent; color: var(--dim); border: 1px solid var(--line);
+      padding: 6px 12px; border-radius: 4px; cursor: pointer;
+      font-size: 12px; font-family: inherit; white-space: nowrap;
+    }
+    .add-source-form button.secondary:hover { color: var(--text); border-color: var(--accent); }
+    /* P1.4 LAN 扫描 */
+    .lan-scan-control {
+      display: flex; gap: 6px; align-items: center;
+    }
+    .lan-scan-control input {
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--line); border-radius: 4px;
+      padding: 5px 8px; font-size: 12px; outline: none;
+      font-family: ui-monospace, monospace;
+    }
+    .lan-scan-control input:focus { border-color: var(--accent); }
+    .lan-scan-control button.primary {
+      background: var(--accent); color: #0d1117; border: 0;
+      padding: 5px 14px; border-radius: 4px; cursor: pointer;
+      font-size: 12px; font-weight: 600; font-family: inherit;
+    }
+    .lan-scan-control button.primary:disabled {
+      background: var(--dim); cursor: wait; opacity: 0.6;
+    }
+    .lan-scan-progress {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; color: var(--dim);
+    }
+    .lan-scan-progress .bar {
+      flex: 1; height: 6px; background: var(--bg);
+      border: 1px solid var(--line); border-radius: 3px; overflow: hidden;
+    }
+    .lan-scan-progress .bar-fill {
+      height: 100%; width: 0%; background: var(--accent);
+      transition: width 0.2s ease;
+    }
+    .lan-scan-results {
+      flex: 1; overflow-y: auto;
+      border: 1px solid var(--line-soft); border-radius: 4px;
+      background: var(--bg);
+    }
+    .lan-scan-empty {
+      padding: 20px; text-align: center; color: var(--dim);
+      font-size: 11px;
+    }
+    .lan-scan-results table {
+      width: 100%; border-collapse: collapse; font-size: 11px;
+    }
+    .lan-scan-results th, .lan-scan-results td {
+      padding: 6px 10px; text-align: left;
+      border-bottom: 1px solid var(--line-soft);
+      font-family: ui-monospace, monospace;
+    }
+    .lan-scan-results th {
+      color: var(--dim); font-weight: 500;
+      letter-spacing: 0.05em; text-transform: uppercase;
+      font-size: 10px;
+      position: sticky; top: 0; background: var(--panel);
+    }
+    .lan-scan-results td.ip { color: var(--text); }
+    .lan-scan-results td.ports { color: var(--text-2); }
+    .lan-scan-results td.ports .port-rtsp { color: var(--accent-2); font-weight: 600; }
+    .lan-scan-results .actions { display: flex; gap: 4px; }
+    .lan-scan-results .actions button {
+      background: transparent; color: var(--accent);
+      border: 1px solid var(--line); border-radius: 3px;
+      padding: 2px 8px; font-size: 11px; cursor: pointer;
+      font-family: inherit; white-space: nowrap;
+    }
+    .lan-scan-results .actions button:hover {
+      background: var(--accent); color: #0d1117;
+    }
+    .lan-scan-results .no-rtsp { color: var(--dim); font-size: 10px; }
+
+    /* P0 快捷控制（第 8 卡） */
+    .ctrl-group { margin-bottom: 10px; }
+    .ctrl-group:last-child { margin-bottom: 0; }
+    .ctrl-group-label {
+      font-size: 10px; color: var(--dim);
+      letter-spacing: 0.08em; text-transform: uppercase;
+      margin-bottom: 5px; font-weight: 600;
+    }
+    .ctrl-group-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ctrl-btn {
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--line); border-radius: 4px;
+      padding: 5px 12px; font-size: 12px;
+      font-family: inherit; cursor: pointer;
+      white-space: nowrap; transition: all 0.1s;
+    }
+    .ctrl-btn:hover {
+      background: var(--accent); color: #0d1117;
+      border-color: var(--accent);
+    }
+    .ctrl-btn:active { transform: translateY(1px); }
+    .ctrl-btn.ctrl-btn-warn { border-color: var(--live); color: var(--live); }
+    .ctrl-btn.ctrl-btn-warn:hover { background: var(--live); color: #0d1117; }
+    .ctrl-btn.ctrl-btn-cool { border-color: var(--accent-2); color: var(--accent-2); }
+    .ctrl-btn.ctrl-btn-cool:hover { background: var(--accent-2); color: #0d1117; }
+    #quick-ctrl-location {
+      background: rgba(13,17,23,0.85); color: var(--text);
+      border: 1px solid var(--line); border-radius: 4px;
+      padding: 3px 10px; font-size: 11px;
+      font-family: inherit; outline: none;
+    }
+    #quick-ctrl-location:focus { border-color: var(--accent); }
+
+    /* 视频墙画格 ✎/✕ 按钮 */
+    .tile-edit-btn, .tile-delete-btn {
+      background: rgba(13,17,23,0.7); color: var(--dim);
+      border: 1px solid var(--line); border-radius: 3px;
+      padding: 2px 7px; font-size: 11px; cursor: pointer;
+      font-family: inherit; line-height: 1; margin-left: 4px;
+    }
+    .tile-edit-btn:hover { color: var(--accent); border-color: var(--accent); }
+    .tile-delete-btn:hover { color: var(--warn); border-color: var(--warn); }
+    .add-source-form .msg {
+      font-size: 11px; color: var(--dim); min-height: 14px;
+      font-family: ui-monospace, monospace;
+    }
+    .add-source-form .msg.ok  { color: var(--final); }
+    .add-source-form .msg.err { color: var(--warn); }
+
+    /* iframe 占满 module-body */
+    #overview-nodered-frame {
+      width: 100%; height: 100%; border: 0;
+      background: var(--bg);
+    }
+    #overview-nodered-fallback {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 8px;
+      color: var(--dim); font-size: 13px;
+    }
+    .video-wall {
+      width: 100%; height: 100%;
+      min-height: 0; overflow: hidden;
+      display: grid; gap: 3px;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      background: #000;
+      padding: 3px;
+    }
+    /* 全屏放大单格：临时切换 grid */
+    .video-wall.zoomed { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+    .video-wall.zoomed .tile:not(.zoomed) { display: none; }
+
+    .tile {
+      position: relative; overflow: hidden;
+      background: #0a0e14; border: 1px solid var(--line-soft);
+      cursor: zoom-in;
+    }
+    .tile.zoomed { cursor: zoom-out; }
+    .tile img.tile-img {
+      width: 100%; height: 100%; object-fit: cover;
+      display: block; background: #000;
+    }
+    .tile.empty {
+      display: flex; align-items: center; justify-content: center;
+      color: var(--dim); font-size: 12px;
+      background: repeating-linear-gradient(45deg, #0a0e14, #0a0e14 10px, #0d1117 10px, #0d1117 20px);
+    }
+    /* overlay 头部：名称 + 状态 + 检测 */
+    .tile-head {
+      position: absolute; top: 6px; left: 6px; right: 6px;
+      display: flex; align-items: center; gap: 6px;
+      z-index: 3; pointer-events: none;
+    }
+    .tile-head > * { pointer-events: auto; }
+    .tile-name {
+      background: rgba(10, 14, 20, 0.78);
+      backdrop-filter: blur(6px);
+      padding: 4px 10px; border-radius: 4px;
+      font-size: 12px; color: var(--text);
+      font-weight: 600;
+      border: 1px solid var(--line-soft);
+    }
+    .tile-status {
+      font-size: 10px; padding: 4px 8px; border-radius: 3px;
+      background: rgba(10, 14, 20, 0.78);
+      backdrop-filter: blur(6px);
+      color: var(--dim); display: flex; align-items: center; gap: 4px;
+      border: 1px solid var(--line-soft);
+      font-family: ui-monospace, monospace;
+    }
+    .tile-status::before {
+      content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--dim);
+    }
+    .tile-status.ok    { color: var(--final); }
+    .tile-status.ok::before { background: var(--final); box-shadow: 0 0 6px var(--final); }
+    .tile-status.warn  { color: var(--live); }
+    .tile-status.warn::before { background: var(--live); }
+    .tile-status.error { color: var(--warn); }
+    .tile-status.error::before { background: var(--warn); }
+    .tile-spacer { flex: 1; }
+    .tile-source-picker {
+      background: rgba(10, 14, 20, 0.78);
+      backdrop-filter: blur(6px);
+      border: 1px solid var(--line-soft);
+      color: var(--text); font-size: 11px; padding: 3px 8px;
+      border-radius: 4px; cursor: pointer; outline: none;
+      max-width: 160px; text-overflow: ellipsis;
+    }
+    .tile-detect {
+      position: absolute; top: 40px; right: 6px;
+      background: rgba(88, 166, 255, 0.15);
+      border: 1px solid var(--accent);
+      color: var(--accent-2); padding: 3px 8px;
+      border-radius: 3px; font-size: 11px;
+      font-family: ui-monospace, monospace;
+      z-index: 3;
+      transition: opacity 0.3s;
+    }
+    .tile-detect.hidden { opacity: 0; }
+    .tile-foot {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(180deg, transparent, rgba(0,0,0,0.85));
+      padding: 18px 10px 6px;
+      font-size: 10px; color: var(--text-2);
+      display: flex; gap: 12px; align-items: center;
+      z-index: 2; pointer-events: none;
+      font-family: ui-monospace, monospace;
+    }
+    .tile-foot .key { color: var(--dim); }
+    .tile-foot .spacer { flex: 1; }
+    /* 中央启用大按钮 */
+    .tile-enable-btn {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 5;
+      background: var(--accent); color: #0d1117;
+      border: 0; padding: 12px 28px; border-radius: 8px;
+      font-size: 14px; font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 4px 24px rgba(88, 166, 255, 0.4);
+      transition: transform 0.1s, box-shadow 0.1s;
+    }
+    .tile-enable-btn:hover {
+      transform: translate(-50%, -50%) scale(1.05);
+      box-shadow: 0 6px 32px rgba(88, 166, 255, 0.6);
+    }
+    .tile-enable-btn:active { transform: translate(-50%, -50%) scale(0.98); }
+
+    /* strip-card 内部内容样式（外壳改为 module-body）*/
+    .strip-card-body {
+      width: 100%; height: 100%;
+      overflow-y: auto; padding: 6px 10px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .strip-empty {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      color: var(--dim); font-size: 11px; font-style: italic;
+    }
+    /* 活动闪动反馈：模块收到事件时边框扫一次光 */
+    @keyframes pulse-border {
+      0%   { box-shadow: 0 0 0 0 var(--accent); }
+      50%  { box-shadow: 0 0 16px 2px var(--accent); }
+      100% { box-shadow: 0 0 0 0 transparent; }
+    }
+    .pulse { animation: pulse-border 0.8s ease-out; }
+    @keyframes pulse-tile {
+      0%   { box-shadow: inset 0 0 0 0 var(--accent); }
+      50%  { box-shadow: inset 0 0 0 3px var(--accent); }
+      100% { box-shadow: inset 0 0 0 0 transparent; }
+    }
+    .tile.pulse { animation: pulse-tile 0.9s ease-out; }
+
+    /* ── 通用 panel 内容 ──────────────────────────────────────────── */
+    .row {
+      padding: 7px 10px; border-radius: 6px;
+      background: var(--panel); border: 1px solid var(--line-soft);
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 12px; color: var(--text-2);
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .row .meta { font-size: 10px; color: var(--dim); margin-top: 3px; }
+    .row.warn  { border-color: var(--live); }
+    .row.final { border-color: var(--final); }
+    .bubble {
+      max-width: 100%; padding: 8px 12px; border-radius: 8px;
+      background: var(--panel); border: 1px solid var(--line-soft);
+      white-space: pre-wrap; word-break: break-word;
+      font-size: 13px; line-height: 1.5;
+    }
+    .bubble .meta { font-size: 10px; color: var(--dim); margin-top: 4px; }
+    .bubble.live  { border-color: var(--live); border-style: dashed; }
+    .bubble.live  .meta::before { content: "● 转写中 · "; color: var(--live); }
+    .bubble.final .meta::before { content: "✓ 定稿 · ";   color: var(--final); }
+
+    /* ── Node-RED iframe ─────────────────────────────────────────── */
+    #nodered-frame {
+      width: 100%; height: 100%; border: 0; background: var(--bg);
+      display: block;
+    }
+    #nodered-fallback {
+      padding: 40px; text-align: center; color: var(--dim);
+      font-size: 13px; line-height: 1.7;
+    }
+    #nodered-fallback code { color: var(--accent); }
+
+    /* ── 底部 ticker ─────────────────────────────────────────────── */
+    footer {
+      grid-area: ticker;
+      display: flex; align-items: center; gap: 24px;
+      padding: 0 16px;
+      background: var(--bg-2);
+      border-top: 1px solid var(--line);
+      font-size: 11px; color: var(--text-2);
+      font-family: ui-monospace, monospace;
+      overflow: hidden;
+    }
+    footer::before {
+      content: ""; position: relative; left: 0;
+      width: 6px; height: 16px;
+      background: var(--accent); flex-shrink: 0;
+      box-shadow: 0 0 8px var(--accent);
+    }
+    footer .ticker-slot {
+      display: flex; align-items: center; gap: 6px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      flex-shrink: 0;
+    }
+    footer .ticker-slot .key { color: var(--dim); }
+    footer .ticker-slot.flex { flex: 1; min-width: 0; }
+    footer .ticker-slot.flex .val { overflow: hidden; text-overflow: ellipsis; }
+
+    /* 滚动条美化 */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--line-soft); }
+  </style>
+  <link rel="stylesheet" href="/static/lib/gridstack.min.css">
+  <style>
+    /* 让 gridstack item content 不带默认 inset/border/padding，让 .module-card 完全占满格子 */
+    .grid-stack { background: transparent; }
+    .grid-stack-item-content {
+      inset: 0; padding: 0; background: transparent; border: 0; overflow: visible;
+    }
+    .grid-stack-item-content > .module-card {
+      height: 100%; width: 100%; margin: 0;
+    }
+    /* gridstack 拖动 placeholder 风格统一 */
+    .grid-stack-placeholder > .placeholder-content {
+      background: rgba(88, 166, 255, 0.08); border: 1px dashed var(--accent);
+      border-radius: 6px;
+    }
+    /* 拖动 / resize 的视觉反馈 */
+    .grid-stack-item.ui-draggable-dragging,
+    .grid-stack-item.ui-resizable-resizing {
+      opacity: 0.85; z-index: 100;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo">Ai 视听信息理解</span>
+      <span class="tag">CREATOR</span>
+      <span class="sub" id="brand-sub" style="display:none">v1.x</span>
+    </div>
+    <span class="spacer"></span>
+    <span class="pill" id="modules-pill">模块 0/0</span>
+    <span class="pill" id="header-status">连接中…</span>
+    <span class="clock" id="clock">--:--:--</span>
+    <span style="font-size:11px;color:var(--dim);margin-left:8px">
+      <a href="/transcript" target="_blank">旧页 ↗</a>
+    </span>
+  </header>
+
+  <nav id="nav"></nav>
+
+  <main id="stage">
+    <!-- 默认视图：vertical stack of module-cards（C+D 重构）
+         上下滑动；每模块统一 header(drag-handle + title + badge + actions) + body；
+         data-module-id 为后续 GridStack 拖动持久化做准备。 -->
+    <section class="view active" data-view-id="__overview">
+      <div class="view-head">
+        <h2>系统总览</h2>
+        <span class="topic">GridStack · 拖 ⋮⋮ 重排 · 拉边角调尺寸</span>
+        <span style="flex:1"></span>
+        <button id="overview-layout-btn" class="layout-trigger" title="模块显示/隐藏 · 重置布局">⚙ 布局</button>
+        <div id="overview-layout-popup" class="layout-popup" style="display:none">
+          <div class="layout-popup-title">模块显示</div>
+          <div class="layout-popup-body" id="layout-popup-body"></div>
+          <div class="layout-popup-foot">
+            <button id="layout-show-all">全部显示</button>
+            <button id="layout-reset" class="danger">⟲ 重置布局</button>
+          </div>
+        </div>
+      </div>
+      <div class="view-body no-pad">
+        <div class="grid-stack modules-stack" id="modules-stack">
+
+          <!-- 1. Node-RED 中控 -->
+          <div class="grid-stack-item" gs-id="overview-nodered" gs-x="0" gs-y="0" gs-w="12" gs-h="7" gs-min-w="6" gs-min-h="4">
+           <div class="grid-stack-item-content">
+            <div class="module-card" data-module-id="overview-nodered">
+              <div class="module-header">
+                <span class="drag-handle" title="拖动重排">⋮⋮</span>
+                <span class="module-title">Node-RED 中控
+                  <span class="module-sub">av/* 编排</span>
+                </span>
+                <span class="module-badge ok" id="overview-nodered-badge">在线</span>
+                <div class="module-actions">
+                  <select id="nodered-page-select" title="切换面板">
+                    <option value="">-- 加载中 --</option>
+                  </select>
+                  <a href="http://localhost:1880/" target="_blank" id="nodered-edit-link" title="编辑流程">↗</a>
+                </div>
+              </div>
+              <div class="module-body">
+                <iframe id="overview-nodered-frame" src="about:blank" title="Node-RED Dashboard"></iframe>
+                <div id="overview-nodered-fallback" style="display:none">
+                  <div>Node-RED 未运行</div>
+                  <code style="color:var(--accent)">./start.command</code>
+                </div>
+              </div>
+            </div>
+           </div>
+          </div>
+
+          <!-- 2. 视频墙 -->
+          <div class="grid-stack-item" gs-id="overview-video" gs-x="0" gs-y="7" gs-w="12" gs-h="6" gs-min-w="6" gs-min-h="4">
+           <div class="grid-stack-item-content">
+            <div class="module-card" data-module-id="overview-video">
+              <div class="module-header">
+                <span class="drag-handle" title="拖动重排">⋮⋮</span>
+                <span class="module-title">视频墙
+                  <span class="module-sub">discovery 自动接入 · 点格放大</span>
+                </span>
+                <span class="module-badge" id="overview-video-badge">等待</span>
+                <div class="module-actions"></div>
+              </div>
+              <div class="module-body">
+                <div class="video-wall" id="video-wall">
+                  <div class="tile empty" data-slot="0">画格 1<br><small>等待 video_processor 上线…</small></div>
+                  <div class="tile empty" data-slot="1">画格 2</div>
+                  <div class="tile empty" data-slot="2">画格 3</div>
+                  <div class="tile empty" data-slot="3">画格 4</div>
+                </div>
+              </div>
+            </div>
+           </div>
+          </div>
+
+          <!-- 3. 转写 -->
+          <div class="grid-stack-item" gs-id="overview-transcript" gs-x="0" gs-y="13" gs-w="6" gs-h="4" gs-min-w="4" gs-min-h="3">
+           <div class="grid-stack-item-content">
+            <div class="module-card" data-module-id="overview-transcript" data-overview="transcript">
+              <div class="module-header">
+                <span class="drag-handle" title="拖动重排">⋮⋮</span>
+                <span class="module-title">语意理解 · 实时转写
+                  <span class="module-sub">av/audio/command</span>
+                </span>
+                <span class="module-badge" id="overview-transcript-badge">等待</span>
+                <div class="module-actions"></div>
+              </div>
+              <div class="module-body">
+                <div class="strip-card-body">
+                  <div class="strip-empty">等待麦克风输入…</div>
+                </div>
+              </div>
+            </div>
+           </div>
+          </div>
+
+          <!-- 4. 意图 / 控制流 -->
+          <div class="grid-stack-item" gs-id="overview-intent" gs-x="6" gs-y="13" gs-w="6" gs-h="4" gs-min-w="4" gs-min-h="3">
+           <div class="grid-stack-item-content">
+            <div class="module-card" data-module-id="overview-intent" data-overview="intent">
+              <div class="module-header">
+                <span class="drag-handle" title="拖动重排">⋮⋮</span>
+                <span class="module-title">意图 / 控制流
+                  <span class="module-sub">av/llm/event · av/control</span>
+                </span>
+                <span class="module-badge" id="overview-intent-badge">等待</span>
+                <div class="module-actions"></div>
+              </div>
+              <div class="module-body">
+                <div class="strip-card-body">
+                  <div class="strip-empty">等待意图事件…</div>
+                </div>
+              </div>
+            </div>
+           </div>
+          </div>
+
+          <!-- 8. 快捷控制（回合 28 P0 · creator 中控 ASCII 转发） -->
+          <div class="grid-stack-item" gs-id="overview-quick-control" gs-x="0" gs-y="32" gs-w="12" gs-h="5" gs-min-w="6" gs-min-h="4">
+           <div class="grid-stack-item-content">
+            <div class="module-card" data-module-id="overview-quick-control">
+              <div class="module-header">
+                <span class="drag-handle" title="拖动重排">⋮⋮</span>
+                <span class="module-title">快捷控制
+                  <span class="module-sub">av/control · creator 中控 192.168.5.20:8932</span>
+                </span>
+                <span class="module-badge" id="quick-ctrl-badge">就绪</span>
+                <div class="module-actions">
+                  <select id="quick-ctrl-location" title="切换地点"></select>
+                </div>
+              </div>
+              <div class="module-body" style="padding:10px;overflow-y:auto">
+                <div id="quick-ctrl-buttons">加载中…</div>
+              </div>
+            </div>
+           </div>
+          </div>
+
+          <!-- 7. LAN 扫描（回合 27 P1.4） -->
+          <div class="grid-stack-item" gs-id="overview-lan-scan" gs-x="0" gs-y="27" gs-w="12" gs-h="5" gs-min-w="6" gs-min-h="4">
+           <div class="grid-stack-item-content">
+            <div class="module-card" data-module-id="overview-lan-scan">
+              <div class="module-header">
+                <span class="drag-handle" title="拖动重排">⋮⋮</span>
+                <span class="module-title">LAN 扫描
+                  <span class="module-sub">av/system/lan_scan · 找出在线设备 · 一键添加为视频源</span>
+                </span>
+                <span class="module-badge" id="lan-scan-badge">就绪</span>
+                <div class="module-actions"></div>
+              </div>
+              <div class="module-body" style="padding:10px;display:flex;flex-direction:column;gap:8px;overflow:hidden">
+                <div class="lan-scan-control">
+                  <label style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:0.05em">子网</label>
+                  <input id="lan-scan-subnet" placeholder="自动检测 (如 192.168.5.0/24)" style="flex:1;min-width:160px">
+                  <button id="lan-scan-btn" class="primary">▶ 扫描</button>
+                </div>
+                <div class="lan-scan-progress" id="lan-scan-progress" style="display:none">
+                  <div class="bar"><div class="bar-fill" id="lan-scan-bar"></div></div>
+                  <span id="lan-scan-progress-text" class="msg">—</span>
+                </div>
+                <div class="lan-scan-results" id="lan-scan-results">
+                  <div class="lan-scan-empty">点 ▶ 扫描启动；扫到 RTSP 设备后可一键添加为视频源。</div>
+                </div>
+              </div>
+            </div>
+           </div>
+          </div>
+
+          <!-- 6. 添加视频源（回合 27 P1.3 · 仿上一版） -->
+          <div class="grid-stack-item" gs-id="overview-add-source" gs-x="0" gs-y="23" gs-w="12" gs-h="4" gs-min-w="6" gs-min-h="3">
+           <div class="grid-stack-item-content">
+            <div class="module-card" data-module-id="overview-add-source">
+              <div class="module-header">
+                <span class="drag-handle" title="拖动重排">⋮⋮</span>
+                <span class="module-title">添加视频源
+                  <span class="module-sub">av/video/source/add · IPC / 分布式 / USB</span>
+                </span>
+                <span class="module-badge" id="add-source-badge">就绪</span>
+                <div class="module-actions"></div>
+              </div>
+              <div class="module-body" style="padding:10px;overflow-y:auto">
+                <div class="add-source-form">
+                  <div class="row">
+                    <label>类型
+                      <select id="src-type">
+                        <option value="ipc">IPC（带认证）</option>
+                        <option value="dist">分布式（无认证）</option>
+                        <option value="local">本机摄像头</option>
+                      </select>
+                    </label>
+                    <label style="flex:1">名称
+                      <input id="src-name" placeholder="如：大厅摄像头">
+                    </label>
+                  </div>
+                  <div class="row src-fields" data-fields="ipc">
+                    <input id="src-ipc-ip" placeholder="IP 192.168.5.181" style="flex:2">
+                    <input id="src-ipc-port" placeholder="端口" value="554" style="width:60px">
+                    <input id="src-ipc-user" placeholder="用户" value="admin" style="width:80px">
+                    <input id="src-ipc-pwd" type="password" placeholder="密码" style="width:90px">
+                    <input id="src-ipc-ch" placeholder="通道号 如 801" style="flex:1">
+                  </div>
+                  <div class="row src-fields" data-fields="dist" style="display:none">
+                    <input id="src-dist-ip" placeholder="IP 192.168.5.31" style="flex:2">
+                    <input id="src-dist-port" placeholder="端口" value="554" style="width:60px">
+                    <input id="src-dist-path" placeholder="路径 如 live/chn2" style="flex:2">
+                  </div>
+                  <div class="row src-fields" data-fields="local" style="display:none">
+                    <input id="src-local-dev" value="0" style="width:60px">
+                    <small style="color:var(--dim)">设备号：0=内置摄像头，1=第二个 USB</small>
+                  </div>
+                  <div class="row">
+                    <code id="src-url-preview">—</code>
+                    <button id="src-add-btn" class="primary">添加并启动</button>
+                    <button id="src-cancel-edit" class="secondary" style="display:none">取消</button>
+                  </div>
+                  <div id="src-add-msg" class="msg"></div>
+                </div>
+              </div>
+            </div>
+           </div>
+          </div>
+
+          <!-- 5. 在线视频源（HLS / m3u8 公共流） -->
+          <div class="grid-stack-item" gs-id="overview-online-stream" gs-x="0" gs-y="17" gs-w="12" gs-h="6" gs-min-w="6" gs-min-h="4">
+           <div class="grid-stack-item-content">
+            <div class="module-card" data-module-id="overview-online-stream">
+              <div class="module-header">
+                <span class="drag-handle" title="拖动重排">⋮⋮</span>
+                <span class="module-title">在线视频源
+                  <span class="module-sub">HLS m3u8 · 公共测试流</span>
+                </span>
+                <span class="module-badge" id="online-stream-badge">空闲</span>
+                <div class="module-actions">
+                  <select id="online-stream-select" title="选择源">
+                    <option value="">— 选源 —</option>
+                    <option value="https://bitmovin-a.akamaihd.net/content/sintel/hls/playlist.m3u8">
+                      Bitmovin Sintel（动画短片）
+                    </option>
+                    <option value="https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8">
+                      Red Bull TV（直播）
+                    </option>
+                    <option value="https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8">
+                      Apple BipBop（HLS 官方测试源）
+                    </option>
+                  </select>
+                  <button id="online-stream-stop">停止</button>
+                </div>
+              </div>
+              <div class="module-body">
+                <video id="online-stream-video"
+                       controls muted playsinline
+                       style="width:100%;height:100%;object-fit:contain;background:#000"></video>
+              </div>
+            </div>
+           </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+    <!-- Node-RED 视图（懒加载 iframe） -->
+    <section class="view" data-view-id="__nodered">
+      <div class="view-head">
+        <h2>Node-RED 控制面板</h2>
+        <span class="topic" id="nodered-page-label">编辑器</span>
+      </div>
+      <div class="view-body no-pad" style="padding:0">
+        <div id="nodered-fallback" style="display:none">
+          Node-RED 还没起来。<br>
+          启动方式：<code>node-red --userDir ./node-red --port 1880</code><br>
+          或运行 <code>./start.command</code>（已自动集成）
+        </div>
+        <iframe id="nodered-frame" src="about:blank" title="Node-RED"></iframe>
+      </div>
+    </section>
+    <!-- 模块视图：dashboard.js 在 discovery 来时动态创建 -->
+  </main>
+
+  <footer>
+    <span class="ticker-slot flex">
+      <span class="key">⏵ 转写</span>
+      <span class="val" id="ticker-transcript" style="color:var(--text-2)">—</span>
+    </span>
+    <span class="ticker-slot">
+      <span class="key">💡 意图</span>
+      <span class="val" id="ticker-intent" style="color:var(--text-2)">—</span>
+    </span>
+    <span class="ticker-slot">
+      <span class="key">CPU</span>
+      <span class="val" id="ticker-cpu" style="color:var(--accent-2)">—</span>
+    </span>
+    <span class="ticker-slot">
+      <span class="key">MEM</span>
+      <span class="val" id="ticker-mem" style="color:var(--accent-2)">—</span>
+    </span>
+    <span class="ticker-slot">
+      <span class="key">NET</span>
+      <span class="val" id="ticker-net" style="color:var(--accent-2)">—</span>
+    </span>
+  </footer>
+
+  <script src="/static/lib/gridstack-all.min.js"></script>
+  <script src="/static/renderers/transcript_seq.js"></script>
+  <script src="/static/renderers/kv_table.js"></script>
+  <script src="/static/renderers/mjpeg.js"></script>
+  <script src="/static/renderers/scan_trigger.js"></script>
+  <script src="/static/dashboard.js"></script>
+  <script src="/static/lib/hls.min.js"></script>
+  <script src="/static/lib/flv.min.js"></script>
+  <script>
+    // 时钟
+    function tick() {
+      const d = new Date();
+      const p = n => String(n).padStart(2, "0");
+      document.getElementById("clock").textContent =
+        `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    }
+    setInterval(tick, 1000); tick();
+
+    // 在线视频源 — 自动识别 HLS / FLV，跨品牌桥接（含 husion HDC900 9 路）
+    (function initOnlineStream() {
+      const video  = document.getElementById('online-stream-video');
+      const select = document.getElementById('online-stream-select');
+      const stopBtn = document.getElementById('online-stream-stop');
+      const badge  = document.getElementById('online-stream-badge');
+      if (!video || !select) return;
+      let hls = null;
+      let flv = null;
+      function setBadge(text, cls) {
+        badge.textContent = text;
+        badge.className = 'module-badge' + (cls ? ' ' + cls : '');
+      }
+      function stop() {
+        if (hls) { try { hls.destroy(); } catch(_){} hls = null; }
+        if (flv) {
+          try { flv.pause(); flv.unload(); flv.detachMediaElement(); flv.destroy(); } catch(_){}
+          flv = null;
+        }
+        try { video.pause(); } catch(_){}
+        video.removeAttribute('src');
+        try { video.load(); } catch(_){}
+        setBadge('空闲');
+      }
+      function isFlv(url) {
+        return /^wss?:\/\//i.test(url) || /\.flv(\?|$)/i.test(url);
+      }
+      function isHls(url) {
+        return /\.m3u8(\?|$)/i.test(url);
+      }
+      function play(url) {
+        stop();
+        if (!url) return;
+        setBadge('加载中', 'warn');
+        if (isFlv(url)) {
+          // ws://...flv 用 flv.js（husion HDC900 类设备）
+          if (!window.flvjs || !window.flvjs.isSupported()) {
+            setBadge('flv.js 不支持', 'error');
+            return;
+          }
+          flv = window.flvjs.createPlayer({
+            type: 'flv',
+            url: url,
+            isLive: true,
+            cors: true,
+          }, { enableStashBuffer: false, stashInitialSize: 128 });
+          flv.attachMediaElement(video);
+          flv.load();
+          flv.play().then(() => setBadge('播放中 · FLV', 'ok')).catch(() => setBadge('已加载 · 点视频区播放', 'warn'));
+          flv.on(window.flvjs.Events.ERROR, (errType, errDetail) => {
+            setBadge('FLV 错误: ' + errDetail, 'error');
+            console.warn('[online-stream] FLV error', errType, errDetail);
+          });
+        } else if (isHls(url) || video.canPlayType('application/vnd.apple.mpegurl')) {
+          if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = url;
+            video.play().catch(()=>{});
+            setBadge('播放中 · HLS native', 'ok');
+          } else if (window.Hls && window.Hls.isSupported()) {
+            hls = new window.Hls({ lowLatencyMode: false });
+            hls.loadSource(url);
+            hls.attachMedia(video);
+            hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+              video.play().catch(()=>{});
+              setBadge('播放中 · HLS', 'ok');
+            });
+            hls.on(window.Hls.Events.ERROR, (_e, data) => {
+              if (data && data.fatal) {
+                setBadge('HLS 错误: ' + data.details, 'error');
+              }
+            });
+          } else {
+            setBadge('hls.js 未加载', 'error');
+          }
+        } else {
+          // 兜底：直接用 video.src（H.264/MP4/WebM 等）
+          video.src = url;
+          video.play().catch(()=>{});
+          setBadge('播放中 · 直连', 'warn');
+        }
+      }
+      select.addEventListener('change', () => play(select.value));
+      stopBtn.addEventListener('click', stop);
+
+      // 跨品牌桥接：周期拉 husion 9 路设备列表，注入 select
+      let husionGroup = null;
+      async function refreshHusion() {
+        try {
+          const r = await fetch('/distributed/husion/devices');
+          if (!r.ok) return;
+          const j = await r.json();
+          const eps = (j.endpoints || []).filter(e => e.kind === 'husion_stream' && e.stream_url);
+          if (!eps.length) return;
+          // 只在第一次或 endpoints 变化时重建分组
+          const sig = eps.map(e => e.device_id + ':' + (e.is_signal ? '1' : '0')).join(',');
+          if (husionGroup && husionGroup.dataset.sig === sig) return;
+          if (husionGroup) husionGroup.remove();
+          husionGroup = document.createElement('optgroup');
+          husionGroup.label = '🌐 Husion HDC900（' + eps.length + ' 路 · 跨品牌桥接）';
+          husionGroup.dataset.sig = sig;
+          eps.forEach(e => {
+            const opt = document.createElement('option');
+            opt.value = e.stream_url;
+            opt.textContent = e.label || e.name;
+            if (!e.is_signal) opt.style.color = '#888';
+            husionGroup.appendChild(opt);
+          });
+          select.appendChild(husionGroup);
+        } catch (_) {}
+      }
+      refreshHusion();
+      setInterval(refreshHusion, 30000);
+    })();
+  </script>
+</body>
+</html>

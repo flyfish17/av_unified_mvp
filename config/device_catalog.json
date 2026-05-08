@@ -1,0 +1,140 @@
+{
+  "_meta": {
+    "schema_version": 1,
+    "source": "公司设备控制api含空调.csv（76 条 ASCII 指令 → MQTT av/control → Node-RED → TCP creator 中控主机）",
+    "host_protocol": "TCP, 每条指令一行，纯 ASCII（部分含空格如 'Monthly Meeting'），结尾分隔符以中控约定为准"
+  },
+  "host": {
+    "name": "Creator 中控主机",
+    "ip": "192.168.5.20",
+    "port": 8932,
+    "protocol": "tcp"
+  },
+  "default_location": "2FDiningTable",
+  "locations": [
+    { "id": "2FDiningTable",         "label": "二楼餐桌",  "category": "default" },
+    { "id": "OperateCentre",         "label": "运营中心",  "category": "main" },
+    { "id": "RDDepartment",          "label": "研发部",    "category": "main" },
+    { "id": "MeetingRoom1",          "label": "会议室1",   "category": "meeting" },
+    { "id": "MeetingRoom2",          "label": "会议室2",   "category": "meeting" },
+    { "id": "ReceptionRoom",         "label": "会客室",    "category": "meeting" },
+    { "id": "NegotiationRoom",       "label": "洽谈室",    "category": "meeting" },
+    { "id": "BarCounter",            "label": "吧台",      "category": "common" },
+    { "id": "DiningTable",           "label": "餐桌",      "category": "common" },
+    { "id": "Corridor",              "label": "走廊",      "category": "common" },
+    { "id": "SmallStairs",           "label": "小楼梯",    "category": "common" },
+    { "id": "EngineRoom",            "label": "机房",      "category": "service" },
+    { "id": "EngineeringDepartment", "label": "工程部",    "category": "service" },
+    { "id": "FinanceOffice",         "label": "财务室",    "category": "service" },
+    { "id": "KunScenery",            "label": "鲲景",      "category": "feature" },
+    { "id": "_global",               "label": "全局",      "category": "feature" }
+  ],
+  "device_types": {
+    "Curtain":              { "label": "窗帘",     "icon": "▦", "actions_label": { "Open": "开",   "Close": "合",   "Stop": "停" } },
+    "Light":                { "label": "灯带",     "icon": "☀", "actions_label": { "On":   "开",   "Off":   "关" } },
+    "Light1":               { "label": "灯带 1",   "icon": "☀", "actions_label": { "On":   "开",   "Off":   "关" } },
+    "Light2":               { "label": "灯带 2",   "icon": "☀", "actions_label": { "On":   "开",   "Off":   "关" } },
+    "TrackLight":           { "label": "轨道灯",   "icon": "✦", "actions_label": { "On":   "开",   "Off":   "关" } },
+    "Downlight":            { "label": "筒灯",     "icon": "⬢", "actions_label": { "On":   "开",   "Off":   "关" } },
+    "VirtualLight":         { "label": "虚光",     "icon": "◎", "actions_label": { "On":   "开",   "Off":   "关" } },
+    "LuminousWordLight":    { "label": "发光字灯", "icon": "✺", "actions_label": { "On":   "开",   "Off":   "关" } },
+    "AirConditioner":       { "label": "空调",     "icon": "❄", "actions_label": { "On":   "开",   "Off":   "关",  "TempUp": "温度+", "TempDown": "温度-" } },
+    "Meeting":              { "label": "会议",     "icon": "▶", "actions_label": { "Begin": "开始", "End":   "结束" } },
+    "Voice":                { "label": "语音触发", "icon": "🎙", "actions_label": {} },
+    "Scenery":              { "label": "景观",     "icon": "✿", "actions_label": { "On":   "开",   "Off":   "关" } },
+    "Word":                 { "label": "发光字",   "icon": "✺", "actions_label": { "On":   "开",   "Off":   "关" } }
+  },
+  "commands": [
+    { "id": "BarCounter_Curtain_Open",     "location": "BarCounter", "device": "Curtain", "action": "Open",  "label": "吧台窗帘开",  "also_in": ["2FDiningTable"] },
+    { "id": "BarCounter_Curtain_Close",    "location": "BarCounter", "device": "Curtain", "action": "Close", "label": "吧台窗帘合",  "also_in": ["2FDiningTable"] },
+    { "id": "BarCounter_Curtain_Stop",     "location": "BarCounter", "device": "Curtain", "action": "Stop",  "label": "吧台窗帘停",  "also_in": ["2FDiningTable"] },
+    { "id": "BarCounter_Light_On",         "location": "BarCounter", "device": "Light",   "action": "On",    "label": "吧台灯带开" },
+    { "id": "BarCounter_Light_Off",        "location": "BarCounter", "device": "Light",   "action": "Off",   "label": "吧台灯带关" },
+
+    { "id": "FinanceOffice_Light_On",      "location": "FinanceOffice", "device": "Light", "action": "On",   "label": "财务室灯带开" },
+    { "id": "FinanceOffice_Light_Off",     "location": "FinanceOffice", "device": "Light", "action": "Off",  "label": "财务室灯带关" },
+
+    { "id": "DiningTable_Light1_On",       "location": "DiningTable", "device": "Light1", "action": "On",   "label": "餐桌灯带1开",  "also_in": ["2FDiningTable"] },
+    { "id": "DiningTable_Light1_Off",      "location": "DiningTable", "device": "Light1", "action": "Off",  "label": "餐桌灯带1关",  "also_in": ["2FDiningTable"] },
+    { "id": "DiningTable_Light2_On",       "location": "DiningTable", "device": "Light2", "action": "On",   "label": "餐桌灯带2开",  "also_in": ["2FDiningTable"] },
+    { "id": "DiningTable_Light2_Off",      "location": "DiningTable", "device": "Light2", "action": "Off",  "label": "餐桌灯带2关",  "also_in": ["2FDiningTable"] },
+
+    { "id": "2FDiningTable_AirConditioner_On",       "location": "2FDiningTable", "device": "AirConditioner", "action": "On",       "label": "二楼餐桌空调开" },
+    { "id": "2FDiningTable_AirConditioner_Off",      "location": "2FDiningTable", "device": "AirConditioner", "action": "Off",      "label": "二楼餐桌空调关" },
+    { "id": "2FDiningTable_AirConditioner_TempUp",   "location": "2FDiningTable", "device": "AirConditioner", "action": "TempUp",   "label": "二楼餐桌空调温度+" },
+    { "id": "2FDiningTable_AirConditioner_TempDown", "location": "2FDiningTable", "device": "AirConditioner", "action": "TempDown", "label": "二楼餐桌空调温度-" },
+
+    { "id": "EngineeringDepartment_TrackLight_On",  "location": "EngineeringDepartment", "device": "TrackLight", "action": "On",  "label": "工程部轨道灯开" },
+    { "id": "EngineeringDepartment_TrackLight_Off", "location": "EngineeringDepartment", "device": "TrackLight", "action": "Off", "label": "工程部轨道灯关" },
+
+    { "id": "ReceptionRoom_Light_On",       "location": "ReceptionRoom", "device": "Light",      "action": "On",  "label": "会客室灯开" },
+    { "id": "ReceptionRoom_Light_Off",      "location": "ReceptionRoom", "device": "Light",      "action": "Off", "label": "会客室灯关" },
+    { "id": "ReceptionRoom_TrackLight_On",  "location": "ReceptionRoom", "device": "TrackLight", "action": "On",  "label": "会客室轨道灯开" },
+    { "id": "ReceptionRoom_TrackLight_Off", "location": "ReceptionRoom", "device": "TrackLight", "action": "Off", "label": "会客室轨道灯关" },
+
+    { "id": "MeetingRoom1_Curtain_Open",  "location": "MeetingRoom1", "device": "Curtain", "action": "Open",  "label": "会议室1窗帘开" },
+    { "id": "MeetingRoom1_Curtain_Close", "location": "MeetingRoom1", "device": "Curtain", "action": "Close", "label": "会议室1窗帘合" },
+    { "id": "MeetingRoom1_Curtain_Stop",  "location": "MeetingRoom1", "device": "Curtain", "action": "Stop",  "label": "会议室1窗帘停" },
+    { "id": "MeetingRoom1_Light_On",      "location": "MeetingRoom1", "device": "Light",   "action": "On",    "label": "会议室1灯带开" },
+    { "id": "MeetingRoom1_Light_Off",     "location": "MeetingRoom1", "device": "Light",   "action": "Off",   "label": "会议室1灯带关" },
+
+    { "id": "MeetingRoom2_Curtain_Open",  "location": "MeetingRoom2", "device": "Curtain", "action": "Open",  "label": "会议室2窗帘开" },
+    { "id": "MeetingRoom2_Curtain_Close", "location": "MeetingRoom2", "device": "Curtain", "action": "Close", "label": "会议室2窗帘合" },
+    { "id": "MeetingRoom2_Curtain_Stop",  "location": "MeetingRoom2", "device": "Curtain", "action": "Stop",  "label": "会议室2窗帘停" },
+    { "id": "MeetingRoom2_Light_On",      "location": "MeetingRoom2", "device": "Light",   "action": "On",    "label": "会议室2灯带开" },
+    { "id": "MeetingRoom2_Light_Off",     "location": "MeetingRoom2", "device": "Light",   "action": "Off",   "label": "会议室2灯带关" },
+
+    { "id": "EngineRoom_AirConditioner_On",       "location": "EngineRoom", "device": "AirConditioner", "action": "On",       "label": "机房空调开" },
+    { "id": "EngineRoom_AirConditioner_Off",      "location": "EngineRoom", "device": "AirConditioner", "action": "Off",      "label": "机房空调关" },
+    { "id": "EngineRoom_AirConditioner_TempUp",   "location": "EngineRoom", "device": "AirConditioner", "action": "TempUp",   "label": "机房空调温度+" },
+    { "id": "EngineRoom_AirConditioner_TempDown", "location": "EngineRoom", "device": "AirConditioner", "action": "TempDown", "label": "机房空调温度-" },
+
+    { "id": "KunScenery_On",  "location": "KunScenery", "device": "Scenery", "action": "On",  "label": "鲲景观开" },
+    { "id": "KunScenery_Off", "location": "KunScenery", "device": "Scenery", "action": "Off", "label": "鲲景观关" },
+
+    { "id": "NegotiationRoom_TrackLight_On",  "location": "NegotiationRoom", "device": "TrackLight", "action": "On",  "label": "洽谈室轨道灯开" },
+    { "id": "NegotiationRoom_TrackLight_Off", "location": "NegotiationRoom", "device": "TrackLight", "action": "Off", "label": "洽谈室轨道灯关" },
+
+    { "id": "SmallStairs_TrackLight_On",  "location": "SmallStairs", "device": "TrackLight", "action": "On",  "label": "小楼梯轨道灯开" },
+    { "id": "SmallStairs_TrackLight_Off", "location": "SmallStairs", "device": "TrackLight", "action": "Off", "label": "小楼梯轨道灯关" },
+
+    { "id": "RDDepartment_AirConditioner_On",       "location": "RDDepartment", "device": "AirConditioner", "action": "On",       "label": "研发部空调开" },
+    { "id": "RDDepartment_AirConditioner_Off",      "location": "RDDepartment", "device": "AirConditioner", "action": "Off",      "label": "研发部空调关" },
+    { "id": "RDDepartment_AirConditioner_TempUp",   "location": "RDDepartment", "device": "AirConditioner", "action": "TempUp",   "label": "研发部空调温度+" },
+    { "id": "RDDepartment_AirConditioner_TempDown", "location": "RDDepartment", "device": "AirConditioner", "action": "TempDown", "label": "研发部空调温度-" },
+    { "id": "RDDepartment_Curtain_Open",            "location": "RDDepartment", "device": "Curtain",        "action": "Open",     "label": "研发部窗帘开" },
+    { "id": "RDDepartment_Curtain_Close",           "location": "RDDepartment", "device": "Curtain",        "action": "Close",    "label": "研发部窗帘合" },
+    { "id": "RDDepartment_Curtain_Stop",            "location": "RDDepartment", "device": "Curtain",        "action": "Stop",     "label": "研发部窗帘停" },
+    { "id": "RDDepartment_TrackLight_On",           "location": "RDDepartment", "device": "TrackLight",     "action": "On",       "label": "研发部轨道灯开" },
+    { "id": "RDDepartment_TrackLight_Off",          "location": "RDDepartment", "device": "TrackLight",     "action": "Off",      "label": "研发部轨道灯关" },
+
+    { "id": "OperateCentre_AirConditioner_On",       "location": "OperateCentre", "device": "AirConditioner", "action": "On",       "label": "运营中心空调开" },
+    { "id": "OperateCentre_AirConditioner_Off",      "location": "OperateCentre", "device": "AirConditioner", "action": "Off",      "label": "运营中心空调关" },
+    { "id": "OperateCentre_AirConditioner_TempUp",   "location": "OperateCentre", "device": "AirConditioner", "action": "TempUp",   "label": "运营中心空调温度+" },
+    { "id": "OperateCentre_AirConditioner_TempDown", "location": "OperateCentre", "device": "AirConditioner", "action": "TempDown", "label": "运营中心空调温度-" },
+    { "id": "OperateCentre_Curtain_Open",            "location": "OperateCentre", "device": "Curtain",        "action": "Open",     "label": "运营中心窗帘开" },
+    { "id": "OperateCentre_Curtain_Close",           "location": "OperateCentre", "device": "Curtain",        "action": "Close",    "label": "运营中心窗帘合" },
+    { "id": "OperateCentre_Curtain_Stop",            "location": "OperateCentre", "device": "Curtain",        "action": "Stop",     "label": "运营中心窗帘停" },
+    { "id": "OperateCentre_Downlight_On",            "location": "OperateCentre", "device": "Downlight",      "action": "On",       "label": "运营中心筒灯开" },
+    { "id": "OperateCentre_Downlight_Off",           "location": "OperateCentre", "device": "Downlight",      "action": "Off",      "label": "运营中心筒灯关" },
+    { "id": "OperateCentre_Light_On",                "location": "OperateCentre", "device": "Light",          "action": "On",       "label": "运营中心灯带开" },
+    { "id": "OperateCentre_Light_Off",               "location": "OperateCentre", "device": "Light",          "action": "Off",      "label": "运营中心灯带关" },
+    { "id": "OperateCentre_VirtualLight_On",         "location": "OperateCentre", "device": "VirtualLight",   "action": "On",       "label": "运营中心虚光开" },
+    { "id": "OperateCentre_VirtualLight_Off",        "location": "OperateCentre", "device": "VirtualLight",   "action": "Off",      "label": "运营中心虚光关" },
+    { "id": "OperateCentre_Meeting_Begin",           "location": "OperateCentre", "device": "Meeting",        "action": "Begin",    "label": "运营中心开始会议" },
+    { "id": "OperateCentre_Meeting_End",             "location": "OperateCentre", "device": "Meeting",        "action": "End",      "label": "运营中心结束会议" },
+    { "id": "OperateCentre_Monthly Meeting",                          "location": "OperateCentre", "device": "Voice", "action": "Monthly",  "label": "月会（语音触发）",       "raw_has_space": true },
+    { "id": "OperateCentre_Research And Development Meeting",         "location": "OperateCentre", "device": "Voice", "action": "RD",       "label": "研发会（语音触发）",     "raw_has_space": true },
+    { "id": "OperateCentre_Weekly Meeting",                           "location": "OperateCentre", "device": "Voice", "action": "Weekly",   "label": "周会（语音触发）",       "raw_has_space": true },
+
+    { "id": "Corridor_Light_On",              "location": "Corridor", "device": "Light",             "action": "On",  "label": "走廊灯带开" },
+    { "id": "Corridor_Light_Off",             "location": "Corridor", "device": "Light",             "action": "Off", "label": "走廊灯带关" },
+    { "id": "Corridor_LuminousWordLight_On",  "location": "Corridor", "device": "LuminousWordLight", "action": "On",  "label": "走廊发光字灯带开" },
+    { "id": "Corridor_LuminousWordLight_Off", "location": "Corridor", "device": "LuminousWordLight", "action": "Off", "label": "走廊发光字灯带关" },
+    { "id": "Corridor_TrackLight_On",         "location": "Corridor", "device": "TrackLight",        "action": "On",  "label": "走廊轨道灯开" },
+    { "id": "Corridor_TrackLight_Off",        "location": "Corridor", "device": "TrackLight",        "action": "Off", "label": "走廊轨道灯关" },
+
+    { "id": "LuminousWord_On",  "location": "_global", "device": "Word", "action": "On",  "label": "发光字开" },
+    { "id": "LuminousWord_Off", "location": "_global", "device": "Word", "action": "Off", "label": "发光字关" }
+  ]
+}

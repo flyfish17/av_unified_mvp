@@ -71,10 +71,10 @@ def scan_lan_rtsp(timeout: float = 0.3) -> list:
 # 添加core目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.audio_processor import AudioProcessor
-from core.llm_engine import LLMEngine
+from modules.audio_processor.processor import AudioProcessor
+from modules.llm_engine.engine import LLMEngine
+from modules.video_processor.processor import VideoProcessor
 from core.mqtt_bridge import MQTTBridge
-from core.video_processor import VideoProcessor
 
 # ── 配置 ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -169,7 +169,10 @@ cfg, state, mqtt, llm, video = init_system()
 
 # ── 音频处理回调 ──────────────────────────────────────────────────────
 
-def on_audio_text(text: str):
+def on_audio_text(ev):
+    if hasattr(ev, "is_final") and not ev.is_final:
+        return
+    text = ev.text if hasattr(ev, "text") else str(ev)
     entry = {
         "time": datetime.now().strftime("%H:%M:%S"),
         "text": text,
