@@ -1,8 +1,20 @@
 # av_unified_mvp
 
-端侧"理解 → 编排 → 执行"统一系统：摄像头 + 麦克风 → 语义事件 → MQTT 总线 → Node-RED 编排 → 前端展示 / 设备执行。优先**离线运行**。
+端侧"**理解 → 编排 → 执行**"统一系统 — 摄像头 + 麦克风 → 语义事件 → MQTT 总线 → Node-RED 编排 → 前端展示 / 设备执行。**优先离线运行**。
 
-> 完整开发蓝本与进展：见 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)
+> 完整开发蓝本与回合日志：见 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)（1700+ 行，回合 1-29 详细推演）
+
+## R28-snapshot 能力总览（v1.1 → 当前）
+
+| 维度 | 能力 |
+|---|---|
+| **感知** | YOLOv8 视频检测 + FunASR 2pass 流式转写（partial 边讲边出 + final 标点 ITN）+ 摄像头亮度采样 |
+| **理解** | qwen3.5:9b LLM 意图翻译，prompt 自动从 device_catalog 生成（76 物理设备指令，支持笼统词灵活匹配 + 标点容错） |
+| **编排** | Node-RED 60 节点（av/control ASCII 转发 + L3 规则 1/2 + 大屏 SVG 流转图）；用户可视化拖拽改 |
+| **执行** | creator 中控 ASCII 短连接 TCP（76 物理设备：灯/空调/窗帘/场景），catalog driven |
+| **跨品牌桥接** | husion HDC900 9 路 ws://flv 流自动接入；creator 分布式 v3.0 协议链路验证；不替代原厂家管理平台 |
+| **UI** | GridStack 拖动 + 模块隐藏/重置布局；视频源 CRUD（IPC/分布式/USB 三类型表单）+ LAN 扫描一键填表；单聚合 SSE 解决 6-connection 限制 |
+| **自动化** | L1 按钮即点即发；L2 语音"打开二楼餐桌空调" → 物理动作；L3 摄像头识人 → 开灯 + 5min 无人 → 关 / 13:00 + 大太阳 → 拉窗帘 1s |
 
 ## 架构
 
@@ -33,9 +45,18 @@
 
 ```bash
 pip install -r requirements.txt
-brew install mosquitto       # MQTT broker
-# Docker Desktop 自行装好并打开
+brew install mosquitto                       # MQTT broker
+npm install -g node-red                      # Node-RED 编排（可选，但推荐）
+# Docker Desktop 自行装好并打开（funasr-2pass 容器需要）
+
+# 复制配置模板（system_config.yaml 已 .gitignore，含敏感字段）
+cp config/system_config.example.yaml config/system_config.yaml
+# 编辑 config/system_config.yaml：
+#   · video.sources 里的 RTSP 密码（占位符 ${IPC_PWD} 改成实际值）
+#   · husion.host / id_ranges（如有 husion HDC900 设备）
 ```
+
+**Husion 子网注意**：husion HDC900 内部分布式终端在 `192.168.150.x` 网段。如要播放 ws://flv 流，本机网卡子网掩码需改成 `255.255.0.0`（/16），让外部 `192.168.5.x` 主机能直连 `.150.x`。或者手动加路由 `route add 192.168.150.0/24 via <gw>`。
 
 ### 启动（双击）
 
@@ -118,19 +139,28 @@ node-red
 
 ```
 av_unified_mvp/
-├── DEVELOPMENT_PLAN.md   开发蓝本 + 进展 + 下次切入点
-├── config/system_config.yaml
-├── core/                 基础设施（MQTT bridge、base module）
-├── modules/              理解模块（可独立运行）
-│   ├── audio_processor/
-│   ├── video_processor/
-│   └── llm_engine/
-├── web/                  Flask SSE + 原生 JS 演示页
+├── DEVELOPMENT_PLAN.md           开发蓝本 + 回合 1-29 进展（1700+ 行）
+├── config/
+│   ├── system_config.example.yaml  配置模板（首次复制为 system_config.yaml）
+│   └── device_catalog.json         设备目录（76 条 ASCII 指令 + locations + device_types）
+├── core/                          基础设施（MQTT bridge、base module、profile）
+├── modules/                       理解 + 桥接模块（独立子进程，全 MQTT 通信）
+│   ├── audio_processor/             FunASR 2pass 流式转写
+│   ├── video_processor/             YOLOv8 + 多 RTSP 源 + MJPEG 服务 :5051
+│   ├── llm_engine/                  qwen3.5:9b 意图翻译（catalog driven prompt）
+│   ├── system_info/                 主机指标（CPU/MEM/磁盘/负载）→ av/system/host_stats
+│   ├── network_info/                网卡 IP + 收发速率 → av/system/network
+│   ├── network_scanner/             局域网扫描 → av/system/lan_scan/{cmd,progress,result}
+│   └── husion_distributed/          husion HDC900 9 路设备发现 + flv 流透出
+├── web/                           Flask SSE + 原生 JS 中控大屏
+│   ├── server.py                    单聚合 SSE /events/__all__ + REST endpoints
+│   ├── templates/dashboard.html     8 模块卡 + GridStack 拖动 + flv.js + hls.js
+│   └── static/                      dashboard.js + lib (gridstack/hls/flv) + renderers
 ├── node-red/
-│   ├── flows.json              新协议示例：语音 → av/control
-│   └── flows_legacy_creator.json  CREATOR 移植版本（仅历史参考）
-├── ui/                   Streamlit 旧版面板（待迁移到 web/）
-├── main.py               一体化入口（开发期方便）
+│   ├── flows.json                   60 节点（av/control 转发 + L3 规则 + SVG 大屏）
+│   └── settings.js
+├── main.py                        supervisor 主程：拉起 7 个子模块 + web 桥接
+├── start.command / stop.command   一键启动/停止（双击运行）
 └── requirements.txt
 ```
 
@@ -143,5 +173,13 @@ av_unified_mvp/
 | MQTT 连接失败 | `brew services list` 看 mosquitto 状态 |
 | Ollama 无响应 | `ollama list` 确认模型已下 |
 | 摄像头打不开（macOS） | 系统设置 → 隐私 → 摄像头授权终端/Python |
+| Ollama 调用 404（实际本地有模型） | 系统代理（Clash 等）劫了 127.0.0.1 流量。`engine.py` 已用 `Session(trust_env=False)` 绕过；如果还有问题 `unset http_proxy https_proxy` |
+| L3 规则 1（人检测开灯）触发后没二次响应 | 这是 design：lit=true 后保持 5min，避免 spam。重启 node-red 或等 5min 无人自动关后再触发 |
+| husion ws://flv 流播不动 | Mac 子网掩码改 /16（`255.255.0.0`）让 `192.168.150.x` 可达；或加路由 |
+| docker pull funasr 慢 | 用 `docker save \| docker load` 从已有的 mac 流式同步（详见 DEV_PLAN 回合 26） |
 
 更多见 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)。
+
+## 致谢
+
+本仓库的 R1-R29 累积工作由 [Claude Code](https://claude.com/claude-code) (Anthropic) 协同完成。开发节奏 / 复盘 / 错误诊断方法论详见 DEVELOPMENT_PLAN.md。

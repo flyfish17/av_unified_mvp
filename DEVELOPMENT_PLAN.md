@@ -14,7 +14,7 @@
 | 启动入口 | `./start.command`（双击 or `bash`），自动起 mosquitto + funasr-2pass + Node-RED + main.py + 浏览器 |
 | 浏览器地址 | `http://localhost:5050`（dashboard）, `http://localhost:1880`（Node-RED） |
 | **当前主线** | **R1–R6 订阅式架构演进**（见 §10），总工期 4.5 天 |
-| **当前进度** | R1–R6 ✅；P1 UI 全部完成；**回合 28 已用户验收**：P0 端到端「语音 → 意图 → 中控 → 物理设备」打通（76 条 catalog + Node-RED 短连接转发 + L1 按钮 + L2 语音 LLM 翻译，含复式跃层 also_in 共享与笼统词灵活匹配） — 最近一回合是 28 |
+| **当前进度** | R1–R6 ✅；P1 UI 全部完成；P0 L1/L2/L3 三层闭环；**回合 29 已用户验收 + r28-snapshot 推到 GitHub**：husion HDC900 跨品牌桥接（9 路 flv.js 播放）+ creator 分布式协议链路实测 + L3 自动化（人检测→开灯 / 13:00大太阳→拉帘）— 最近一回合是 29 |
 | 下一步具体动作 | 见 §11 下次切入点 |
 | 已完成历史 | P0 离线 / P1 模块统一 / P2 Node-RED / P3 拆 SSE / Bug A/B / 联调 — 详见 §5 简报 |
 | 计划文件 | `./PLAN_R1_R6_subscription.md`（R1-R6 详细设计，跟随项目同步） |
@@ -189,6 +189,117 @@
 ---
 
 ## 6. 进展（按时间倒序）
+
+### 2026-05-08 (回合 29) — L3 摄像头自动化 + P0 二阶段（分布式协议）+ husion 跨品牌桥接 + r28-snapshot 上传
+
+#### 用户方向再校准（关键）
+
+- 业务护城河 = 理解 → 执行（讯飞没有的）。L3 摄像头识别 + 环境感知是项目最完整差异化。
+- 跨品牌桥接定位："**主**消费 + **辅**贡献，**不替代原厂家管理平台**"。讯飞做转写、creator/husion 做分布式视频管理；我们只做"语音控制底层物理 + AI 视听理解的桥梁"。
+- 当前阶段不过度复杂化，能体现跨品牌跨系统桥接就用。
+- 二楼餐桌定位：**复式跃层** — 吧台窗帘 + 餐桌灯带 1/2 与二楼餐桌空调物理上是同一个空间，靠 catalog `also_in: ["2FDiningTable"]` 字段共享。
+
+#### ✅ L3 摄像头识别 + 环境自动化（Node-RED 编排）
+
+**L3.1 video_processor 加 av/env/brightness 周期发布**
+- `modules/video_processor/processor.py` capture loop 每 10s 算一次 `cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).mean()`，publish 到 `av/env/brightness` payload `{camera, brightness, ts}`（0-255 数值）。
+
+**L3.2 Node-RED 规则 1 — 人检测 → 灯带 2 + 5min 无人自动关**
+- mqtt-in `av/video/detect` → function 状态机（边沿触发：lit=false → ON + 重置 5min off timer；持续 person 不 spam；setTimeout 在 5min 无新检测后自动发 OFF）→ mqtt-out `av/control`
+- function 节点 `initialize` 字段在部署/重启时 reset `flow.l3_rule1_lit=false` + 清 timer，避免 state stuck
+- 实测：cold start 后第一帧 person 来即 fire `DiningTable_Light2_On` 到 av/control，物理灯亮
+
+**L3.3 Node-RED 规则 2 — 13:00 + 大太阳 → 拉窗帘 1s**
+- mqtt-in `av/env/brightness` → function 缓存 `flow.l3_brightness`
+- inject (cron `0 13 * * *`) → function 检查 brightness > 180 + 5 分钟内有效数据 → 输出双 msg：[立即 close, delay 1s 后 stop] → mqtt-out `av/control`
+- 行为："关帘 1 秒"= 发 `BarCounter_Curtain_Close` 然后 1 秒发 `_Stop`，电机走 1 秒部分合帘（不完全关）
+
+**Node-RED flows 节点共 60 个**（48 + 12 新增），脚本 `/tmp/add_l3_flows.py` 幂等可重跑。
+
+#### ✅ 顺手三项（回合 28 遗留清理）
+
+1. **engine.py 移除 `self._lock`**：连续语音输入会导致 4+ 分钟卡死的根因。ollama serve 自带请求队列，外部 lock 多余。删除 `with self._lock:` 解锁后，多次调用并发交给 ollama 自己排。
+2. **video_processor 写回 yaml 持久化**：`_add_source / _update_source / _remove_source / _toggle_camera` 末尾调 `_persist_sources()`，原子替换写 `config/system_config.yaml` 的 `video.sources`。重启 main.py 后动态加的源不再丢。
+3. **classify_intent 关键词从 catalog derive**：原 `CONTROL_KEYWORDS` 硬编码 19 词（"打开/关闭/灯光/空调"等），引擎 `_build_keywords_from_catalog()` 从 `device_catalog.json` 的 `device_types.label` + `actions_label` + `locations.label` 自动 derive，启动时拉到 49 个关键词（含"筒灯/虚光/发光字/轨道灯/二楼餐桌/会议室1"等以前漏的）。新加 catalog 指令零代码生效。
+
+#### ✅ P0 第二阶段：分布式协议解析 + 实测（user D-激进授权范围）
+
+**Creator 分布式网关 v3.0**（HTTP :23282 + token + JSON）
+- 14 个 endpoints 协议解析（getToken/openWindow/switchSrc/cleanScreen/callPlan/queryVersion/deviceStatus/allDeviceState/setAudio/closeAudio 等）
+- 网络扫描定位：12 台开 :23282（.15/.16/.31-.45/.234/.235）；只有 `.16` 是有效网关（其它 502 Bad Gateway，是被网关代理的节点）
+- 实测：getToken admin/123 返回 token，queryVersion 返回 V3.2.0；allDeviceState 返回 device 数组（mock 示例 IP，可能 .16 是测试网关未注册真实拓扑）
+- 主功能定位：**视频墙拼接 + 切源 + 预案** — 与 creator 中控（192.168.5.20:8932 ASCII 物理控制）完全两类协议
+- 模块代码本回合**未实现**（先验证协议链路通，等业务需求明确再写完整 modules/creator_distributed）
+
+**Husion 白鲨 v9.4.8 协议**（TCP :6000 + JSON `hscmd-*`）
+- 39 个 hscmd-* 接口（涵盖设备列表/切换信号/视频墙窗口/字幕/预案/串口转发/USB 同步等）
+- 网络扫描：.253 单台开 :6000 = HDC900 9 路一体机（9 个分布式盒子合一，外部一个 IP）
+- 实测：`hscmd-get-rx-shark-config` + `idList=[5001..5009]` 返回 9 设备完整数据：name/id/ip/hls(`ws://...flv`)/isSignal/online。3 路有信号（无纸化电脑 1/2/3），其它 6 路无信号
+- 协议要点：必须传具体 idList（空数组返回空 cmd_body）；hls 字段是 ws://flv（WebSocket-FLV，需 flv.js 库播放，不是 RTSP）
+- 关键现象：husion 内部分布式网段是 192.168.150.x，外部访问需把子网掩码改成 `255.255.0.0`（/16）让 192.168.5.x 主机能直连 .150.x（用户实测）
+
+#### ✅ husion 跨品牌桥接（A 方案，1h ship）
+
+按用户原话"主消费 + 辅贡献，不替代"，先做"主"：从 husion 拉 9 路设备到 av_unified_mvp 视频源池。
+
+- **新模块 `modules/husion_distributed/`**：
+  - BaseModule 子类，30s poll `hscmd-get-rx-shark-config` 拿设备列表
+  - 转成 endpoints `[{kind: "husion_stream", name, device_id, stream_url, stream_type: "flv", is_signal, online, label}]`
+  - 重新发布 discovery 让前端实时刷新
+  - 命名陷阱：`self.port` 跟 BaseModule 的 `self.port`(mqtt) 冲突 → 改名 `self.husion_port`
+- **`web/server.py` 加 `GET /distributed/husion/devices`**：从 discovery snapshot 返回最新 endpoints
+- **`web/static/lib/flv.min.js`**（141KB 离线）+ `dashboard.html` 引入
+- **在线视频源卡升级**：select 自动多出 `optgroup label="🌐 Husion HDC900（9 路·跨品牌桥接）"`，9 个 option（带信号状态色）；play(url) 按协议分流（`ws://flv` → flv.js / `m3u8` → hls.js / 其它 → native）；30s 自动 refresh husion 列表
+- **用户实测**：列表正常 + 选有信号源 → flv.js 立即播放 ✅（前提：Mac Studio 子网掩码改 /16 让 .150.x 可达）
+
+#### ✅ r28-snapshot 上传 GitHub（开发固化）
+
+- `.gitignore` 加：node_modules / .config.* / .lock / .bak / .claude / config/system_config.yaml（含 RTSP 密码）
+- 留 `config/system_config.example.yaml`（密码改占位 `${IPC_PWD}`）作模板
+- 新建分支 `r28-snapshot`，commit b1a5074：**55 files / +9382 / -1969 行**
+- push 到 `origin/r28-snapshot`，**main 不动**保留 v1.1 干净
+- PR 链接：https://github.com/flyfish17/av_unified_mvp/pull/new/r28-snapshot
+
+#### 📋 文件改动清单（回合 29）
+
+```
+modules/video_processor/processor.py      ← 加亮度采样
+modules/video_processor/main.py           ← 加 _persist_sources，写回 yaml
+modules/llm_engine/engine.py              ← 移除 _lock + classify_intent catalog derive + Session(trust_env=False)
+modules/husion_distributed/{__init__.py,main.py}  ← 新模块（TCP poll + flv 流发现）
+main.py                                    ← MANAGED_MODULES 加 husion_distributed
+config/system_config.yaml                 ← 加 husion 段；2FDiningTable also_in；移出 git
+config/system_config.example.yaml         ← 新增（脱敏模板）
+config/device_catalog.json                ← BarCounter_Curtain + DiningTable_Light1/2 加 also_in: ["2FDiningTable"]
+node-red/flows.json                       ← +12 节点（L3 规则 1/2 + 亮度缓存 + cron 13:00）
+web/server.py                             ← +GET /distributed/husion/devices
+web/static/lib/flv.min.js                 ← 新增（141KB 离线）
+web/templates/dashboard.html              ← 在线视频源卡升级支持 flv + husion 自动注入
+.gitignore                                 ← 加 node_modules/.config/.bak/.claude/system_config.yaml
+DEVELOPMENT_PLAN.md                       ← 本节
+/tmp/add_l3_flows.py                      ← 幂等脚本（L3.2/3 节点插入）
+```
+
+#### 🟢 当前完整能力（用户验收的"质的飞跃"）
+
+| 维度 | 能力 |
+|---|---|
+| 感知 | YOLO 视频检测 + FunASR 2pass 流式转写（含 partial/final/标点 ITN） + 摄像头亮度采样 |
+| 理解 | qwen3.5:9b LLM 意图翻译（catalog driven prompt 76 指令 + 笼统词灵活匹配） |
+| 编排 | Node-RED 60 节点（av/control 转发 + L3 规则 1/2 + 大屏 SVG 流转图） |
+| 执行 | creator 中控 ASCII（76 物理设备指令） + Node-RED 短连接 TCP |
+| 桥接 | husion HDC900 9 路设备发现 + flv.js 浏览器播放 + ws://flv 跨品牌融合 |
+| UI | GridStack 拖动 + 8 模块卡 + 视频源 CRUD + LAN 扫描一键填表 + 单聚合 SSE |
+| 自动化 | 人检测 → 开灯 + 5min 无人 → 关 / 时间 + 亮度 → 拉窗帘 1s |
+
+#### 🟡 已知遗留 / 下次顺手
+
+- **husion 辅模式（AI 字幕推墙）**：`hscmd-wall-create-subtitle` 接口待实现，可让 YOLO 检测结果作字幕推到 husion 视频墙
+- **creator 分布式完整模块**：现只是协议链路验证，没写 modules/creator_distributed driver
+- **husion ws 流子网掩码**：每台 mac 都需要 /16；写进 README 提示
+- **L3.3 cron 13:00 实际验证**：等到下午 1 点自然触发才能确认（亮度数据已实测在缓存）
+
+---
 
 ### 2026-05-07 (回合 28) — P0 端到端：语音 → 意图 → creator 中控 → 物理设备（L1 + L2 全通）
 
