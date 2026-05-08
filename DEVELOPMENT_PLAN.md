@@ -355,6 +355,37 @@ User 给关键 hint：先 `logout` 释放 session 再 `login`，**token 不变**
 - user 截图当时测过的 `srcDevIp` 和 `outputIp` 实际值（多半是某个真实拓扑设备的 IP）
 - 或者：user 在 .16 网关 admin 后台**注册分布式拓扑**让 allDeviceState 返真实设备
 
+#### 🔬 Creator 分布式协议第 4 次测试（user 给真实拓扑后纯只读）
+
+User 截图给 admin 配置界面真实拓扑（全部在 192.168.5.x 网段）：
+
+| 角色 | IP | 角色 | IP |
+|---|---|---|---|
+| LED 拼接屏 001 | 192.168.5.234 | 销售部电视 | 192.168.5.18 |
+| LED 拼接屏 002 | 192.168.5.235 | 采集卡 | 192.168.5.15 |
+| 技术部电视 | 192.168.5.12 | 研发部电视 | 192.168.5.13 |
+| 运营中心左显示器 | 192.168.5.17 | 运营中心右显示器 | 192.168.5.16（也是协议 server） |
+
+**实测**：
+1. **deviceStatus 8 个真实 IP**：全返 `code:0, onoff:0, hdmi:0`（不是 user 截图里的"在线"状态）
+2. **探 9 个候选 IP 的 :12121**：只有 192.168.5.16 接受协议（其它 connection refused），**确认 .16 是唯一协议 server**
+3. **allDeviceState** 仍返 PDF 示例 mock IP（192.168.1.10/.11），不返真实拓扑
+
+**矛盾分析**：
+- .16 协议接口接受真实 IP 的 deviceStatus 查询（不报"未知设备"），说明 IP 是合法
+- 但 onoff/hdmi 都返 0 + allDeviceState 不返真实列表 — **server 端跑的是默认 / 测试 namespace**，不是 user 截图的 admin 视图同一份数据
+- user 截图当时测通的 openWindow / switchSrc 应该**确实可以工作**（因为 IP 合法），只是 read APIs 返的是无效默认值
+
+**启示**：
+- 协议**写操作**可能正常（只是 read APIs 不可信）
+- Sprint B driver 实施时**不能依赖 deviceStatus / allDeviceState 做拓扑发现**，要么从 user 提供的静态 catalog 拿真实 IP，要么扫局域网定位
+- 真实可用的**最小验证**只能通过**发 openWindow** + 物理观察确认（写操作有副作用，需 user 在场授权）
+
+**Sprint B 实施建议**（更新）：
+1. driver 不做拓扑自动发现，从 `config/system_config.yaml` 的 `creator_distributed.devices` 段读真实 IP 列表（user 维护）
+2. 或者从 catalog 加段，与 76 中控指令统一管理
+3. 实测开窗 / 切源 / 调预案 / 清屏 — 等 user 在场观察一次后启用
+
 **如果开始做 modules/creator_distributed**：
 - 仿 husion_distributed 模式：BaseModule + TCP poll + 暴露 endpoints
 - 关键 endpoint：login / queryVersion / allDeviceState / openWindow / switchSrc / cleanScreen / callPlan
