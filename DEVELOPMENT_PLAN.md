@@ -292,12 +292,57 @@ DEVELOPMENT_PLAN.md                       ← 本节
 | UI | GridStack 拖动 + 8 模块卡 + 视频源 CRUD + LAN 扫描一键填表 + 单聚合 SSE |
 | 自动化 | 人检测 → 开灯 + 5min 无人 → 关 / 时间 + 亮度 → 拉窗帘 1s |
 
+#### ✅ husion 网络方案（用户实测确定 — 替代之前 README 里"改 /16"的错方案）
+
+之前 README 写"改子网掩码为 255.255.0.0（/16）"让 mac 能直连 .150.x — **错的**：mac GUI 改子网时默认网关被清掉，会断网。
+
+**正确方案：保留原 /24 + ifconfig alias 给网卡追加第二 IP**
+
+```bash
+# Wi-Fi 通常是 en1（networksetup -listallhardwareports 确认）
+sudo ifconfig en1 alias 192.168.150.250 netmask 255.255.255.0
+ping -c 3 192.168.150.1   # husion 内部，应通
+ping -c 2 baidu.com        # 互联网，仍通（默认网关 .5.1 不变）
+```
+
+**用户在 Mac Studio 实测通过**：alias 加完后 ping .150.x 通 + 互联网正常 + 浏览器播 husion ws://flv 流流畅。
+
+持久化 LaunchDaemon plist 写进 README（开机自动加 alias）。
+
+**为什么 alias 比 /16 干净**：
+- /16 让 mac 把整个 192.168.0.0/16 当本地直连 → 默认网关 .5.1 在 GUI 改时被一起清掉 → 互联网走不通
+- alias 是给同一物理网卡追加第二个 IP/子网 → 原 /24 配置 + 网关完全保留 → 互联网照常 + 多了一条 .150.x 直连路径
+
+#### 🔍 Creator 分布式协议二次评估（用户提示真实路径后）
+
+**第一次评估走错路**：按 PDF v3.0 协议文档用 HTTP :23282 + admin/123 测 .16 网关，14 endpoint 协议层通但是 mock 数据（设备列表是 192.168.1.10/.11 文档示例 IP）；真实业务 endpoint（openWindow/switchSrc 等）全部 code=3。
+
+**用户截图给真实路径**：**TCP :12121 + JSON + 密码 `123456`**（不是 PDF 写的 :23282 / :123）：
+```
+13:32:35 → {"cmd":"login","user":"admin","password":"123456"}
+13:32:35 ← {"cmd":"login","code":0,"token":"a66abb..."}
+```
+用户在该路径下手动测通了 openWindow / switchSrc。
+
+**Claude 端再测**：连续 3 次 login 都返回 `code=3`。怀疑：admin 用户单 session 限制，user 的 TCP 调试工具仍占着 session 锁；或者 server 拒绝特定来源的并发登录。
+
+**结论**：
+- 协议路径正确（PDF 文档不全或版本不一致）
+- 真实生产凭据：admin / 123456 / TCP :12121
+- 实测被 user 工具阻塞，**driver 实施暂停**，等 user 自己再测过 / 让出 session 后再启动
+
+**如果开始做 modules/creator_distributed**：
+- 仿 husion_distributed 模式：BaseModule + TCP poll + 暴露 endpoints
+- 关键 endpoint：login / queryVersion / allDeviceState / openWindow / switchSrc / cleanScreen / callPlan
+- 注意 token 持久化（PDF 说永久，但实测 a66abb... token 已过期 — 需要每次 login 拿新）
+- 注意 single-session：admin 一个 token 同时只允许一处用？要做"如果 code=3 重 login"机制
+
 #### 🟡 已知遗留 / 下次顺手
 
-- **husion 辅模式（AI 字幕推墙）**：`hscmd-wall-create-subtitle` 接口待实现，可让 YOLO 检测结果作字幕推到 husion 视频墙
-- **creator 分布式完整模块**：现只是协议链路验证，没写 modules/creator_distributed driver
-- **husion ws 流子网掩码**：每台 mac 都需要 /16；写进 README 提示
+- **husion 辅模式（事件回传）**：用户原话"把视频结果『有人』等推回就好" — **不是**字幕推到墙，而是结构化事件回传给 husion 系统作数据源；husion 那侧接收方式未明（订阅 av/video/detect？webhook？专用 endpoint？），等需求确认再做
+- **creator 分布式完整 driver**：协议路径已找到（TCP :12121），实施待 user 测试确认 session 行为后启动
 - **L3.3 cron 13:00 实际验证**：等到下午 1 点自然触发才能确认（亮度数据已实测在缓存）
+- **鲲景观/走廊灯 D-激进实测**：未触发，需要 creator 中控连接稳定 + 在场观察
 
 ---
 
@@ -1411,44 +1456,38 @@ iCloud 源项目目录下原本有两个文件名直接含真实 API key 的 .tx
 
 ## 11. 下次切入点（请直接从这里开始）
 
-**回合 21-26 收尾状态**：UI 主线全部完成；SSE 单聚合频道；视频墙启用即时响应；左导航选中态清晰；**回合 26 funasr-2pass 在 Mac Studio 本机就位**，转写达到讯飞同款观感（partial 边讲边出 + final 标点定稿）。
+**回合 29 收尾状态（2026-05-08）**：
+- ✅ P1 UI 用户可调（拖动 / persist / 隐藏 / 视频源 CRUD / LAN 扫描 / 单聚合 SSE）
+- ✅ P0 L1（按钮）+ L2（语音）+ L3（摄像头识别自动化）三层全闭环；creator 中控 ASCII 真实控制 76 指令
+- ✅ husion HDC900 跨品牌桥接：9 路 ws://flv 流注入 av_unified_mvp 视频墙（前提：mac alias .150.250 网络配置）
+- ✅ **r28-snapshot 已 push 到 GitHub**（origin/r28-snapshot 含完整代码+回合 1-29 文档；origin/main 保持 v1.1）
 
-### 当前状态（回合 28 收尾后 — 2026-05-07）
+### 5 分钟接手三步
 
-**护城河完成首个端到端 demo**：理解 → 执行的差异化已落地真实硬件（creator 中控 + 76 条指令 + 复式跃层共享 + 笼统词容错）。
+1. `git clone -b r28-snapshot https://github.com/flyfish17/av_unified_mvp.git` + `cp config/system_config.example.yaml config/system_config.yaml` + 改密码
+2. `./start.command` 跑起来；注意 husion alias 网络（README 有完整步骤）
+3. 看 §6 回合 29 末尾「下次切入点」决定推哪条
 
-完成节点：
-- ✅ P1 UI 用户可调（拖动/persist/隐藏/视频源 CRUD/LAN 扫描）
-- ✅ P0 第一阶段：creator 中控 ASCII 转发（Node-RED 短连接）
-- ✅ P0 L1：前端按钮控制
-- ✅ P0 L2：语音 → LLM 翻译 → 真实设备
+### 下次优先项（按 user 最近表态排）
 
-#### 下步候选（按业务价值排）
-
-| 优先级 | 项 | 工期 | 备注 |
+| # | 项 | 工时 | 状态 / 阻塞点 |
 |---|---|---|---|
-| **P0 第二阶段** | creator/husion **分布式直连**（绕过中控） | 1-2 天 | 解 PDF 协议；当前网络已有 creator/husion 分布式；creator 部分协议已知，husion 待实测 |
-| **P0 L3** | 摄像头识别 + 环境感知自动化 | 1-2 天 | 项目最完整差异化（讯飞绝无）。例：识别有人 + 当前亮度 → 自动开灯。前置：YOLO 检测 + 时序聚合 + 环境传感器接入或合成 |
-| 顺手 | 移除 engine.py `self._lock` 死锁 | 5 min | 回合 28 遗留 |
-| 顺手 | 配置持久化（视频源 + catalog also_in 写回 yaml） | 30 min | 回合 27/28 累积 |
-| 顺手 | classify_intent 关键词从 catalog 自动 derive | 30 min | 防漏关键词 |
-| 工程 | start.command 鲁棒性（trap 解耦 / Flask 异常传播 / 容器名校验） | 1h | 回合 25/26 累积 |
-| P2 | 转写 partial 逐词追加渲染 | 半天 | 用户口径"东施效颦避免，能做就做" |
-| P4 战略 | FunASR / YOLO 在 RK3588 / 信创 Linux 预研 | 1-2 天 | 国产化卖点 |
+| **1** | **creator 分布式 driver**（modules/creator_distributed） | 30-60min | **真实路径**：TCP `192.168.5.16:12121` + JSON `{cmd, user, password}` + 密码 `123456`（不是 PDF 写的 :23282 / :123）。**阻塞**：admin 单 session 限制，user 用 TCP 调试工具占着 session 时 Claude 端 login 返回 code=3。**解阻**：user 关闭工具 / 让出 session 后即可启动 |
+| 2 | **husion 辅模式**（事件回传）| 待需求 | user 原话"把视频结果『有人』等推回就好" — **不是**字幕推墙，而是**结构化事件回传**给 husion；接收方式（订阅 av/video/detect MQTT / webhook / 专用 endpoint）需要 husion 那侧确认 |
+| 3 | **L3.3 cron 13:00 实测** | 0min（被动等）| 等真到下午 1 点自然触发，亮度数据已实测在缓存 |
+| 4 | **鲲景观 / 走廊灯 D-激进实测** | 30min | user 之前授权可发实包测 KunScenery_* / Corridor_*Light_*；目前 creator 中控转发已实测全 76 指令 OK，这步可省 |
+| 5 | start.command 鲁棒性（trap 解耦 / Flask 异常传播） | 1h | 回合 25-26 累积小坑 |
+| 6 | 转写 partial 逐词追加渲染 | 半天 | user 口径"不为对标讯飞而东施效颦，能做就做" |
+| 7 | FunASR / YOLO 在 RK3588 / 信创 Linux 预研 | 1-2 天 | 国产化战略 |
 
-#### P2（按需）— 转写视觉打磨
+### 关键关注点 / 已知 trap（防下次踩）
 
-partial 逐词追加渲染 + final 定稿动画。**不强上多说话人分离**（讯飞有但我们不必跟）。
-
-#### P3（顺手）— 鲁棒性
-
-- start.command trap 解耦 Node-RED
-- web/server.py 启动失败异常传播（不再 swallow Address already in use）
-- start.command 容器名校验放宽（识别 funasr-server 等错误名时主动提示）
-
-#### P4（远期 · 战略）— 国产化路径预研
-
-FunASR / YOLO 在 RK3588 / 信创 Linux 的可行性。
+- **协议陷阱**：creator 分布式 PDF 写 HTTP :23282 是**不全/旧版**；真实生产是 TCP :12121（user 截图证明）。下次接其它新协议先**抓真实流量样本**，不要光信文档
+- **网络**：husion 内部 .150.x 网段，mac 用 ifconfig alias 加 .150.250 直连最干净（README 完整步骤）；改 /16 子网会让默认网关在 GUI 配置中被清掉无法上网
+- **kill main.py 重启**：必须 `until ! lsof -i :5050 -sTCP:LISTEN` 等端口释放再起，否则新 Flask 启动 `Address already in use` daemon thread 内 swallow + supervisor 不察觉
+- **代理污染**：requests 调 ollama 127.0.0.1:11434 时若环境有 http_proxy（Clash 等），Session(trust_env=False) 才稳；NO_PROXY 在某些 requests 版本不可靠
+- **Node-RED function 状态**：用 `flow.set/get` + `initialize` 字段在重启时 reset 状态；setTimeout 要在 `finalize` 里清避免 leak
+- **iCloud git index lock**：偶发 "index.lock write timed out"，`rm .git/index.lock` 后重 add
 
 ---
 

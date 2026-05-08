@@ -56,7 +56,42 @@ cp config/system_config.example.yaml config/system_config.yaml
 #   · husion.host / id_ranges（如有 husion HDC900 设备）
 ```
 
-**Husion 子网注意**：husion HDC900 内部分布式终端在 `192.168.150.x` 网段。如要播放 ws://flv 流，本机网卡子网掩码需改成 `255.255.0.0`（/16），让外部 `192.168.5.x` 主机能直连 `.150.x`。或者手动加路由 `route add 192.168.150.0/24 via <gw>`。
+**Husion 子网注意**：husion HDC900 内部分布式终端在 `192.168.150.x` 网段。直接改子网掩码 /16 会让默认网关失效不能上网，**推荐用 ifconfig alias** 给本机网卡追加一个 `.150.x` IP（不动原 /24 配置，互联网仍走原网关）：
+
+```bash
+# 看 Wi-Fi 对应的网卡名（mac 多数是 en1）
+networksetup -listallhardwareports | grep -A 1 'Wi-Fi'
+
+# 给 en1 加 alias（临时，重启失效）
+sudo ifconfig en1 alias 192.168.150.250 netmask 255.255.255.0
+
+# 验证两条路都通
+ping -c 3 192.168.150.1   # husion 内部
+ping -c 2 baidu.com       # 互联网
+
+# 持久化（开机自动）：保存为 /Library/LaunchDaemons/local.husion-alias.plist
+sudo tee /Library/LaunchDaemons/local.husion-alias.plist >/dev/null <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>local.husion-alias</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/sbin/ifconfig</string><string>en1</string><string>alias</string>
+    <string>192.168.150.250</string><string>netmask</string><string>255.255.255.0</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+</dict>
+</plist>
+EOF
+sudo launchctl bootstrap system /Library/LaunchDaemons/local.husion-alias.plist
+
+# 撤销 alias 时
+sudo ifconfig en1 -alias 192.168.150.250
+```
+
+如果 mac 不在 husion 内部物理段（alias 后 ping .150.x 不通），退到静态路由：`sudo route -n add -net 192.168.150.0/24 192.168.5.253`
 
 ### 启动（双击）
 
