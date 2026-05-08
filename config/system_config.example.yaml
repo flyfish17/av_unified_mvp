@@ -15,8 +15,8 @@ audio:
     url: ws://127.0.0.1:10095
 llm:
   ollama:
-    model_fast: qwen3.5:9b
-    model_smart: qwen3.5:9b
+    model_fast: qwen3.5:4b
+    model_smart: qwen3.5:4b
     timeout: 30
     url: http://127.0.0.1:11434/api/generate
 mqtt:

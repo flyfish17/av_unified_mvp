@@ -1895,3 +1895,72 @@ AV / 控制类设备与客户办公网混合部署是高频痛点。客户报"�
 
 附：今晚顺手扫到家里 192.168.3.2 / 3.3 / 3.32 三台都是海康设备（OUI `ec:97:e0`），仅 8000 SDK 开，RTSP 全关 → 可作"客户场景常见状态"参考样本。
 
+### 2026-05-08 LLM 切 qwen3.5:4b：内存省 4.2 GB + 反 hallucinate 兜底
+
+**触发**
+家里 16G MacBook Pro 长期 swap 4 GB+，Activity Monitor 看到 ollama 单进程占 7.67 GB（qwen3.5:9b 模型 + KV cache 常驻）。结合"评估 8G/16G MacBook Air 与 RK3588 能否跑"的目标，先把 LLM 模型规模降下来才有得谈。
+
+**测试方法（不重启 av）**
+独立脚本 `/tmp/test_llm_models.py`：复用 `engine._build_command_prompt_from_catalog()` 真实 76 指令 prompt，8 个 case 覆盖（精准命中、笼统词、标点容错、闲聊陷阱"塑料管"、不存在地点"三楼厨房"），直接调 `127.0.0.1:11434/api/generate`，stream=true 拿 TTFT。
+
+**三模型横评（qwen3.5:0.8b / qwen3.5:4b / gemma4:e4b）**
+
+| 模型 | RAM | 加载 | TTFT | total | 正确率 |
+|---|---|---|---|---|---|
+| qwen3.5:0.8b | 2.14 GB | 2.9s | 929ms | 1260ms | 5/8（"打开"被错认成 TempUp、地点 hallucinate，演示翻车） |
+| **qwen3.5:4b** | **3.50 GB** | 4.9s | **216ms** | **652ms** | **7/8**（唯一漏：三楼厨房 hallucinate） |
+| gemma4:e4b | 10.52 GB | 9.8s | 404ms | 789ms | 8/8（但 RAM 比 9b 还大） |
+| (qwen3.5:9b baseline) | 7.67 GB | — | — | — | 实测有"塑料管"误命中 |
+
+颠覆预期：**gemma4:e4b 比 9b 更费内存**（10.52 vs 7.67 GB，因 Gemma 3n 完整权重 ~9.6 GB 全装入）。如目标省内存，e4b 是最差选择。
+
+**4b 下载与 import（ollama hub 直拉 33 B/s 不可用）**
+```bash
+modelscope download --model Qwen/Qwen3-4B-GGUF \
+    --include 'Qwen3-4B-Q4_K_M.gguf' \
+    --local_dir ~/models/qwen3-4b-gguf      # ~28 MB/s，2.3 GB 86s 下完
+echo 'FROM /Users/yzj/models/qwen3-4b-gguf/Qwen3-4B-Q4_K_M.gguf
+PARAMETER stop "<|im_end|>"
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|endoftext|>"' > /tmp/Modelfile_qwen3_4b
+ollama create qwen3.5:4b -f /tmp/Modelfile_qwen3_4b
+```
+**两处必加 stop tokens 才能正常停**（modelscope GGUF metadata 不被 ollama 自动识别为 stop），否则模型出完 JSON 后会循环重复直到 num_predict 用完。
+
+**4b 引入两个新坑（本次一并处理）**
+1. **qwen3 默认 thinking mode**，`think:false` API 参数对自定义 import 的模型无效 → `engine._ask` 在 prompt 末尾追加 ` /no_think`（Qwen3 官方硬关开关）。配合现有 `re.sub(r"<think>.*?</think>", "", raw)` 剥离空 think 标签
+2. **小模型 hallucinate 编造**：实测"打开三楼厨房空调"→ `3FDiningTable_AirConditioner_On`（catalog 里没有但格式贴切，creator 网关会丢但污染 dashboard）。双重防御：(a) catalog prompt 加规则 6"cmd 必须从字典精确逐字选取，禁止编造"；(b) `generate_command` 出口加 catalog 76 个 cmd id 白名单后置过滤，不在白名单 → null + warning 日志
+
+**端到端验证（mosquitto_pub 注入 5 case）**
+```
+打开二楼餐桌空调          → av/control: 2FDiningTable_AirConditioner_On  ✓
+关闭吧台灯带              → av/control: BarCounter_Light_Off            ✓
+把会议室1的灯打开          → av/control: MeetingRoom1_Light_On           ✓
+这个塑料管什么时候挂上去的 → 不发布（关键词前置 + 反 hallucinate prompt）  ✓
+打开三楼厨房空调          → 不发布（白名单拒绝 + WARNING 日志）         ✓
+```
+"塑料管误命中" 顺手修了。端到端延迟 ~1s（含 MQTT + LLM + JSON 解析；纯 LLM 652ms）。
+
+**收益对比 baseline 9b**
+
+| 维度 | 切前 (9b) | 切后 (4b + /no_think + 白名单) |
+|---|---|---|
+| ollama RAM | 7.67 GB | 3.50 GB（**省 4.2 GB**） |
+| 整机 av 全栈占用 | ~9.5 GB | ~5.3 GB |
+| 端到端延迟 | ~1.5s | ~1s |
+| 闲聊误命中 | 偶发 | 消除 |
+| hallucinate 指令 | 可能发出 | 直接拒绝 |
+| 16G MBA / RK3588 16G | 边缘 | 舒适 |
+| 8G MBA / RK3588 8G | 不可行 | 边缘可行 |
+
+**oMLX / Ollama MLX 方向调研结论（不切）**
+- ollama 0.19+ 已集成 MLX 后端（Apple 官方框架），prefill 1.6×、decode 2× 提速，主支持 Qwen3.5 + Gemma 4
+- **但 MLX 不解决内存压力**：同模型权重 → 同 RAM。本次省 4.2 GB 是换模型规模带来的，与后端无关
+- oMLX（github.com/jundot/omlx）是独立 MLX 推理服务，OpenAI 兼容 API（不是 ollama 兼容），切换需改 `engine.py` 30-50 行 + 抽 backend 开关。当前没有切换驱动力，搁置
+
+**下次接手上下文**
+- `system_config.yaml` 在 .gitignore 内，**生产侧需手动改** `model_fast/model_smart` 到 `qwen3.5:4b`（example.yaml 已同步可参考）
+- `qwen3.5:4b` 不是 ollama hub 同名拉取的，而是从 modelscope 下 `Qwen/Qwen3-4B-GGUF` 的 Q4_K_M + 本地 `ollama create` 而来的（直拉 ollama hub 33 B/s 实测不可用）。生产机部署时同样走 modelscope 路径，Modelfile 必须加 3 个 stop tokens
+- 本次涉及文件：`modules/llm_engine/engine.py`（白名单 + /no_think + prompt 规则 6）、`config/system_config.example.yaml`（同步模型名）。`config/system_config.yaml` 本地已改但 .gitignore 不入库
+- av 全栈仍在跑（mosquitto / Node-RED / main.py / funasr-2pass）；ollama 已加载 qwen3.5:4b（3.5 GB）
+

@@ -76,7 +76,8 @@ def _build_command_prompt_from_catalog() -> str:
             "   灯带(Light) > 灯带1(Light1) > 轨道灯(TrackLight) > 筒灯(Downlight)\n"
             "3. \"温度高/调高\"= TempUp，\"温度低/调低\"= TempDown\n"
             "4. 忽略输入中的标点、语气词、重复\n"
-            "5. 仅当该地点 + 设备真无任何匹配项才输出 {\"cmd\": null}\n\n"
+            "5. 仅当该地点 + 设备真无任何匹配项才输出 {\"cmd\": null}\n"
+            "6. cmd 必须从下方字典中精确逐字选取，禁止编造任何字典外的指令名\n\n"
             "【可用指令字典】：\n"
             + dict_block
             + "\n\n用户输入："
@@ -137,6 +138,18 @@ def _build_keywords_from_catalog() -> set:
 CONTROL_KEYWORDS = list(_build_keywords_from_catalog())
 
 
+def _build_cmd_whitelist_from_catalog() -> set:
+    """所有合法 cmd id，用于反 hallucinate 后置过滤（小模型会编造类似但不存在的 id）。"""
+    try:
+        catalog_path = Path(__file__).parent.parent.parent / "config" / "device_catalog.json"
+        if catalog_path.exists():
+            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+            return {c["id"] for c in catalog.get("commands", []) if c.get("id")}
+    except Exception as e:
+        logger.warning(f"cmd 白名单加载失败：{e}")
+    return set()
+
+
 class LLMEngine:
     # 暴露给 dashboard 直接拼接：llm.COMMAND_PROMPT + text
     COMMAND_PROMPT = COMMAND_PROMPT
@@ -153,7 +166,9 @@ class LLMEngine:
         # 实例化时从 catalog 重建 prompt + 关键词集
         self.command_prompt = _build_command_prompt_from_catalog()
         self._keywords = _build_keywords_from_catalog()
+        self._cmd_whitelist = _build_cmd_whitelist_from_catalog()
         logger.info(f"control 关键词集（catalog derive）：{len(self._keywords)} 个")
+        logger.info(f"cmd 白名单（catalog derive）：{len(self._cmd_whitelist)} 个")
         # ollama 必走本机直连：trust_env=False 完全忽略 http_proxy/https_proxy 环境变量，
         # 防 Clash 等系统代理把 127.0.0.1 流量也劫走（NO_PROXY 在某些 requests 版本不可靠）。
         self._http = requests.Session()
@@ -283,6 +298,9 @@ class LLMEngine:
         cmd_str = cmd_str.strip()
         if not cmd_str or cmd_str.lower() == "null":
             return None
+        if self._cmd_whitelist and cmd_str not in self._cmd_whitelist:
+            logger.warning(f"LLM hallucinate 拒绝：{cmd_str!r} 不在 catalog 白名单（{len(self._cmd_whitelist)} 项）")
+            return None
         return {"cmd": cmd_str}
 
     def analyze_scene(self, detections: list, camera_name: str) -> Optional[dict]:
@@ -319,7 +337,7 @@ class LLMEngine:
                 self.url,
                 json={
                     "model": model,
-                    "prompt": prompt,
+                    "prompt": prompt + " /no_think",
                     "stream": False,
                     "think": think,
                     "options": {"temperature": 0.0, "num_predict": 200},
