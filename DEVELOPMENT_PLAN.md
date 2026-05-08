@@ -14,7 +14,7 @@
 | 启动入口 | `./start.command`（双击 or `bash`），自动起 mosquitto + funasr-2pass + Node-RED + main.py + 浏览器 |
 | 浏览器地址 | `http://localhost:5050`（dashboard）, `http://localhost:1880`（Node-RED） |
 | **当前主线** | **R1–R6 订阅式架构演进**（见 §10），总工期 4.5 天 |
-| **当前进度** | R1–R6 ✅；P1 UI 全部完成；P0 L1/L2/L3 三层闭环；**回合 29 已用户验收 + r28-snapshot 推到 GitHub**：husion HDC900 跨品牌桥接（9 路 flv.js 播放）+ creator 分布式协议链路实测 + L3 自动化（人检测→开灯 / 13:00大太阳→拉帘）— 最近一回合是 29 |
+| **当前进度** | **阶段一完成 ✅**（端到端打通 + 跨品牌桥接 + r28-snapshot 推 GitHub）。**明天起转阶段二：子模块精进 sprint**（路径见 §11）。当前最近回合是 29，下个回合 30 起按 Sprint A/B/C... 编号 |
 | 下一步具体动作 | 见 §11 下次切入点 |
 | 已完成历史 | P0 离线 / P1 模块统一 / P2 Node-RED / P3 拆 SSE / Bug A/B / 联调 — 详见 §5 简报 |
 | 计划文件 | `./PLAN_R1_R6_subscription.md`（R1-R6 详细设计，跟随项目同步） |
@@ -1456,38 +1456,105 @@ iCloud 源项目目录下原本有两个文件名直接含真实 API key 的 .tx
 
 ## 11. 下次切入点（请直接从这里开始）
 
-**回合 29 收尾状态（2026-05-08）**：
-- ✅ P1 UI 用户可调（拖动 / persist / 隐藏 / 视频源 CRUD / LAN 扫描 / 单聚合 SSE）
-- ✅ P0 L1（按钮）+ L2（语音）+ L3（摄像头识别自动化）三层全闭环；creator 中控 ASCII 真实控制 76 指令
-- ✅ husion HDC900 跨品牌桥接：9 路 ws://flv 流注入 av_unified_mvp 视频墙（前提：mac alias .150.250 网络配置）
-- ✅ **r28-snapshot 已 push 到 GitHub**（origin/r28-snapshot 含完整代码+回合 1-29 文档；origin/main 保持 v1.1）
+> **阶段一完成宣告**（2026-05-08 r28-snapshot push 上 GitHub）。明天起转入**阶段二：子模块精进 sprint**。
 
 ### 5 分钟接手三步
 
-1. `git clone -b r28-snapshot https://github.com/flyfish17/av_unified_mvp.git` + `cp config/system_config.example.yaml config/system_config.yaml` + 改密码
-2. `./start.command` 跑起来；注意 husion alias 网络（README 有完整步骤）
-3. 看 §6 回合 29 末尾「下次切入点」决定推哪条
+1. `git clone -b r28-snapshot https://github.com/flyfish17/av_unified_mvp.git`，`cp config/system_config.example.yaml config/system_config.yaml` 改 RTSP 密码 + husion host
+2. `sudo ifconfig en1 alias 192.168.150.250 netmask 255.255.255.0`（husion 网络，详见 README）+ `./start.command`
+3. 看下方「阶段二精进路径」决定明天推哪个 Sprint
 
-### 下次优先项（按 user 最近表态排）
+---
 
-| # | 项 | 工时 | 状态 / 阻塞点 |
+### 阶段一完成情况（不再回头）
+
+**P0 三层闭环**
+- ✅ L1 按钮：总览"快捷控制"卡按地点分组 → POST `/mqtt/publish` av/control → Node-RED 短连 → creator 中控（76 指令）
+- ✅ L2 语音：FunASR 2pass → qwen3.5:9b（catalog driven prompt + 标点容错 + 笼统词灵活匹配）→ av/control
+- ✅ L3 自动化：YOLO `person` → 开 `DiningTable_Light2` + 5min 无人自动关 / cron 13:00 + 亮度阈值 → 拉窗帘 1s
+
+**跨品牌桥接**
+- ✅ creator 中控 ASCII（TCP :8932 短连接 + 标点容错）
+- ✅ husion HDC900 9 路 ws://flv 流注入视频墙（前端 flv.js + ifconfig alias 网络）
+- 🔶 creator 分布式 driver（协议探明 TCP :12121 + 密码 `123456`，等 user 让 session 后实施 30-60min）
+- 📋 husion 辅模式事件回传（接收方式待 user 明确）
+
+---
+
+### 各子模块成熟度（5 = 可深化精进 / 1 = 待启动）
+
+| 子模块 | 成熟度 | 现状 |
+|---|---|---|
+| audio_processor | ⭐⭐⭐⭐⭐ | FunASR 2pass + ITN + 降级 + mic 自检 |
+| video_processor | ⭐⭐⭐⭐ | YOLO + 多源 + MJPEG :5051 + 亮度采样 + CRUD + 持久化 |
+| llm_engine | ⭐⭐⭐⭐ | catalog driven 76 指令 + classify_intent 自动 derive + Session 代理修复 |
+| system_info / network_info / network_scanner | ⭐⭐⭐⭐ | CPU/MEM/网卡/速率/端口扫描 + 一键填表 |
+| husion_distributed | ⭐⭐⭐ | TCP poll + flv 流注入视频墙（主消费） |
+| creator_distributed | ⭐ | 协议探明，待启动 |
+
+**基础设施**：MQTT 总线 + LWT discovery / 单聚合 SSE / Node-RED 60 节点 / catalog driven / GridStack UI 全可调 — 全部 ✅
+
+---
+
+### 阶段二精进路径（按业务价值 / 工时 / 风险排序）
+
+#### 第一梯队（客户演示直接受益 · 总计 2-3 天）
+
+| Sprint | 子模块 | 工时 | 演示价值 |
 |---|---|---|---|
-| **1** | **creator 分布式 driver**（modules/creator_distributed） | 30-60min | **真实路径**：TCP `192.168.5.16:12121` + JSON `{cmd, user, password}` + 密码 `123456`（不是 PDF 写的 :23282 / :123）。**阻塞**：admin 单 session 限制，user 用 TCP 调试工具占着 session 时 Claude 端 login 返回 code=3。**解阻**：user 关闭工具 / 让出 session 后即可启动 |
-| 2 | **husion 辅模式**（事件回传）| 待需求 | user 原话"把视频结果『有人』等推回就好" — **不是**字幕推墙，而是**结构化事件回传**给 husion；接收方式（订阅 av/video/detect MQTT / webhook / 专用 endpoint）需要 husion 那侧确认 |
-| 3 | **L3.3 cron 13:00 实测** | 0min（被动等）| 等真到下午 1 点自然触发，亮度数据已实测在缓存 |
-| 4 | **鲲景观 / 走廊灯 D-激进实测** | 30min | user 之前授权可发实包测 KunScenery_* / Corridor_*Light_*；目前 creator 中控转发已实测全 76 指令 OK，这步可省 |
-| 5 | start.command 鲁棒性（trap 解耦 / Flask 异常传播） | 1h | 回合 25-26 累积小坑 |
-| 6 | 转写 partial 逐词追加渲染 | 半天 | user 口径"不为对标讯飞而东施效颦，能做就做" |
-| 7 | FunASR / YOLO 在 RK3588 / 信创 Linux 预研 | 1-2 天 | 国产化战略 |
+| **A. partial 逐词追加渲染** | audio_processor + 前端 transcript_seq.js | 半天 | 转写"逐字蹦"对标讯飞观感 |
+| **B. creator 分布式 driver** | modules/creator_distributed（待启） | 1h | 视频墙开窗/切源/预案完整桥接 — **前提**：user 让出 :12121 session |
+| **C. husion 辅模式 — 事件回传** | husion_distributed 扩展 | 1-2h | "AI 检测结果反馈给原厂家"完整闭环 — **前提**：user 确认 husion 那侧接收方式 |
 
-### 关键关注点 / 已知 trap（防下次踩）
+#### 第二梯队（能力深化 · 单 sprint 半天到 2 天）
 
-- **协议陷阱**：creator 分布式 PDF 写 HTTP :23282 是**不全/旧版**；真实生产是 TCP :12121（user 截图证明）。下次接其它新协议先**抓真实流量样本**，不要光信文档
-- **网络**：husion 内部 .150.x 网段，mac 用 ifconfig alias 加 .150.250 直连最干净（README 完整步骤）；改 /16 子网会让默认网关在 GUI 配置中被清掉无法上网
-- **kill main.py 重启**：必须 `until ! lsof -i :5050 -sTCP:LISTEN` 等端口释放再起，否则新 Flask 启动 `Address already in use` daemon thread 内 swallow + supervisor 不察觉
-- **代理污染**：requests 调 ollama 127.0.0.1:11434 时若环境有 http_proxy（Clash 等），Session(trust_env=False) 才稳；NO_PROXY 在某些 requests 版本不可靠
-- **Node-RED function 状态**：用 `flow.set/get` + `initialize` 字段在重启时 reset 状态；setTimeout 要在 `finalize` 里清避免 leak
-- **iCloud git index lock**：偶发 "index.lock write timed out"，`rm .git/index.lock` 后重 add
+| Sprint | 子模块 | 工时 |
+|---|---|---|
+| D. 跨摄像头人员追踪 re-id | video_processor | 1-2 天 |
+| E. VLM 视频帧描述 | video_processor + llm_engine | 1 天 |
+| F. 检测事件持久化（SQLite / Parquet 时序） | 新 modules/storage 或 video_processor | 半天 |
+| G. 多 LLM 路由（fast / smart / cloud 策略） | llm_engine | 半天 |
+| H. 多说话人分离（cam++ / SOND） | audio_processor | 1 天 |
+
+#### 第三梯队（战略 / 工程）
+
+| Sprint | 工时 |
+|---|---|
+| I. 国产化预研（FunASR / YOLO / ollama 在 RK3588 / 信创 Linux） | 1-2 天 |
+| J. start.command 鲁棒性 + 配置中心 web UI（catalog 在线编辑） | 半天 |
+| K. Flask 启动失败异常传播（不再 swallow `Address In Use`） | 30 min |
+
+---
+
+### 推荐第一周节奏
+
+**Day 1（明天）**
+- 上午：**Sprint A** partial 逐词追加（半天，纯前端 + audio_processor 改动小）
+- 下午：等 user 让出 creator session → **Sprint B** creator 分布式 driver（1h）
+- 备：如 user 没让 session，做 **K** Flask 异常传播（30min 顺手）
+
+**Day 2-3**
+- **Sprint C** husion 辅模式（前提：user 确认接收接口；不行就先做 D）
+- 整合演示 + 汇报
+
+**Day 4-5**
+- 进入第二梯队（D / E 二选一）
+
+---
+
+### 关键 trap / 防踩坑（沿自回合 1-29 的实战）
+
+| 类别 | trap | 应对 |
+|---|---|---|
+| 协议 | creator PDF 写 HTTP :23282 是错的 / 旧版 | 先抓真实流量（TCP :12121 + 123456 是事实） |
+| 网络 | husion .150.x 不可达；改 /16 子网会断网 | `sudo ifconfig en1 alias 192.168.150.250 netmask 255.255.255.0`（README 完整步骤） |
+| 重启 | kill main.py 后立即重启会撞 :5050 TIME_WAIT | `until ! lsof -i :5050 -sTCP:LISTEN; do sleep 1; done` 后再启 |
+| 代理 | requests 调 127.0.0.1 走系统代理（Clash 等）→ 404 | `requests.Session(); s.trust_env = False` |
+| Node-RED | function 节点 setTimeout / context state 重启不 reset | 用 `flow.set/get` + `initialize` 字段；timer 在 `finalize` 清 |
+| Git | iCloud 路径偶发 `.git/index.lock write timed out` | `rm .git/index.lock` 后重 add |
+| supervisor | Flask daemon thread 内 swallow `Address In Use` 不传播 | Sprint K 待修；目前手动 grep log |
+| Husion | TCP `hscmd-get-tx-*` idList=[] 返回空 | 必须传具体 idList（白鲨 RX 5001-6999） |
+| Creator | admin 单 session 限制，多端 login 后续返 code=3 | 用同 token 串起来；或 让出旧 session |
 
 ---
 
