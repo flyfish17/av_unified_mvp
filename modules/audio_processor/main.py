@@ -9,9 +9,14 @@ modules/audio_processor/main.py
   - partial → av/audio/partial
   - final   → av/audio/command
 """
+import io
 import logging
 import signal
 import sys
+import threading
+import wave
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import yaml
@@ -20,6 +25,56 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.base_module import BaseModule
 from modules.audio_processor.processor import AudioProcessor, TranscriptEvent
+
+AUDIO_HTTP_PORT = 5052
+
+
+class _AudioExportHandler(BaseHTTPRequestHandler):
+    """嵌入式 HTTP，前端"导出原音"按钮直连 :5052 拉 WAV（仿 video_processor 5051 风格）。
+
+    路径：GET /audio/export.wav  → 当前 PCM 环形 buffer 打 WAV 包返回
+    """
+    processor_ref: "AudioProcessor | None" = None  # 由 AudioModule 注入
+    sample_rate: int = 16000
+
+    def log_message(self, fmt, *args):
+        pass  # 静默 access log
+
+    def do_GET(self):
+        if self.path.startswith("/audio/export.wav"):
+            return self._serve_wav()
+        self.send_error(404)
+
+    def _serve_wav(self):
+        proc = self.processor_ref
+        if proc is None:
+            self.send_response(503)
+            self.send_header("Content-Length", "0"); self.end_headers()
+            return
+        pcm = proc.get_pcm_buffer()
+        if not pcm:
+            self.send_response(204)
+            self.send_header("Content-Length", "0"); self.end_headers()
+            return
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # int16
+            wf.setframerate(self.sample_rate)
+            wf.writeframes(pcm)
+        wav_bytes = buf.getvalue()
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        self.send_response(200)
+        self.send_header("Content-Type", "audio/wav")
+        self.send_header("Content-Length", str(len(wav_bytes)))
+        self.send_header("Content-Disposition", f'attachment; filename="audio-{stamp}.wav"')
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            self.wfile.write(wav_bytes)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
 
 logging.basicConfig(
     level=logging.INFO,
@@ -95,12 +150,31 @@ class AudioModule(BaseModule):
     def start(self) -> None:
         super().start()
         self.processor.start(callback=self._on_transcript)
+        # 启嵌入式 HTTP（5052）— 前端"导出原音"按钮直连此端口
+        # 与 video_processor 5051 同样思路；start() 时启避免 __init__ 阶段还没装好 processor
+        _AudioExportHandler.processor_ref = self.processor
+        _AudioExportHandler.sample_rate = self.processor.sample_rate
+        try:
+            self._http_server = ThreadingHTTPServer(("0.0.0.0", AUDIO_HTTP_PORT), _AudioExportHandler)
+            threading.Thread(target=self._http_server.serve_forever, daemon=True).start()
+            self.logger.info(f"音频导出 HTTP 已启动: http://0.0.0.0:{AUDIO_HTTP_PORT}/audio/export.wav")
+        except Exception as e:
+            self.logger.warning(f"音频导出 HTTP 启动失败 :{AUDIO_HTTP_PORT} → {e}")
+            self._http_server = None
 
     def stop(self) -> None:
         try:
             self.processor.stop()
         except Exception as e:
             self.logger.warning(f"AudioProcessor stop 异常: {e}")
+        # 关嵌入式 HTTP，避免 supervisor 重拉子进程时 5052 残留导致 EADDRINUSE
+        srv = getattr(self, "_http_server", None)
+        if srv is not None:
+            try:
+                srv.shutdown()
+                srv.server_close()
+            except Exception:
+                pass
         super().stop()
 
     # ── transcript → MQTT ────────────────────────────────────────────

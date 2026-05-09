@@ -5,6 +5,7 @@ audio_processor.py
 - local_offline: 本地 SenseVoiceSmall，按静音切段后输出 final
 """
 import asyncio
+import collections
 import json
 import logging
 import queue
@@ -78,6 +79,15 @@ class AudioProcessor:
         # 诊断：PCM 帧计数（macOS 静默拒绝麦克风时 sd.InputStream 假成功但 callback 永不触发）
         self._pcm_frames_received = 0
         self._mic_self_check_done = False
+
+        # PCM 环形缓冲：留最近 N 秒原音，前端"导出原音"按钮调 get_pcm_buffer 打包 WAV。
+        # int16 mono @ sample_rate × N 秒 × 2 byte ≈ 9.6MB（5min @ 16kHz），可接受。
+        # 不持久化磁盘（演示场景），supervisor 重启就丢；如客户要长录改 _pcm_ring_seconds。
+        self._pcm_ring_seconds = 300
+        self._pcm_ring_max_bytes = self.sample_rate * 2 * self._pcm_ring_seconds
+        self._pcm_ring: "collections.deque[bytes]" = collections.deque()
+        self._pcm_ring_total = 0
+        self._pcm_ring_lock = threading.Lock()
 
     # ── 启动/停止 ─────────────────────────────────────────────────────
 
@@ -183,6 +193,12 @@ class AudioProcessor:
         if self._pcm_frames_received == 1:
             logger.info(f"[mic] 第 1 帧 PCM 已收到 ({frames} samples) — 麦克风正常工作")
         pcm = indata[:, 0].tobytes()
+        # 写环形 buffer（旁路 tee，不影响 send_q 流向 FunASR）
+        with self._pcm_ring_lock:
+            self._pcm_ring.append(pcm)
+            self._pcm_ring_total += len(pcm)
+            while self._pcm_ring_total > self._pcm_ring_max_bytes and self._pcm_ring:
+                self._pcm_ring_total -= len(self._pcm_ring.popleft())
         try:
             self._send_q.put_nowait(pcm)
         except queue.Full:
@@ -191,6 +207,11 @@ class AudioProcessor:
                 self._send_q.put_nowait(pcm)
             except (queue.Empty, queue.Full):
                 pass
+
+    def get_pcm_buffer(self) -> bytes:
+        """返回当前环形 buffer 的 PCM 字节流（int16 mono @ sample_rate）。"""
+        with self._pcm_ring_lock:
+            return b"".join(self._pcm_ring)
 
     def _run_ws_loop(self):
         try:

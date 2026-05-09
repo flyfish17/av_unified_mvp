@@ -1411,6 +1411,7 @@
   function setupTranscriptActions() {
     const stopBtn   = document.querySelector("[data-tx-stop]");
     const exportBtn = document.querySelector("[data-tx-export-text]");
+    const audioBtn  = document.querySelector("[data-tx-export-audio]");
     if (stopBtn) {
       stopBtn.onclick = async () => {
         // 当前态显示"停止" → 发 disable；显示"启动" → 发 enable
@@ -1452,6 +1453,19 @@
         a.href = url; a.download = `transcript-${stamp}.txt`;
         document.body.appendChild(a); a.click();
         setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+      };
+    }
+    if (audioBtn) {
+      // 导出原音：直连 audio_processor 嵌入式 HTTP :5052 拉 WAV（仿 video_processor 5051 风格，
+      // 跨进程通信由 audio_processor 自带 server 处理，不走 main.py web/server 中转）
+      audioBtn.onclick = () => {
+        const url = `${location.protocol}//${location.hostname}:5052/audio/export.wav`;
+        // 直接 navigation 触发下载（Content-Disposition 强制 attachment）
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "";  // 让浏览器用服务端 filename
+        document.body.appendChild(a); a.click();
+        setTimeout(() => document.body.removeChild(a), 100);
       };
     }
   }
