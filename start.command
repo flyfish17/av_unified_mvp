@@ -205,5 +205,10 @@ trap cleanup EXIT INT TERM
 # ── 5. 浏览器 + 主程 ───────────────────────────────────────────
 say "打开浏览器 + 启动 main.py"
 ( sleep 2 && open "http://localhost:5050" ) &
-python3 main.py
+# 日志持久化到 logs/main-<时间戳>.log（K8：mic 假死等静默故障的事后取证；
+# tee -a 保留终端实时显示同时落盘；老日志保留 5 个，旧的删除）
+mkdir -p logs
+LOG_FILE="logs/main-$(date +%Y%m%d-%H%M%S).log"
+ls -1t logs/main-*.log 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null
+python3 main.py 2>&1 | tee "$LOG_FILE"
 # main.py 退出后会触发 trap cleanup 清理 Node-RED

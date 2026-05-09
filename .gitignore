@@ -69,3 +69,6 @@ config/system_config.yaml
 
 # 纪要留档（C 档：知识库源 — 用户私有数据不入仓库）
 summaries/
+
+# main.py 持久化日志（K8：mic 假死等静默故障事后取证用）
+logs/

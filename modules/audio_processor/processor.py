@@ -158,6 +158,34 @@ class AudioProcessor:
         # 启动 5 秒后自检：若 0 帧 → macOS 静默拒绝麦克风（典型：终端无授权 / 设备被独占）
         threading.Thread(target=self._mic_self_check, daemon=True).start()
 
+        # 持续 watchdog：sd.InputStream 长时间运行后偶现 callback 假死（sounddevice 已知坑），
+        # 表现是进程仍在但 _pcm_frames_received 不再增。30s 不增 → 主动 os._exit(1) 让
+        # supervisor 重拉子进程恢复。修复用户实测"时间稍长后语音转写停止；刷新不能解决；
+        # 重启后好用"的静默挂死现象（5/9 真实场景观察）。
+        threading.Thread(target=self._mic_watchdog, daemon=True, name="mic_watchdog").start()
+
+    def _mic_watchdog(self):
+        """每 5s 巡检 PCM 帧计数；30s 不增 → mic stream 假死，os._exit 让 supervisor 重拉。"""
+        # 启动初期跳过，等 mic 真正就位
+        time.sleep(15)
+        last_count = self._pcm_frames_received
+        last_change = time.time()
+        while not self._stop_event.is_set():
+            cur = self._pcm_frames_received
+            if cur != last_count:
+                last_count = cur
+                last_change = time.time()
+            else:
+                idle_sec = time.time() - last_change
+                if idle_sec > 30:
+                    import os
+                    logger.error(
+                        f"⚠️ mic watchdog: PCM 帧计数 {idle_sec:.0f}s 无变化 (count={cur})；"
+                        f"麦克风 stream 假死，退出让 supervisor 重拉子进程恢复"
+                    )
+                    os._exit(1)
+            time.sleep(5)
+
     def _mic_self_check(self):
         """sd.InputStream.start() 在 macOS 上对未授权进程会静默成功但 callback 永不触发。
         启动后等 5s 看 _pcm_frames_received，0 → 报警 + 推 mqtt 状态给前端显示。
