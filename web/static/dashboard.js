@@ -207,11 +207,11 @@
     btn.classList.toggle("stop", running);  // 红色仅在"停止"态（点击会停）
   }
   function setIntentToggleState(on) {
-    // 意图判断开关现归意图卡（顶栏只剩系统级"退出系统"，更符合订阅式架构）
+    // 意图判断开关在意图卡 module-header（A8 从 body 底挪到 header；按钮少不值得占一行）
     const btn = document.querySelector("[data-intent-toggle]");
     if (!btn) return;
-    btn.classList.toggle("intent-on",  !!on);
-    btn.classList.toggle("intent-off", !on);
+    btn.classList.toggle("on",  !!on);
+    btn.classList.toggle("off", !on);
     btn.textContent = on ? "⚡ 判别中" : "▶ 已暂停";
     btn.title = on ? "意图判别中（点击暂停 — 仍转写但不调 LLM）"
                    : "意图判别已暂停（点击启用）";
@@ -1616,7 +1616,7 @@
     const btn = document.querySelector("[data-intent-toggle]");
     if (!btn) return;
     btn.onclick = async () => {
-      const willEnable = !btn.classList.contains("intent-on");
+      const willEnable = !btn.classList.contains("on");
       btn.disabled = true;
       try {
         const r = await fetch("/mqtt/publish", {

@@ -649,17 +649,12 @@
     .tx-actions button:hover { color: var(--accent); border-color: var(--accent); }
     .tx-actions button.stop:hover { color: var(--warn); border-color: var(--warn); }
     .tx-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
-    /* 转写卡 / 意图卡 module-body：上 = 滚动事件流（可压缩），下 = 按钮条（固定） */
-    [data-overview="transcript"] .module-body,
-    [data-overview="intent"]     .module-body { display: flex; flex-direction: column; }
-    [data-overview="transcript"] .strip-card-body,
-    [data-overview="intent"]     .strip-card-body { flex: 1; height: auto; min-height: 0; }
-    /* 意图卡 toggle 按钮：ON=绿描边（判别中）/ OFF=灰描边（已暂停）。
-       视觉与转写卡停止按钮风格一致；按钮文字直接表达当前状态。 */
-    .tx-actions button.intent-on  { color: var(--final); border-color: var(--final); }
-    .tx-actions button.intent-on:hover  { background: rgba(46,160,67,0.10); color: var(--final); border-color: var(--final); }
-    .tx-actions button.intent-off { color: var(--dim); border-color: var(--line); }
-    .tx-actions button.intent-off:hover { background: rgba(107,118,132,0.10); color: var(--text-2); }
+    /* 转写卡 module-body：上 = 滚动事件流（可压缩），下 = 按钮条（固定）。
+       意图卡按钮少（仅 toggle）已移到 module-header，body 不再需要 flex 分区。 */
+    [data-overview="transcript"] .module-body { display: flex; flex-direction: column; }
+    [data-overview="transcript"] .strip-card-body { flex: 1; height: auto; min-height: 0; }
+    /* TODO: GridStack 左下角 resize handle 在 hover 时遮挡转写卡最左「停止/启动」按钮。
+       user 选先不动（A8 中），后续 K 阶段处理 — 方案：禁用 sw handle 或按钮区改 margin-left。 */
 
     /* ── Header 顶栏 toggle 按钮（意图判断 ON/OFF） ──────────────── */
     .hdr-toggle {
@@ -941,14 +936,13 @@
                   <span class="module-sub">av/llm/event · av/control</span>
                 </span>
                 <span class="module-badge" id="overview-intent-badge">等待</span>
-                <div class="module-actions"></div>
+                <div class="module-actions">
+                  <button data-intent-toggle class="hdr-toggle">⚡ 判别中</button>
+                </div>
               </div>
               <div class="module-body">
                 <div class="strip-card-body">
                   <div class="strip-empty">等待意图事件…</div>
-                </div>
-                <div class="tx-actions">
-                  <button data-intent-toggle>⚡ 判别中</button>
                 </div>
               </div>
             </div>
