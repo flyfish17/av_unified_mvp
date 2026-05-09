@@ -227,6 +227,7 @@ class AVSupervisor:
                 push as web_push,
                 run as run_web,
                 set_mqtt_publisher,
+                set_run_error_handler,
                 set_shutdown_handler,
             )
         except ModuleNotFoundError as e:
@@ -238,6 +239,8 @@ class AVSupervisor:
         set_mqtt_publisher(self.mqtt.publish)
         # POST /system/shutdown → 设 _running=False 让主循环退出，stop() 清子进程 + 外部服务
         set_shutdown_handler(lambda: setattr(self, "_running", False))
+        # K4：Flask 启动失败（Address In Use 等）→ 让主循环退出，user 在终端看到清晰错误
+        set_run_error_handler(self._on_web_run_error)
         host = web_cfg.get("host", "0.0.0.0")
         port = int(web_cfg.get("transcript_port", 5050))
 
@@ -252,6 +255,11 @@ class AVSupervisor:
             time.sleep(1)
             self._announce_supervisor()
         threading.Thread(target=_announce, daemon=True).start()
+
+    def _on_web_run_error(self, exc: Exception) -> None:
+        """Flask daemon thread 抛错回调。立即让主循环退出（stop() 会清子进程 + 外部服务）。"""
+        logger.error(f"⚠️  Web 启动失败 — supervisor 即将退出：{exc}")
+        self._running = False
 
     def _announce_supervisor(self):
         """Supervisor 向 discovery SSE channel 推一条伪 discovery，使 UI 生成控制面板。"""

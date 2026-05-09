@@ -24,6 +24,23 @@ ok()  { printf "${GREEN}✓${OFF} %s\n" "$1"; }
 warn(){ printf "${YELLOW}!${OFF} %s\n" "$1"; }
 die() { printf "${RED}✗${OFF} %s\n" "$1"; read -p "回车关闭..." _; exit 1; }
 
+# ── 0. system_config.yaml first-run（K2：新克隆 / .gitignore 不入仓库）─────
+if [ ! -f config/system_config.yaml ]; then
+    if [ -f config/system_config.example.yaml ]; then
+        say "首次运行：从 example 拷贝 system_config.yaml"
+        cp config/system_config.example.yaml config/system_config.yaml
+        ok "已生成 config/system_config.yaml"
+        warn "  请检查并按需修改下列字段（不改也能启，启动后再改重启）："
+        warn "    · video.sources[].url 里的 \${IPC_PWD}（实际密码）"
+        warn "    · husion.host / id_ranges（如有 HDC900 设备）"
+        warn "    · llm.ollama.model_fast / model_smart"
+        printf "  按回车继续启动..."
+        read -r _
+    else
+        die "缺 config/system_config.example.yaml — 项目结构损坏，git pull 一次"
+    fi
+fi
+
 # ── 1. 性能档位 ─────────────────────────────────────────────────
 PROFILE=$(grep -E '^\s*performance_profile:' config/system_config.yaml 2>/dev/null | awk '{print $2}')
 PROFILE=${PROFILE:-medium}
@@ -39,6 +56,41 @@ else
     mosquitto -c "$MOSQ_CONF" -d
     sleep 1
     ok "已启动 (port 1883)"
+fi
+
+# ── 2.5. Ollama（K1：客户机第一次跑常因 Ollama.app 未启 → LLM 404 演示翻车）──
+say "Ollama 服务"
+if curl -s --max-time 1 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+    ok "已在运行"
+else
+    # 优先启 macOS app（带 menu bar 状态指示，user 友好）；fallback 到 CLI 后台
+    if [ -d "/Applications/Ollama.app" ]; then
+        open -a Ollama
+    elif command -v ollama >/dev/null 2>&1; then
+        nohup ollama serve > /tmp/ollama.log 2>&1 &
+    else
+        die "未找到 Ollama — 请安装 https://ollama.com/download 后再运行"
+    fi
+    printf "  等待 11434 就绪 "
+    for i in $(seq 1 30); do
+        if curl -s --max-time 1 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+            printf "\n"; ok "Ollama 已启动"; break
+        fi
+        printf "."; sleep 1
+    done
+    curl -s --max-time 1 http://127.0.0.1:11434/api/tags >/dev/null 2>&1 \
+        || die "Ollama 启动超时（30s）— 检查 Ollama.app 能否正常打开"
+fi
+# 轻量验证：config 写的 LLM 模型在 ollama 列表里（提前暴露"模型缺失 → 演示翻车"）
+LLM_MODEL=$(grep -E '^\s*model_fast:' config/system_config.yaml 2>/dev/null | awk '{print $2}' | head -1)
+if [ -n "$LLM_MODEL" ]; then
+    if curl -s --max-time 2 http://127.0.0.1:11434/api/tags | grep -q "\"$LLM_MODEL\""; then
+        ok "LLM 模型可用: $LLM_MODEL"
+    else
+        warn "model_fast=$LLM_MODEL 不在 ollama 列表 — LLM 调用会 404"
+        warn "  → 改 config/system_config.yaml 的 model_fast/smart"
+        warn "  → 或 ollama pull $LLM_MODEL  (qwen3.5:4b 走 modelscope，见 DEV PLAN R29)"
+    fi
 fi
 
 # ── 3. funasr-2pass 容器（仅 medium / heavy 档需要）────────────
@@ -57,9 +109,16 @@ else
     fi
 fi
 if [ "$PROFILE" != "light" ]; then
+    # K5：提示离线部署路径 — 模型缓存目录大小给 user 一眼判断"是否已下完"
+    MODELS_DIR="$HOME/funasr-runtime-resources/models"
+    if [ -d "$MODELS_DIR" ]; then
+        MODELS_SIZE=$(du -sh "$MODELS_DIR" 2>/dev/null | awk '{print $1}')
+        say "FunASR 模型缓存：$MODELS_DIR ($MODELS_SIZE)"
+    fi
     if [ -z "$(docker ps -q -f name=funasr-2pass)" ]; then
         if [ -z "$(docker ps -aq -f name=funasr-2pass)" ]; then
             warn "容器不存在，首次创建（会下载 ~3GB 模型，5-10 分钟）"
+            warn "  → 客户离线机部署：先在有网机 docker save funasr:funasr-runtime-sdk-online-cpu-0.1.12 + rsync $MODELS_DIR"
             mkdir -p ~/funasr-runtime-resources/models
             # 关键：用 wait $SERVER_PID 让容器主进程绑定 server 生命周期。
             # server crash → 容器退出 → --restart 自动拉起，避免"端口在但服务死"。

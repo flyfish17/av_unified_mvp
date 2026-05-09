@@ -41,6 +41,7 @@ class VideoProcessor:
         self.target_classes = set(yolo_cfg.get("target_classes", []))
 
         self._model = None
+        self._model_none_warned = False  # K3：模型未加载时只 warn 一次，避免刷屏
         self._threads = []
         self._stop_event = threading.Event()
         self._event_queue: queue.Queue = queue.Queue(maxsize=100)
@@ -75,6 +76,12 @@ class VideoProcessor:
         """按 §4 协议发布到 av/video/detect"""
         if self._mqtt_publisher is None:
             return
+        # K3：加可观察性 — 之前 detection 默默工作，user 无从判断 L3 自动化为何不响应
+        try:
+            classes = ",".join(d.get("class", "?") for d in detections[:5])
+            logger.info(f"[detect] {camera_name} → {classes} ({len(detections)} 目标)")
+        except Exception:
+            pass
         self._mqtt_publisher("av/video/detect", {
             "camera": camera_name,
             "time": timestamp,
@@ -213,6 +220,9 @@ class VideoProcessor:
                 continue  # 限速，避免推理速度过快堆积 GPU/CPU
             last_run = now
             if self._model is None:
+                if not self._model_none_warned:
+                    logger.warning(f"YOLO 模型未加载（_model=None），所有路推理跳过 — detection 不会发出")
+                    self._model_none_warned = True
                 continue
             try:
                 results = self._model(frame, verbose=False)[0]

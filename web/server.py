@@ -41,6 +41,17 @@ def set_shutdown_handler(fn: Callable[[], None]) -> None:
     global _shutdown_handler
     _shutdown_handler = fn
 
+
+# K4：Flask 启动失败（多见于 :5050 Address In Use）原本在 daemon thread 内 swallow，
+# supervisor 不察觉 → user 看似启动成功但页面打不开。注入回调让错误冒到主循环。
+_run_error_handler: Optional[Callable[[Exception], None]] = None
+
+
+def set_run_error_handler(fn: Callable[[Exception], None]) -> None:
+    """供 main.py 注入 web 启动失败回调（OSError / Address In Use 等）。"""
+    global _run_error_handler
+    _run_error_handler = fn
+
 _flask_mod = None
 
 
@@ -370,9 +381,25 @@ def mock(channel: str):
 
 
 def run(host: str = "0.0.0.0", port: int = 5050) -> None:
-    """在当前线程同步阻塞地起 Flask（main.py 会包一层 daemon 线程调用）。"""
+    """在当前线程同步阻塞地起 Flask（main.py 会包一层 daemon 线程调用）。
+
+    K4：Flask 启动失败（典型 OSError "Address already in use" :5050 被占）以前
+    在 daemon thread 内 swallow，supervisor 看不到。改成抛错前先调 _run_error_handler
+    通知主循环停机；user 在终端看到清晰 ERROR 而不是"启动成功但页面打不开"。
+    """
     logger.info(f"演示页: http://{host}:{port}  (SSE 订阅制，动态 channel)")
-    _app.run(host=host, port=port, threaded=True, debug=False, use_reloader=False)
+    try:
+        _app.run(host=host, port=port, threaded=True, debug=False, use_reloader=False)
+    except OSError as e:
+        logger.error(f"Flask 启动失败 :{port} — {e}")
+        logger.error(f"  → 通常是端口被占。检查：lsof -nP -iTCP:{port} -sTCP:LISTEN")
+        logger.error(f"  → 或 kill 残留 main.py：pkill -f 'python3 main.py'，等 :{port} TIME_WAIT 释放再起")
+        if _run_error_handler is not None:
+            try:
+                _run_error_handler(e)
+            except Exception:
+                pass
+        raise
 
 
 if __name__ == "__main__":
