@@ -135,7 +135,27 @@ class AVSupervisor:
                 except subprocess.TimeoutExpired:
                     proc.kill()
         self.mqtt.stop()
+        self._cleanup_external()
         logger.info("已退出")
+
+    def _cleanup_external(self):
+        """清理 start.command 拉起但不属于 supervisor 子进程的外部服务。
+
+        Web 退出按钮触发 stop() 时，希望"完整清场"：mosquitto / Node-RED / FunASR
+        都是 start.command 里 detached 起的，得在这里一并 kill，否则会留后台僵尸。
+        每条独立 try，单条失败不影响其它清理。
+        """
+        for desc, cmd in [
+            ("Node-RED", ["pkill", "-f", "node-red"]),
+            ("mosquitto", ["pkill", "-x", "mosquitto"]),
+            ("funasr-2pass", ["docker", "stop", "funasr-2pass"]),
+        ]:
+            try:
+                subprocess.run(cmd, timeout=8, check=False,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                logger.info(f"  外部服务已停: {desc}")
+            except Exception as e:
+                logger.warning(f"  外部服务停止失败 {desc}: {e}")
 
     # ── Supervisor 主循环 ─────────────────────────────────────────────
 
@@ -203,7 +223,12 @@ class AVSupervisor:
         if not web_cfg.get("transcript_enabled", True):
             return
         try:
-            from web.server import push as web_push, run as run_web, set_mqtt_publisher
+            from web.server import (
+                push as web_push,
+                run as run_web,
+                set_mqtt_publisher,
+                set_shutdown_handler,
+            )
         except ModuleNotFoundError as e:
             logger.warning(f"演示页未启动（缺依赖：{e}）")
             return
@@ -211,6 +236,8 @@ class AVSupervisor:
         self._web_push = web_push
         # 让 web 端的 /camera/<name>/(enable|disable) 能通过 MQTT 通知 video_processor
         set_mqtt_publisher(self.mqtt.publish)
+        # POST /system/shutdown → 设 _running=False 让主循环退出，stop() 清子进程 + 外部服务
+        set_shutdown_handler(lambda: setattr(self, "_running", False))
         host = web_cfg.get("host", "0.0.0.0")
         port = int(web_cfg.get("transcript_port", 5050))
 

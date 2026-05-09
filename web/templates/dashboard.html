@@ -428,8 +428,8 @@
     }
     #quick-ctrl-location:focus { border-color: var(--accent); }
 
-    /* 视频墙画格 ✎/✕ 按钮 */
-    .tile-edit-btn, .tile-delete-btn {
+    /* 视频墙画格 ⏸/✎/✕ 按钮 */
+    .tile-edit-btn, .tile-delete-btn, .tile-disable-btn {
       background: rgba(13,17,23,0.7); color: var(--dim);
       border: 1px solid var(--line); border-radius: 3px;
       padding: 2px 7px; font-size: 11px; cursor: pointer;
@@ -437,6 +437,15 @@
     }
     .tile-edit-btn:hover { color: var(--accent); border-color: var(--accent); }
     .tile-delete-btn:hover { color: var(--warn); border-color: var(--warn); }
+    .tile-disable-btn:hover { color: var(--live); border-color: var(--live); }
+    /* 本机摄像头停用按钮：直接红色描边 + 冷却提示，强调"释放 macOS camera 占用" */
+    .tile-disable-btn.local {
+      color: var(--warn); border-color: var(--warn);
+      background: rgba(248,81,73,0.08);
+    }
+    .tile-disable-btn.local:hover {
+      background: var(--warn); color: #fff;
+    }
     .add-source-form .msg {
       font-size: 11px; color: var(--dim); min-height: 14px;
       font-family: ui-monospace, monospace;
@@ -689,6 +698,12 @@
     <span style="font-size:11px;color:var(--dim);margin-left:8px">
       <a href="/transcript" target="_blank">旧页 ↗</a>
     </span>
+    <button id="btn-system-exit" title="停止 supervisor + 关闭后台 mosquitto / Node-RED / FunASR"
+            style="margin-left:10px;font-size:11px;padding:3px 10px;border-radius:4px;
+                   background:transparent;color:var(--warn);border:1px solid var(--warn);
+                   cursor:pointer;font-family:ui-monospace,monospace;letter-spacing:0.05em;">
+      ⏻ 退出系统
+    </button>
   </header>
 
   <nav id="nav"></nav>

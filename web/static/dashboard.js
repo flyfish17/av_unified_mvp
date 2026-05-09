@@ -432,6 +432,15 @@
             return `<span class="tile-status ${m.cls}" data-status>${m.text}</span>`;
           })() +
           `<span class="tile-spacer"></span>` +
+          (ep.enabled ? (() => {
+            // 本机摄像头独占 macOS camera，停用按钮加红色 ring + tooltip
+            const isLocal = /^\d+$/.test(String(ep.src_url || ""));
+            const tip = isLocal
+              ? "停用本机摄像头（释放 macOS camera 占用）"
+              : "停用此摄像头";
+            const cls = isLocal ? "tile-disable-btn local" : "tile-disable-btn";
+            return `<button class="${cls}" data-disable title="${tip}">⏸</button>`;
+          })() : "") +
           `<button class="tile-edit-btn" data-edit title="编辑此源">✎</button>` +
           `<button class="tile-delete-btn" data-delete title="删除此源">✕</button>` +
           buildPickerHtml(slot) +
@@ -478,6 +487,14 @@
         delBtn.onclick = (e) => {
           e.stopPropagation();
           window.__videoSourceForm?.confirmDelete(ep.name);
+        };
+      }
+      const disableBtn = tileEl.querySelector("[data-disable]");
+      if (disableBtn) {
+        disableBtn.onclick = (e) => {
+          e.stopPropagation();
+          fetch(`/camera/${encodeURIComponent(ep.name)}/disable`, { method: "POST" })
+            .catch(err => console.warn("disable failed", err));
         };
       }
       // 整格点击 = 放大切换（避开 picker / 按钮的事件）
@@ -1333,4 +1350,41 @@
   setupAddSourceForm();
   setupLanScan();
   setupQuickControl();
+  setupSystemExit();
+
+  // ── 退出系统按钮 ─────────────────────────────────────────────────────
+  // 触发 supervisor 优雅停机：杀子进程 → 停 mosquitto / Node-RED / FunASR docker。
+  // 后端先返回 200，0.1s 后才设 _running=False，所以 UI 能及时显示遮罩。
+  function setupSystemExit() {
+    const btn = document.getElementById("btn-system-exit");
+    if (!btn) return;
+    btn.onclick = async () => {
+      if (!confirm("确定退出系统？\n\n将停止：\n  · main.py 及所有子模块\n  · mosquitto / Node-RED / FunASR")) return;
+      btn.disabled = true;
+      btn.textContent = "退出中…";
+      let shutdownOk = true;
+      try {
+        const r = await fetch("/system/shutdown", { method: "POST" });
+        // 端点不存在 / 后端未注入 handler → 不要假装成功，否则会出现"显示退出但进程仍在跑"
+        if (!r.ok && r.status !== 0) {
+          shutdownOk = false;
+          alert(`退出失败：HTTP ${r.status}\n可能是 main.py 未重启加载新代码。\n请到终端 Ctrl+C 后双击 start.command。`);
+          btn.disabled = false;
+          btn.textContent = "⏻ 退出系统";
+          return;
+        }
+      } catch (_) { /* 后端关停时连接断开属正常，shutdownOk 保持 true */ }
+      // 全屏遮罩：避免用户继续操作
+      const mask = document.createElement("div");
+      mask.style.cssText =
+        "position:fixed;inset:0;background:rgba(10,14,20,0.92);z-index:99999;" +
+        "display:flex;align-items:center;justify-content:center;flex-direction:column;" +
+        "color:var(--text);font-size:16px;gap:14px;";
+      mask.innerHTML =
+        "<div style='font-size:36px'>⏻</div>" +
+        "<div>系统正在退出…</div>" +
+        "<div style='font-size:12px;color:var(--dim)'>关闭浏览器即可。如需重启 → 双击 start.command</div>";
+      document.body.appendChild(mask);
+    };
+  }
 })();

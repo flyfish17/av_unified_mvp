@@ -23,12 +23,20 @@ logger = logging.getLogger(__name__)
 
 # 由 main.py 在启动后注入；用于 /camera/<name>/(enable|disable) → MQTT 发布
 _mqtt_publish: Optional[Callable[[str, dict], None]] = None
+# 由 main.py 注入；前端"退出系统"按钮 → POST /system/shutdown 触发 supervisor 优雅停机
+_shutdown_handler: Optional[Callable[[], None]] = None
 
 
 def set_mqtt_publisher(fn: Callable[[str, dict], None]) -> None:
     """供 main.py supervisor 注入 MQTTBridge.publish。"""
     global _mqtt_publish
     _mqtt_publish = fn
+
+
+def set_shutdown_handler(fn: Callable[[], None]) -> None:
+    """供 main.py supervisor 注入退出回调。"""
+    global _shutdown_handler
+    _shutdown_handler = fn
 
 _flask_mod = None
 
@@ -222,6 +230,18 @@ def mqtt_publish_proxy():
         return {"ok": False, "error": "topic must start with av/"}, 403
     _mqtt_publish(topic, payload)
     return {"ok": True, "topic": topic}
+
+
+@_app.post("/system/shutdown")
+def system_shutdown():
+    """前端"退出系统"按钮：触发 supervisor 优雅停机，main.py.stop() 会清外部进程。
+
+    回调在另一线程调用，让本响应能先返回给浏览器。
+    """
+    if _shutdown_handler is None:
+        return {"ok": False, "error": "shutdown handler not injected"}, 503
+    threading.Timer(0.1, _shutdown_handler).start()
+    return {"ok": True, "msg": "shutting down"}
 
 
 @_app.post("/mock/<channel>")

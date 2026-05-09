@@ -37,6 +37,13 @@ window.Renderers.mjpeg = function makeMjpegRenderer(feed) {
           .catch(err => console.warn("camera toggle failed", err));
       };
 
+      // 本机摄像头：卡边框红 + 头部背景红，远距离一眼看到该停
+      const isLocal = /^\d+$/.test(String(ep.src_url || ""));
+      if (isLocal) {
+        wrap.style.border = "1px solid var(--warn)";
+        head.style.background = "rgba(248,81,73,0.10)";
+      }
+
       head.appendChild(label);
       head.appendChild(btn);
 
@@ -78,7 +85,7 @@ window.Renderers.mjpeg = function makeMjpegRenderer(feed) {
       wrap.appendChild(img);
       wrap.appendChild(errBox);
       feed.appendChild(wrap);
-      c = { wrap, img, label, btn, errBox, enabled: false, url: ep.url };
+      c = { wrap, img, label, btn, errBox, enabled: false, url: ep.url, isLocal };
       cards.set(name, c);
     }
     return c;
@@ -156,8 +163,10 @@ window.Renderers.mjpeg = function makeMjpegRenderer(feed) {
     c.enabled = enabled;
     if (enabled) {
       c.img.style.opacity = "1";
-      c.label.textContent = c.img.alt + " · 在线";
-      c.btn.textContent = "停用";
+      const tag = c.isLocal ? "（本机·占 camera）" : "";
+      c.label.textContent = c.img.alt + " · 在线" + tag;
+      c.btn.textContent = c.isLocal ? "⏹ 停用本机" : "停用";
+      c.btn.title = c.isLocal ? "停用本机摄像头（释放 macOS camera 占用）" : "";
       c.btn.style.background = "var(--warn)";
       c.btn.style.color = "#fff";
       startPoll(c);
