@@ -192,6 +192,29 @@
     if (!modules.has(name)) createModuleView(name, ev);
     updateModule(name, ev);
     refreshModulesPill();
+    // llm_engine 的 enabled 字段反向同步顶栏意图判断 toggle
+    if (name === "llm_engine" && typeof ev.enabled === "boolean") {
+      setIntentToggleState(ev.enabled);
+    }
+    if (name === "audio_processor" && typeof ev.running === "boolean") {
+      setTxStopButtonState(ev.running);
+    }
+  }
+  function setTxStopButtonState(running) {
+    const btn = document.querySelector("[data-tx-stop]");
+    if (!btn) return;
+    btn.textContent = running ? "⏸ 停止" : "▶ 启动";
+    btn.classList.toggle("stop", running);  // 红色仅在"停止"态（点击会停）
+  }
+  function setIntentToggleState(on) {
+    // 意图判断开关现归意图卡（顶栏只剩系统级"退出系统"，更符合订阅式架构）
+    const btn = document.querySelector("[data-intent-toggle]");
+    if (!btn) return;
+    btn.classList.toggle("intent-on",  !!on);
+    btn.classList.toggle("intent-off", !on);
+    btn.textContent = on ? "⚡ 判别中" : "▶ 已暂停";
+    btn.title = on ? "意图判别中（点击暂停 — 仍转写但不调 LLM）"
+                   : "意图判别已暂停（点击启用）";
   }
 
   function refreshModulesPill() {
@@ -645,23 +668,52 @@
     document.getElementById("ticker-net").textContent = `↑${main.sent_kbps} ↓${main.recv_kbps} KB/s`;
   }
 
+  // 转写卡渲染：仿讯飞「讲解稿」观感 — 连续讲话合并到同一段落，停顿 >60s 才换段。
+  // 段头只显示时间戳（说话人 diarization 当前没接，"说话人 1" 占位反而误导，等接
+  // SOND/cam++ 后再加）。每段内部：.finals 累积所有定稿文字 + 末尾 .live 显示当前
+  // partial（灰色斜体），final 时把 partial 文字并入 finals 并清空 live。
+  // PARA_GAP_SEC：超过此时长没新 final 就开新段落。
+  const PARA_GAP_SEC = 60;
+  const _txState = { para: null, finalsText: "", lastFinalMs: 0 };
+  function fmtClock(ts) {
+    const d = ts ? new Date(ts * 1000) : new Date();
+    const p = n => String(n).padStart(2, "0");
+    return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
   function pushOverviewTranscript(ev) {
     const card = document.querySelector('[data-overview="transcript"] .strip-card-body');
     if (!card) return;
     clearEmpty(card);
     pulseEl(card.closest(".strip-card"));
-    let bubble = card.querySelector(`[data-seq="${ev.seq_id}"]`);
-    if (!bubble) {
-      bubble = document.createElement("div");
-      bubble.className = "bubble";
-      bubble.dataset.seq = ev.seq_id || ("anon-" + Date.now());
-      card.appendChild(bubble);
-      while (card.querySelectorAll(".bubble").length > 3) card.firstChild.remove();
+
+    const nowMs = Date.now();
+    const stale = !_txState.para || !card.contains(_txState.para);
+    const gapped = _txState.lastFinalMs > 0 &&
+                   (nowMs - _txState.lastFinalMs) / 1000 > PARA_GAP_SEC;
+
+    if (stale || gapped) {
+      const para = document.createElement("div");
+      para.className = "tx-para";
+      para.innerHTML =
+        `<div class="tx-meta"><span class="tx-ts">${fmtClock(ev.ts)}</span></div>` +
+        `<div class="tx-text"><span class="finals"></span><span class="live"></span></div>`;
+      card.appendChild(para);
+      while (card.querySelectorAll(".tx-para").length > 50) card.firstChild.remove();
+      _txState.para = para;
+      _txState.finalsText = "";
+      _txState.lastFinalMs = 0;
     }
-    bubble.classList.toggle("live", !ev.is_final);
-    bubble.classList.toggle("final", !!ev.is_final);
-    bubble.innerHTML = `<div>${escHtml(ev.text || "")}</div>` +
-      `<div class="meta">seq=${escHtml(ev.seq_id || "-")}</div>`;
+
+    const finalsEl = _txState.para.querySelector(".finals");
+    const liveEl   = _txState.para.querySelector(".live");
+    if (ev.is_final) {
+      _txState.finalsText += (ev.text || "");
+      finalsEl.textContent = _txState.finalsText;
+      liveEl.textContent = "";
+      _txState.lastFinalMs = nowMs;
+    } else {
+      liveEl.textContent = ev.text || "";
+    }
     card.scrollTop = card.scrollHeight;
   }
   function pushOverviewIntent(body) {
@@ -1352,6 +1404,82 @@
   setupLanScan();
   setupQuickControl();
   setupSystemExit();
+  setupIntentToggle();
+  setupTranscriptActions();
+
+  // ── 转写卡按钮（A3 导出原文 + A4 停止/启动） ────────────────────────
+  function setupTranscriptActions() {
+    const stopBtn   = document.querySelector("[data-tx-stop]");
+    const exportBtn = document.querySelector("[data-tx-export-text]");
+    if (stopBtn) {
+      stopBtn.onclick = async () => {
+        // 当前态显示"停止" → 发 disable；显示"启动" → 发 enable
+        const willDisable = stopBtn.textContent.includes("停止");
+        stopBtn.disabled = true;
+        try {
+          await fetch("/mqtt/publish", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              topic: "av/audio/cmd",
+              payload: { action: willDisable ? "disable" : "enable" }
+            })
+          });
+        } catch (e) { console.warn("audio toggle 失败", e); }
+        finally { stopBtn.disabled = false; }
+      };
+    }
+    if (exportBtn) {
+      exportBtn.onclick = () => {
+        const card = document.querySelector('[data-overview="transcript"] .strip-card-body');
+        if (!card) return;
+        const paras = card.querySelectorAll(".tx-para");
+        if (paras.length === 0) {
+          alert("当前没有转写内容");
+          return;
+        }
+        const lines = [];
+        paras.forEach(p => {
+          const ts = p.querySelector(".tx-ts")?.textContent || "";
+          // 只导出已定稿（.finals），未定稿的 .live 不算
+          const txt = p.querySelector(".finals")?.textContent || "";
+          if (txt) lines.push(`[${ts}]\n${txt}\n`);
+        });
+        const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        a.href = url; a.download = `transcript-${stamp}.txt`;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+      };
+    }
+  }
+
+  // ── 意图判断 toggle（在意图卡 module-body 底部按钮条） ─────────────
+  // 点击 → POST /mqtt/publish av/llm/cmd {action} → llm_engine 切状态 → 重发 discovery →
+  // handleDiscovery 看到 enabled 字段变化 → setIntentToggleState 更新 UI。
+  // UI 不在点击时立即 toggle 类（防止网络失败 / llm_engine 未连而出现状态飘移）。
+  function setupIntentToggle() {
+    const btn = document.querySelector("[data-intent-toggle]");
+    if (!btn) return;
+    btn.onclick = async () => {
+      const willEnable = !btn.classList.contains("intent-on");
+      btn.disabled = true;
+      try {
+        const r = await fetch("/mqtt/publish", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topic: "av/llm/cmd",
+            payload: { action: willEnable ? "enable" : "disable" }
+          })
+        });
+        if (!r.ok) console.warn("意图判断切换失败", r.status);
+      } catch (e) { console.warn("意图判断切换异常", e); }
+      finally { btn.disabled = false; }
+    };
+  }
 
   // ── 退出系统按钮 ─────────────────────────────────────────────────────
   // 触发 supervisor 优雅停机：杀子进程 → 停 mosquitto / Node-RED / FunASR docker。

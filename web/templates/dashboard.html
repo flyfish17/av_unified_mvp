@@ -619,6 +619,69 @@
     .bubble.live  .meta::before { content: "● 转写中 · "; color: var(--live); }
     .bubble.final .meta::before { content: "✓ 定稿 · ";   color: var(--final); }
 
+    /* ── 讯飞观感转写段落（总览页转写卡） ─────────────────────── */
+    /* 段落式纯文本流，连续讲话并入同段，60s 停顿才换段，目标"讲解稿"观感。
+       段头只显示时间戳（diarization 没接前不显示"说话人 1"，避免误导）。 */
+    .tx-para { padding: 8px 4px 12px; border-bottom: 1px solid var(--line-soft); }
+    .tx-para:last-child { border-bottom: 0; }
+    .tx-meta {
+      font-size: 11px; margin-bottom: 6px;
+      font-family: ui-monospace, monospace; color: var(--dim);
+    }
+    .tx-ts { color: var(--dim); }
+    .tx-text {
+      font-size: 14px; line-height: 1.75;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .tx-text .finals { color: var(--text); }                 /* 定稿主色 */
+    .tx-text .live { color: var(--text-2); opacity: 0.65; }  /* 未定稿灰 */
+    /* 转写卡底部按钮条（停止/导出原文/导出原音/生成纪要） */
+    .tx-actions {
+      display: flex; gap: 8px; padding: 6px 4px 0;
+      border-top: 1px solid var(--line-soft); margin-top: 4px;
+    }
+    .tx-actions button {
+      font-size: 11px; padding: 4px 10px; border-radius: 4px;
+      background: transparent; color: var(--dim);
+      border: 1px solid var(--line); cursor: pointer;
+      font-family: ui-monospace, monospace;
+    }
+    .tx-actions button:hover { color: var(--accent); border-color: var(--accent); }
+    .tx-actions button.stop:hover { color: var(--warn); border-color: var(--warn); }
+    .tx-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+    /* 转写卡 / 意图卡 module-body：上 = 滚动事件流（可压缩），下 = 按钮条（固定） */
+    [data-overview="transcript"] .module-body,
+    [data-overview="intent"]     .module-body { display: flex; flex-direction: column; }
+    [data-overview="transcript"] .strip-card-body,
+    [data-overview="intent"]     .strip-card-body { flex: 1; height: auto; min-height: 0; }
+    /* 意图卡 toggle 按钮：ON=绿描边（判别中）/ OFF=灰描边（已暂停）。
+       视觉与转写卡停止按钮风格一致；按钮文字直接表达当前状态。 */
+    .tx-actions button.intent-on  { color: var(--final); border-color: var(--final); }
+    .tx-actions button.intent-on:hover  { background: rgba(46,160,67,0.10); color: var(--final); border-color: var(--final); }
+    .tx-actions button.intent-off { color: var(--dim); border-color: var(--line); }
+    .tx-actions button.intent-off:hover { background: rgba(107,118,132,0.10); color: var(--text-2); }
+
+    /* ── Header 顶栏 toggle 按钮（意图判断 ON/OFF） ──────────────── */
+    .hdr-toggle {
+      margin-left: 10px; font-size: 11px; padding: 3px 10px;
+      border-radius: 4px; cursor: pointer; background: transparent;
+      font-family: ui-monospace, monospace; letter-spacing: 0.05em;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+    .hdr-toggle.on  { color: var(--final); border: 1px solid var(--final); }
+    .hdr-toggle.off { color: var(--dim);   border: 1px solid var(--line); }
+    .hdr-toggle.on:hover  { background: rgba(46,160,67,0.10); }
+    .hdr-toggle.off:hover { background: rgba(107,118,132,0.10); color: var(--text-2); }
+
+    /* 意图卡 module-header 状态 pill：与顶栏 toggle 同步，避免抬头看顶栏 */
+    .intent-state {
+      font-size: 10px; padding: 1px 6px; border-radius: 999px;
+      font-family: ui-monospace, monospace; letter-spacing: 0.05em;
+      border: 1px solid var(--line); color: var(--dim);
+    }
+    .intent-state.on  { color: var(--final); border-color: var(--final); }
+    .intent-state.off { color: var(--dim);   border-color: var(--line); }
+
     /* ── Node-RED iframe ─────────────────────────────────────────── */
     #nodered-frame {
       width: 100%; height: 100%; border: 0; background: var(--bg);
@@ -798,6 +861,10 @@
                 <div class="strip-card-body">
                   <div class="strip-empty">等待麦克风输入…</div>
                 </div>
+                <div class="tx-actions">
+                  <button data-tx-stop class="stop">⏸ 停止</button>
+                  <button data-tx-export-text>📄 导出原文</button>
+                </div>
               </div>
             </div>
            </div>
@@ -818,6 +885,9 @@
               <div class="module-body">
                 <div class="strip-card-body">
                   <div class="strip-empty">等待意图事件…</div>
+                </div>
+                <div class="tx-actions">
+                  <button data-intent-toggle>⚡ 判别中</button>
                 </div>
               </div>
             </div>

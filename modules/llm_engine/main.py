@@ -37,6 +37,13 @@ class LLMModule(BaseModule):
                 "title": "意图识别 / 指令翻译",
             },
         ]
+        # 运行时开关：用户可在 dashboard 顶栏 toggle ON/OFF。OFF 时收到 av/audio/command
+        # 直接丢弃，不调 ollama 不发 av/llm/event。默认 ON 保留当前演示链路；改默认改
+        # config llm.enabled_default。
+        # 必须在 super().__init__ 之前设：BaseModule.__init__ 构造 LWT 时立即调
+        # self._discovery_payload("offline")，子类重写版会引用 self.enabled。
+        self.enabled = bool(cfg.get("llm", {}).get("enabled_default", True))
+
         super().__init__("llm_engine", cfg, streams=streams)
 
         # 创建引擎
@@ -47,15 +54,37 @@ class LLMModule(BaseModule):
         self.subscribe(cfg.get("mqtt", {}).get("topics", {}).get("audio_command", "av/audio/command"))
         # 向后兼容：允许直接向 av/llm/command 注入文本（测试 / 手动调用）
         self.subscribe("av/llm/command")
+        # 运行时开关命令：dashboard toggle → POST /mqtt/publish av/llm/cmd {action: enable|disable}
+        self.subscribe("av/llm/cmd")
 
         signal.signal(signal.SIGINT, lambda s, f: self.stop())
         signal.signal(signal.SIGTERM, lambda s, f: self.stop())
 
-        self.logger.info(f"LLM Engine 初始化完成，Ollama: {self.engine.url}")
+        self.logger.info(f"LLM Engine 初始化完成，Ollama: {self.engine.url}，意图判断: {'ON' if self.enabled else 'OFF'}")
+
+    def _discovery_payload(self, event: str) -> dict:
+        # 在公告里带 enabled，让前端 header toggle 实时同步当前状态
+        payload = super()._discovery_payload(event)
+        payload["enabled"] = self.enabled
+        return payload
 
     def _handle_message(self, topic: str, payload: dict) -> None:
-        """处理MQTT消息。av/audio/command 和 av/llm/command 都触发 process_command。"""
+        """av/audio/command 和 av/llm/command 触发 process_command；av/llm/cmd 是开关。"""
+        if topic == "av/llm/cmd":
+            inner = payload.get("payload", payload) if isinstance(payload, dict) else {}
+            action = inner.get("action") or (payload.get("action") if isinstance(payload, dict) else None)
+            if action in ("enable", "disable"):
+                new_state = (action == "enable")
+                if new_state == self.enabled:
+                    return
+                self.enabled = new_state
+                self.logger.info(f"意图判断 {'已开启' if new_state else '已关闭'}")
+                self._publish_discovery("online")  # 让前端 toggle 立即同步
+            return
         if "audio/command" in topic or "llm/command" in topic:
+            # OFF 时直接丢弃（用户原则"不开就不动"）
+            if not self.enabled:
+                return
             # av/audio/command 只含 final，但做一次防御性检查
             inner = payload.get("payload", {}) or {}
             if inner.get("is_final") is False:

@@ -50,16 +50,47 @@ class AudioModule(BaseModule):
                 "title": "已定稿（含标点）",
             },
         ]
+        # 运行时麦克风开关：dashboard "停止" 按钮 → POST /mqtt/publish av/audio/cmd
+        # 默认 ON（开机后立即转写）。disable 时 processor.stop() 释放 mic + WS；enable 重启。
+        # 必须在 super().__init__ 之前设：BaseModule.__init__ 构造 LWT 时立即调
+        # self._discovery_payload("offline")，子类重写版会引用 self.running。
+        self.running = True
+
         super().__init__("audio_processor", cfg, streams=streams)
         self._topics = topics
         self.processor = AudioProcessor(cfg.get("audio", {}))
+        self.subscribe("av/audio/cmd")
 
         signal.signal(signal.SIGINT, lambda s, f: self.stop())
         signal.signal(signal.SIGTERM, lambda s, f: self.stop())
 
+    def _discovery_payload(self, event: str) -> dict:
+        # 公告里带 running 状态供前端 toggle 同步
+        payload = super()._discovery_payload(event)
+        payload["running"] = self.running
+        return payload
+
     def _handle_message(self, topic: str, payload: dict) -> None:
-        # 语意理解模块当前不消费任何下行 topic
-        pass
+        if topic == "av/audio/cmd":
+            inner = payload.get("payload", payload) if isinstance(payload, dict) else {}
+            action = inner.get("action") or (payload.get("action") if isinstance(payload, dict) else None)
+            if action == "disable" and self.running:
+                self.logger.info("收到 disable，停止麦克风采集 + 转写")
+                try:
+                    self.processor.stop()
+                except Exception as e:
+                    self.logger.warning(f"processor.stop 异常: {e}")
+                self.running = False
+                self._publish_discovery("online")
+            elif action == "enable" and not self.running:
+                self.logger.info("收到 enable，恢复麦克风采集 + 转写")
+                try:
+                    self.processor.start(callback=self._on_transcript)
+                except Exception as e:
+                    self.logger.warning(f"processor.start 异常: {e}")
+                    return
+                self.running = True
+                self._publish_discovery("online")
 
     def start(self) -> None:
         super().start()
