@@ -1468,6 +1468,144 @@
         setTimeout(() => document.body.removeChild(a), 100);
       };
     }
+    const sumBtn = document.querySelector("[data-tx-summary]");
+    if (sumBtn) sumBtn.onclick = () => generateSummary(sumBtn);
+  }
+
+  // ── 纪要生成（C 档双路：弹窗即时翻阅 + summaries/ JSON 留档） ───────
+  function gatherTranscriptText() {
+    const card = document.querySelector('[data-overview="transcript"] .strip-card-body');
+    if (!card) return { text: "", durationSec: 0 };
+    const finals = card.querySelectorAll(".tx-para .finals");
+    const parts = [];
+    finals.forEach(el => {
+      const t = el.textContent || "";
+      if (t.trim()) parts.push(t);
+    });
+    // 用第一段时间戳估算时长（仅用于元数据，不影响 LLM 调用）
+    const firstTsEl = card.querySelector(".tx-para .tx-ts");
+    let durationSec = 0;
+    if (firstTsEl) {
+      const m = firstTsEl.textContent.match(/(\d+):(\d+):(\d+)/);
+      if (m) {
+        const start = (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]);
+        const now = new Date();
+        const end = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+        durationSec = Math.max(0, end - start);
+      }
+    }
+    return { text: parts.join("\n"), durationSec };
+  }
+
+  async function generateSummary(btn) {
+    const { text, durationSec } = gatherTranscriptText();
+    if (text.length < 30) {
+      alert("当前转写内容太少，至少需要 30 字才能生成纪要");
+      return;
+    }
+    const modal = openSummaryModal({ loading: true });
+    btn.disabled = true;
+    try {
+      const r = await fetch("/audio/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript: text, duration_sec: durationSec })
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.ok) {
+        renderSummaryError(modal, data.error || `HTTP ${r.status}`);
+        return;
+      }
+      renderSummary(modal, data);
+    } catch (e) {
+      renderSummaryError(modal, String(e));
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function openSummaryModal({ loading }) {
+    closeSummaryModal();  // 防止重叠
+    const modal = document.createElement("div");
+    modal.className = "summary-modal";
+    modal.innerHTML = `<div class="summary-card${loading ? " loading" : ""}">
+      ${loading ? "✦ 正在生成纪要…<br><span style='font-size:11px'>（qwen3.5:4b · 约 5-15 秒）</span>" : ""}
+    </div>`;
+    modal.onclick = (e) => { if (e.target === modal) closeSummaryModal(); };
+    document.body.appendChild(modal);
+    return modal;
+  }
+
+  function closeSummaryModal() {
+    document.querySelectorAll(".summary-modal").forEach(m => m.remove());
+  }
+
+  function escHtmlSafe(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
+
+  function renderSummary(modal, data) {
+    const card = modal.querySelector(".summary-card");
+    card.classList.remove("loading");
+    const ptsHtml = (data.points || []).map(p => `<li>${escHtmlSafe(p)}</li>`).join("");
+    const kwsHtml = (data.keywords || []).map(k => `<span class="kw">${escHtmlSafe(k)}</span>`).join("");
+    const dur = data.duration_sec ? `${Math.round(data.duration_sec / 60)} 分钟 · ` : "";
+    const fileMeta = data.file ? `已留档 summaries/${escHtmlSafe(data.file)}` : "";
+    card.innerHTML = `
+      <h2>${escHtmlSafe(data.title)}</h2>
+      <div class="summary-meta">${dur}${data.id} · ${fileMeta}</div>
+      <p class="sm-summary">${escHtmlSafe(data.summary)}</p>
+      <h3>关键点</h3>
+      <ul class="sm-points">${ptsHtml}</ul>
+      <h3>关键词</h3>
+      <div class="sm-keywords">${kwsHtml}</div>
+      <div class="summary-actions">
+        <button data-sm-copy>📋 复制 Markdown</button>
+        <button data-sm-md>💾 下载 .md</button>
+        <button data-sm-close class="close">关闭</button>
+      </div>
+    `;
+    const md = summaryToMarkdown(data);
+    card.querySelector("[data-sm-copy]").onclick = async () => {
+      try { await navigator.clipboard.writeText(md); flashBtn(card.querySelector("[data-sm-copy]"), "✓ 已复制"); }
+      catch { alert("复制失败 — 浏览器可能未授权剪贴板权限"); }
+    };
+    card.querySelector("[data-sm-md]").onclick = () => {
+      const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `summary-${data.id}.md`;
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+    };
+    card.querySelector("[data-sm-close]").onclick = closeSummaryModal;
+  }
+
+  function renderSummaryError(modal, msg) {
+    const card = modal.querySelector(".summary-card");
+    card.classList.remove("loading");
+    card.innerHTML = `
+      <h2>纪要生成失败</h2>
+      <div class="summary-error">${escHtmlSafe(msg)}</div>
+      <div class="summary-actions">
+        <button data-sm-close class="close">关闭</button>
+      </div>`;
+    card.querySelector("[data-sm-close]").onclick = closeSummaryModal;
+  }
+
+  function flashBtn(btn, msg) {
+    const old = btn.textContent;
+    btn.textContent = msg;
+    setTimeout(() => { btn.textContent = old; }, 1200);
+  }
+
+  function summaryToMarkdown(d) {
+    const points = (d.points || []).map(p => `- ${p}`).join("\n");
+    const keywords = (d.keywords || []).join(" · ");
+    return `# ${d.title}\n\n` +
+           `**${d.id}** · ${d.duration_sec ? Math.round(d.duration_sec/60) + ' 分钟' : ''}\n\n` +
+           `## 摘要\n${d.summary}\n\n` +
+           `## 关键点\n${points}\n\n` +
+           `## 关键词\n${keywords}\n\n` +
+           `---\n\n## 转写全文\n${d.transcript || ''}\n`;
   }
 
   // ── 意图判断 toggle（在意图卡 module-body 底部按钮条） ─────────────

@@ -66,3 +66,6 @@ htmlcov/
 # 临时实验
 creator_ai_platform_intro.html
 config/system_config.yaml
+
+# 纪要留档（C 档：知识库源 — 用户私有数据不入仓库）
+summaries/

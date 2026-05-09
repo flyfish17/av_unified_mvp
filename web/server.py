@@ -11,10 +11,13 @@ web/server.py
     GET /events/discovery       模块公告流（驱动前端动态面板）
     POST /mock/<channel>        推一条 fake event；body 即 payload
 """
+import datetime
 import json
 import logging
 import os
+import pathlib
 import queue
+import re
 import threading
 from collections import defaultdict
 from typing import Callable, Dict, List, Optional
@@ -230,6 +233,117 @@ def mqtt_publish_proxy():
         return {"ok": False, "error": "topic must start with av/"}, 403
     _mqtt_publish(topic, payload)
     return {"ok": True, "topic": topic}
+
+
+# ── 纪要生成（C 档：双路输出 — 弹窗 + JSON 留档知识库） ─────────────────
+# 一次 LLM 调用拿结构化字段；写到 ${project}/summaries/<id>-<title>.json 留档；
+# 同步返回给前端用于弹窗展示。
+_PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
+_SUMMARIES_DIR = _PROJECT_ROOT / "summaries"
+
+# qwen3.5:4b 默认 thinking mode；末尾 /no_think 关掉（68bc510 已确认）
+_SUMMARY_PROMPT = """你是会议纪要助手。下面是一段语音转写文本，请生成一份结构化纪要。
+
+输出严格要求：
+- title：6-15 字，反映核心主题
+- summary：50-100 字一段话，提炼核心观点
+- points：3-5 条，每条 10-30 字，覆盖讨论要点
+- keywords：3-6 个名词性短语，便于后期检索
+
+只输出 JSON 一行，不要解释，不要 markdown 代码块：
+{{"title":"...","summary":"...","points":["...","..."],"keywords":["...","..."]}}
+
+转写文本：
+{transcript}
+
+/no_think"""
+
+
+def _extract_json(text: str) -> dict:
+    """容错 JSON 提取（仿 llm_engine.engine._parse_json）。
+    qwen3.5:4b 偶尔会带 ```json``` markdown 包裹或前后多余文本。"""
+    if not text:
+        raise ValueError("LLM 返回空内容")
+    text = re.sub(r"```(?:json)?", "", text).strip()
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    if start >= 0 and end > start:
+        return json.loads(text[start:end])
+    raise ValueError(f"未找到 JSON 块；原始：{text[:120]}")
+
+
+def _call_ollama_summary(transcript: str, model: str = "qwen3.5:4b", timeout: int = 60) -> dict:
+    """调 ollama 生成纪要。**不用 format=json**：实测 qwen3.5:4b + format=json 返回 response
+    字段为空（DEV PLAN 已记 qwen3 thinking mode 坑 + format=json 复合问题）；改用
+    engine._ask 同款策略：prompt 末尾 `/no_think`，输出文本后 _extract_json 容错提取。"""
+    import requests
+    s = requests.Session()
+    s.trust_env = False  # 绕系统代理（DEV PLAN 已知坑）
+    prompt = _SUMMARY_PROMPT.format(transcript=transcript)
+    r = s.post(
+        "http://127.0.0.1:11434/api/generate",
+        json={
+            "model": model,
+            "prompt": prompt,  # prompt 内末尾已含 /no_think
+            "stream": False,
+            "think": False,
+            "options": {"temperature": 0.3, "num_predict": 800},
+        },
+        timeout=timeout,
+    )
+    r.raise_for_status()
+    raw = (r.json() or {}).get("response", "")
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    if not raw:
+        raise ValueError("LLM 返回空（可能 /no_think 未生效或 model 不支持）")
+    return _extract_json(raw)
+
+
+@_app.post("/audio/summary")
+def audio_summary():
+    """生成纪要：调 ollama 获结构化 JSON → 写文件 + 返回前端弹窗。
+
+    body: {transcript: "全文...", duration_sec: 180}
+    """
+    body = _flask.request.get_json(force=True, silent=True) or {}
+    transcript = (body.get("transcript") or "").strip()
+    if len(transcript) < 30:
+        return {"ok": False, "error": "转写文本太短（需至少 30 字）"}, 400
+
+    try:
+        result = _call_ollama_summary(transcript)
+    except Exception as e:
+        logger.warning(f"summary LLM 调用失败：{e}")
+        return {"ok": False, "error": f"LLM 调用失败：{e}"}, 502
+
+    now = datetime.datetime.now()
+    summary = {
+        "id": now.strftime("%Y%m%d-%H%M%S"),
+        "ts": now.timestamp(),
+        "duration_sec": int(body.get("duration_sec") or 0),
+        "title": str(result.get("title") or "（无标题）")[:50],
+        "summary": str(result.get("summary") or ""),
+        "points": [str(x) for x in (result.get("points") or [])][:8],
+        "keywords": [str(x) for x in (result.get("keywords") or [])][:10],
+        "transcript": transcript,
+        "model": "qwen3.5:4b",
+        "version": "1.0",
+    }
+
+    # B 路：留档到 summaries/<id>-<safe_title>.json（知识库源）
+    try:
+        _SUMMARIES_DIR.mkdir(exist_ok=True)
+        safe_title = re.sub(r'[^\w一-龥\-]+', '_', summary["title"])[:30] or "untitled"
+        fn = f"{summary['id']}-{safe_title}.json"
+        with open(_SUMMARIES_DIR / fn, "w", encoding="utf-8") as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+        summary["file"] = fn
+        logger.info(f"纪要已留档：summaries/{fn}")
+    except Exception as e:
+        logger.warning(f"summary 写文件失败：{e}")
+
+    # A 路：返回给前端弹窗
+    return {"ok": True, **summary}
 
 
 @_app.post("/system/shutdown")
