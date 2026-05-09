@@ -124,7 +124,7 @@ class MjpegHandler(BaseHTTPRequestHandler):
         try:
             while True:
                 cur_status = (proc.get_stream_status() if proc else {}).get(name)
-                # 状态变成 stopped 或被 reload 清掉 → 主动断流
+                # 状态变成 stopped 或被 reload 清掉 → 主动断流（合法的 EOF 信号）
                 if cur_status not in ("connecting", "ok"):
                     break
                 jpg = proc.get_latest_jpeg(name, mode=mode) if proc else None
@@ -132,14 +132,21 @@ class MjpegHandler(BaseHTTPRequestHandler):
                     time.sleep(0.05)
                     continue
                 cur_hash = id(jpg)
-                if cur_hash == last_hash:
+                is_new = cur_hash != last_hash
+                if is_new:
+                    last_hash = cur_hash
+                    idle_count = 0
+                else:
+                    # 旧版逻辑：60 帧（~4s）相同就 break stream → Chrome 收到 multipart EOF
+                    # 有概率不触发 onerror，img 卡死，4 路并发时 6-connection limit + 重连竞争
+                    # 失败累积 → "陆续黑掉必须刷新"。改为：stale 时仍每秒推一帧旧 jpg 作为心跳
+                    # 保活 multipart 长连。Chrome 收到 boundary 即触发 onload，前端 watchdog 永
+                    # 不超时。client 主动断开会抛 BrokenPipeError 自然清理；status 真 stopped 才
+                    # break。
                     idle_count += 1
-                    if idle_count > 60:
-                        break
-                    time.sleep(1 / 15)
-                    continue
-                last_hash = cur_hash
-                idle_count = 0
+                    if idle_count % 15 != 0:
+                        time.sleep(1 / 15)
+                        continue
                 self.wfile.write(b"--frame\r\n")
                 self.wfile.write(b"Content-Type: image/jpeg\r\n\r\n")
                 self.wfile.write(jpg)

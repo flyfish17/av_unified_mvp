@@ -305,13 +305,13 @@
     }
   }
 
-  // 当前视频墙签名（源名+启停态） → 用于决定是否重建 DOM
-  let lastWallSig = "";
-  function wallSignature() {
-    return wallSlots.map(s => {
-      const ep = s.sourceName ? videoEndpointsCache.find(e => e.name === s.sourceName) : null;
-      return `${s.idx}:${ep ? ep.name + (ep.enabled ? "+" : "-") : "_"}:${s.zoomed ? "Z" : ""}`;
-    }).join("|") + "@" + videoEndpointsCache.map(e => e.name + (e.enabled ? "+" : "-")).join(",");
+  // 单个 slot 签名：只反映该 slot 自己关心的状态。
+  // 旧版用全局 wallSignature（含全部 endpoints enabled），任一路启停就让全 4 路 sig 变 →
+  // renderWall 全量重建 DOM → 4 路 multipart MJPEG 同时被打断（Chrome 立即重连有缓存怪行为，
+  // 实测"不刷新不恢复"全黑）。改成 per-slot sig 后，只有真正变化的 tile 重建，其它三路保持流不动。
+  function slotSignature(slot, ep) {
+    if (!ep) return `_:${slot.zoomed ? "Z" : ""}`;
+    return `${ep.name}:${ep.enabled ? "+" : "-"}:${ep.status || ""}:${slot.zoomed ? "Z" : ""}`;
   }
 
   // ── 视频墙逻辑 ───────────────────────────────────────────────────────
@@ -395,13 +395,14 @@
   function renderWall() {
     const wall = document.getElementById("video-wall");
     if (!wall) return;
-    const sig = wallSignature();
-    if (sig === lastWallSig) return;  // 没变就别动 DOM，不打断 multipart 流
-    lastWallSig = sig;
     wallSlots.forEach(slot => {
       const tileEl = wall.querySelector(`[data-slot="${slot.idx}"]`);
       if (!tileEl) return;
       const ep = slot.sourceName ? videoEndpointsCache.find(e => e.name === slot.sourceName) : null;
+      // per-slot 缓存比较：状态没变就跳过此 tile，保留它的 multipart 流
+      const sig = slotSignature(slot, ep);
+      if (tileEl.dataset.sig === sig) return;
+      tileEl.dataset.sig = sig;
       if (!ep) {
         tileEl.className = "tile empty";
         tileEl.innerHTML =
