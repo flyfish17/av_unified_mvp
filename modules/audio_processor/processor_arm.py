@@ -95,6 +95,10 @@ class AudioProcessorARM:
 
         # 诊断
         self._pcm_frames_received = 0
+        # rms debug：每 N 帧 print 一次平均 rms，便于诊断"mic 是否收到声音"+"阈值是否合理"
+        # 60ms/帧 × 50 = 3s 一行；rms 0.01 是 VAD speaking 阈值
+        self._rms_debug_interval = 50
+        self._rms_debug_buf: list = []
 
     # ── Public API ────────────────────────────────────────────────────
 
@@ -175,6 +179,16 @@ class AudioProcessorARM:
         )
         gained_f32 = filtered_f32 * self._denoise_gain
         rms = float(np.sqrt(np.mean(gained_f32 ** 2)))
+        # rms debug：每 N 帧 print 一次 min/max/mean，看 mic 是否真在收声 + 阈值合理性
+        self._rms_debug_buf.append(rms)
+        if len(self._rms_debug_buf) >= self._rms_debug_interval:
+            rms_arr = np.array(self._rms_debug_buf)
+            logger.info(
+                f"[rms] {self._rms_debug_interval}帧({self._rms_debug_interval*self.chunk_ms}ms): "
+                f"min={rms_arr.min():.4f} mean={rms_arr.mean():.4f} max={rms_arr.max():.4f} "
+                f"(阈值 {self.silence_threshold:.4f})"
+            )
+            self._rms_debug_buf = []
 
         # 环形 buffer（int16 字节）— 供 /audio/export.wav
         pcm_i16 = np.clip(gained_f32 * 32768.0, -32768.0, 32767.0).astype(np.int16)
