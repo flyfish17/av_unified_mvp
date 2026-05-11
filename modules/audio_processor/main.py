@@ -11,6 +11,7 @@ modules/audio_processor/main.py
 """
 import io
 import logging
+import os
 import signal
 import sys
 import threading
@@ -24,7 +25,15 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.base_module import BaseModule
-from modules.audio_processor.processor import AudioProcessor, TranscriptEvent
+
+# Backend 切换：默认 funasr_2pass（Mac），AV_ASR_BACKEND=sense_voice_arm 切 ARM 路径（3588）
+_ASR_BACKEND = os.environ.get("AV_ASR_BACKEND", "funasr_2pass").strip()
+if _ASR_BACKEND == "sense_voice_arm":
+    from modules.audio_processor.processor_arm import AudioProcessorARM as AudioProcessor
+    from modules.audio_processor.processor import TranscriptEvent  # 共享 dataclass
+    logging.getLogger(__name__).info("使用 ARM 路径：SenseVoiceSmall + VAD 分段 + 流式降噪")
+else:
+    from modules.audio_processor.processor import AudioProcessor, TranscriptEvent
 
 AUDIO_HTTP_PORT = 5052
 
