@@ -105,11 +105,16 @@ class AudioProcessorARM:
     def start(self, callback: Optional[Callable[[TranscriptEvent], None]] = None) -> None:
         self._callback = callback
         self._stop_event.clear()
-        # worker 先起，准备好接队列再开 mic（避免 mic 帧涌入 + 队列还没 drain）
+        # 关键：必须先加载模型（阻塞 3-4s）再开 mic stream。
+        # 若并行启动，alsa USB buffer 在模型加载期间填满 → sounddevice callback 假死
+        # （已被 demo cache_resource 顺序证实，processor_arm 首版踩过这坑）
+        self._load_model()
+        # worker 只负责 VAD + inference 循环（模型已就位）
         self._worker_thread = threading.Thread(
             target=self._worker_loop, name="asr_worker", daemon=True
         )
         self._worker_thread.start()
+        # 模型 ready 后才开 mic，第一帧 PCM 立刻能进 worker 处理，无阻塞窗口
         self._stream = sd.InputStream(
             device=self._mic_device,
             samplerate=self.sample_rate,
@@ -211,12 +216,7 @@ class AudioProcessorARM:
                 pass
 
     def _worker_loop(self) -> None:
-        try:
-            self._load_model()
-        except Exception as e:
-            logger.error(f"模型加载失败，worker 退出: {e}")
-            return
-
+        # 模型在 start() 已加载好，这里直接进 VAD/inference 循环
         buf = []
         speaking = False
         silence_count = 0
