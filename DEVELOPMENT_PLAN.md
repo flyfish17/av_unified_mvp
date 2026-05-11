@@ -14,7 +14,7 @@
 | 启动入口 | `./start.command`（双击 or `bash`），自动起 mosquitto + funasr-2pass + Node-RED + main.py + 浏览器 |
 | 浏览器地址 | `http://localhost:5050`（dashboard）, `http://localhost:1880`（Node-RED） |
 | **当前主线** | **R1–R6 订阅式架构演进**（见 §10），总工期 4.5 天 |
-| **当前进度** | **阶段一完成 ✅**（端到端打通 + 跨品牌桥接 + r28-snapshot 推 GitHub）。**明天起转阶段二：子模块精进 sprint**（路径见 §11）。当前最近回合是 29，下个回合 30 起按 Sprint A/B/C... 编号 |
+| **当前进度** | **阶段一 ✅** + **巩固冲刺 K1-K5+K8 ✅** + **辽河 3588 sprint 进行中**（2026-05-11 启动，分支 `sprint/liaohe-3588`，回滚锚点 tag `pre-liaohe-sprint-2026-05-11`）。阶段 1 Mac 讯飞观感 baseline ✅ 完成（1.1 partial 逐字蹦 + 1.2 流式降噪 + 1.3 final 定稿动画）。**下一步进阶段 2：3588 端转写复刻 + 三阈值判定**。完整 plan 文件：`~/.claude/plans/3588-demo-1-50-mac-3588-3588-2-3588-ai-streamed-riddle.md` |
 | 下一步具体动作 | 见 §11 下次切入点 |
 | 已完成历史 | P0 离线 / P1 模块统一 / P2 Node-RED / P3 拆 SSE / Bug A/B / 联调 — 详见 §5 简报 |
 | 计划文件 | `./PLAN_R1_R6_subscription.md`（R1-R6 详细设计，跟随项目同步） |
@@ -1557,7 +1557,7 @@ iCloud 源项目目录下原本有两个文件名直接含真实 API key 的 .tx
 
 | Sprint | 子模块 | 工时 | 演示价值 |
 |---|---|---|---|
-| **A. partial 逐词追加渲染** | audio_processor + 前端 transcript_seq.js | 半天 | 转写"逐字蹦"对标讯飞观感 |
+| **A. partial 逐词追加渲染** ✅ | audio_processor + 前端 transcript_seq.js | 半天 | 转写"逐字蹦"对标讯飞观感（commit ea4216b 2af83e2 f154ea9，2026-05-11 完成） |
 | **B. creator 分布式 driver** | modules/creator_distributed（待启） | 1h | 视频墙开窗/切源/预案完整桥接 — **前提**：user 让出 :12121 session |
 | **C. husion 辅模式 — 事件回传** | husion_distributed 扩展 | 1-2h | "AI 检测结果反馈给原厂家"完整闭环 — **前提**：user 确认 husion 那侧接收方式 |
 
