@@ -17,6 +17,7 @@ from functools import partial
 from typing import Callable, Optional
 
 import numpy as np
+import scipy.signal as signal
 import sounddevice as sd
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,15 @@ class AudioProcessor:
         self._send_q: "queue.Queue[Optional[bytes]]" = queue.Queue(maxsize=64)
         self._loop_thread: Optional[threading.Thread] = None
         self._stream: Optional[sd.InputStream] = None
+
+        # 降噪前处理流水线（流式适配版）：
+        # - 100Hz 10阶 Butterworth 高通：去 50/60Hz 电源嗡 + 空调低频共振 + 风噪 buffeting
+        # - 1.5x 增益：弱声场补偿（demo 3588 同款）
+        # sosfilt running state 跨 chunk 续帧，避免每 60ms 段头出现 filter transient 咔嗒声。
+        # noisereduce 谱减法是 offline 段处理（demo 用 1.2s VAD 切段），不适合我们的流式架构。
+        self._denoise_hp_sos = signal.butter(10, 100, btype='hp', fs=self.sample_rate, output='sos')
+        self._denoise_hp_zi = np.zeros((self._denoise_hp_sos.shape[0], 2), dtype=np.float32)
+        self._denoise_gain = 1.5
 
         # local_offline 参数
         self.silence_threshold = float(funasr.get("silence_threshold", 0.008))
@@ -220,7 +230,15 @@ class AudioProcessor:
         self._pcm_frames_received += 1
         if self._pcm_frames_received == 1:
             logger.info(f"[mic] 第 1 帧 PCM 已收到 ({frames} samples) — 麦克风正常工作")
-        pcm = indata[:, 0].tobytes()
+        # 降噪流水线：HP 滤波（去低频嗡/风噪/电源嗡）+ 1.5x 增益。
+        # 流式 sosfilt 续 state，跨 chunk 无 transient；不替代 FunASR 内部 VAD/特征。
+        samples_f32 = indata[:, 0].astype(np.float32) / 32768.0
+        filtered_f32, self._denoise_hp_zi = signal.sosfilt(
+            self._denoise_hp_sos, samples_f32, zi=self._denoise_hp_zi
+        )
+        gained_f32 = filtered_f32 * self._denoise_gain
+        pcm_i16 = np.clip(gained_f32 * 32768.0, -32768.0, 32767.0).astype(np.int16)
+        pcm = pcm_i16.tobytes()
         # 写环形 buffer（旁路 tee，不影响 send_q 流向 FunASR）
         with self._pcm_ring_lock:
             self._pcm_ring.append(pcm)
