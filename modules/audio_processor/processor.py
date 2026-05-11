@@ -103,6 +103,19 @@ class AudioProcessor:
 
     def start(self, callback: Optional[Callable[[TranscriptEvent], None]] = None):
         self._callback = callback
+        # 重置 stop_event + 上次会话残留 state，防 disable→enable 时新 ws/watchdog/send 线程
+        # 一启动就因 _stop_event 仍 set 而即时退出（5/11 销售来访 15:05 enable 后 6.5min 静默假活的根因）。
+        self._stop_event.clear()
+        # send_q 在 stop() 时 put 了 None 哨兵 + 可能还有未发的 PCM；不 drain 重启第一个被
+        # _send_loop 取走的就是 None → 发 is_speaking:false 给 funasr → server 视为流结束。
+        while True:
+            try:
+                self._send_q.get_nowait()
+            except queue.Empty:
+                break
+        self._pcm_frames_received = 0
+        self._mic_self_check_done = False
+        self._last_partial = ""
         if self.mode == "local_offline":
             self._start_local_offline()
             return
