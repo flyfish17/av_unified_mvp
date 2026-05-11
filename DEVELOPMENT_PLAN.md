@@ -1964,3 +1964,75 @@ ollama create qwen3.5:4b -f /tmp/Modelfile_qwen3_4b
 - 本次涉及文件：`modules/llm_engine/engine.py`（白名单 + /no_think + prompt 规则 6）、`config/system_config.example.yaml`（同步模型名）。`config/system_config.yaml` 本地已改但 .gitignore 不入库
 - av 全栈仍在跑（mosquitto / Node-RED / main.py / funasr-2pass）；ollama 已加载 qwen3.5:4b（3.5 GB）
 
+### 2026-05-11 双线推进 — Mac 假活 bug 修复 + Jetson Orin Nano 阶段 2 落地
+
+**Mac 主线修复**（commit 5418467）
+
+5/11 上午真销售来访 22min（导出到 `~/Downloads/summary-20260511-150528.md`，业务价值充分讨论）。15:04:25 user 按"停止"导出转写，15:05:05 重新启用，**之后 6.5min 一行 [final] 都没出**；15:11/15:52 又试两轮 disable/enable 仍 0 finals（127→0 落差铁证）。
+
+根因：`modules/audio_processor/processor.py:130 stop()` 设 `_stop_event`，但 `start()` **不 clear** → 新 `_supervise_ws` / `_send_loop` / `_mic_watchdog` 三线程一启动就因 `while not _stop_event.is_set()` 立即退出，mic 跑着但 WS 没人接 = 完美"假活"。日志上 `录音流已启动` + `FunASR 2pass 客户端已启动` 两行 print 误导成功假象。
+
+修法（`processor.py:104 start()` 入口加 13 行）：
+- `_stop_event.clear()`
+- drain `_send_q`（不 drain 重启第一帧取到 stop() 塞的 None 哨兵 → 给 funasr 发 `is_speaking:false` 视为流结束）
+- 重置 `_pcm_frames_received` / `_mic_self_check_done` / `_last_partial`
+
+验证：SIGTERM PID 4229 → supervisor 重拉 PID 5454 加载新代码 → 16:06:21 [final] 复活。
+
+横向影响：`processor_arm.py` 已正确 clear（commit 0dd9b1a），不影响 ARM 路径。
+
+**Jetson Orin Nano 阶段 2 落地**（commit 4b79332，硬件备选短名单 #1 平行验证）
+
+辽河 3588 sprint 退出条件设计的"路径错就换硬件"原则下，Jetson Orin Nano（`jetson@192.168.5.51`，JetPack 6.1 / CUDA 12.6 / 7.4G RAM）作平行测试。
+
+PoC 一路踩坑：
+1. **CUDA 不可用**：旧用户级 `torch 2.11.0+cu130` 是 pip 直拉的通用 wheel（带 nvidia_cublas-13.1 等 CUDA 13 deps），driver 12.6 不向后兼容 CUDA 13 → 假装可用实际崩。
+2. **NVIDIA JP6.1 wheel index 只有 torch 一个 wheel**，无 torchaudio/torchvision 预编译。
+3. **PyPI torchaudio 全版本 ABI 不兼容** NVIDIA torch（`undefined symbol _ZNK5torch8autograd4Node4nameEv` — NVIDIA 用自定义 gcc/ABI 编译）。
+4. 首轮源编 torchaudio v2.5.0 `BUILD_SOX=0 USE_FFMPEG=0` 卡在 CUDA CTC decoder `.cu` 缺 `<cfloat>` 头致 `FLT_MAX` 未定义（CUDA 12.6 + g++ 11 已知坑）。
+
+修法：
+- 卸装 user-level torch + nvidia/* 系列（释放 3G），自动激活 `/usr/local/lib/python3.10/dist-packages/torch 2.5.0a0+nv24.08`（系统 dist 已自带 NVIDIA wheel，user-level 错装的把它掩盖了）
+- 源编 torchaudio v2.5.0 走 `USE_CUDA=0`（funasr 用 `torchaudio.compliance.kaldi` CPU 算 fbank，不需要 torchaudio 自带 CUDA 内核；模型推理本身仍走 GPU）— 装到 `~/.local/.../torchaudio-2.5.0a0-py3.10-linux-aarch64.egg`
+- 源码 tarball 走 `gh-proxy.com` CN 代理拉 github
+
+`processor_arm.py` 三处增量（commit 4b79332）：
+- mic 识别加 `WebCamera` / `USB Audio` 名匹配（Jetson 接的是 Yahboom OEM 摄像头麦克风）
+- 模型路径默认按主机自适应（3588 路径不存在 → `~/models/SenseVoiceSmall`）
+- `AutoModel(device=cuda|cpu)` 自动 — `torch.cuda.is_available()` 真就走 GPU
+
+实测：
+- SenseVoiceSmall 加载 `device=cuda` **3.9s**（vs 3588 CPU 5-10s）
+- mic 第 1 帧 PCM 正常，环境 rms base 0.0013-0.0020（比 3588 的 0.011-0.018 低一个数量级 — Yahboom mic 增益小）
+- VAD 阈值 0.008（config 默认）暂时合理但靠 mic 远点说话可能触发不了
+- MQTT discovery `running:true` 在 IP 192.168.5.51 心跳正常
+- modelscope 下 SenseVoiceSmall 30s @ 33 MB/s
+
+**两台 NPU 当前状态**
+
+| 项 | 3588 (192.168.5.6) | Jetson (192.168.5.51) |
+|---|---|---|
+| 算力 | RK3588 8核 ARM + NPU（demo 没用） | Orin Nano CUDA 12.6 |
+| RAM | 16G | 7.4G + 11G swap |
+| Python torch stack | demo venv 自带（CPU 跑 SenseVoice） | torch 2.5+nv24.08 + 源编 torchaudio + funasr 1.3.1 全栈 GPU |
+| SenseVoiceSmall 加载 | 5-10s CPU | **3.9s CUDA** |
+| 推理 RTF | 0.8-1.9（接近 1） | 待测（GPU 应 <0.3） |
+| 当前实例 PID | 60037（已跑 >2h） | 588595（新跑，CUDA 模式） |
+| av_unified_mvp 仓库 | `~/av_unified_mvp/` ✅ | `~/av_unified_mvp/` ✅（Mac rsync） |
+
+**未完成 / 下次切入点**
+
+1. **用户对着 Jetson 麦克风说话** — 测 5-10 句 [final] 输出 + 实际 RTF + GPU 利用率（`tegrastats`）+ 与 3588 端到端对比
+2. **三阈值正式验收**（plan 文件 §38-49）：延迟 p95 ≤ 1.5s / 字错率 vs Mac 增加 ≤ 15% / 30min 稳定性
+3. **如果 Jetson 过阈值** → 选 Jetson 走阶段 3 差异化护城河（两级漏斗 LLM + av/control 桥接）；如果 3588 也勉强能过 → 二选一看综合性价比
+4. **阶段 4 辽河方案落底文档**（条件触发，等阶段 2-3 出数据）
+
+**下次接手所需上下文**
+
+- SSH：`SSHPASS=firefly sshpass -e ssh firefly@192.168.5.6`（3588） / `SSHPASS=yahboom sshpass -e ssh jetson@192.168.5.51`（Jetson）
+- Jetson 当前 ASR log：`/tmp/asr_jetson.log`，监 `[final]`
+- 3588 当前 ASR log：`/tmp/asr_arm.log`，PID 60037 已跑 >2h（rms+VAD+少量 final）
+- Mac av 全栈在跑（新 audio_processor PID 5454 已加补丁）
+- 完整 plan 文件：`~/.claude/plans/3588-demo-1-50-mac-3588-3588-2-3588-ai-streamed-riddle.md`
+- Jetson 端 torchaudio 是 user-site `.egg`（不是 .whl），如要重装 `pip3 uninstall -y torchaudio` 不会清干净，需手动 rm `.egg` 文件 + 改 `easy-install.pth`
+
