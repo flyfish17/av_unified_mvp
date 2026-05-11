@@ -58,6 +58,13 @@
       0%   { color: var(--live); text-shadow: 0 0 8px rgba(240, 180, 41, 0.85); }
       100% { color: inherit;     text-shadow: none; }
     }
+    /* 气泡 partial→final 过渡：橙虚线→绿实线 border-color 平滑 + 绿色淡背景闪 */
+    .bubble { transition: border-color 0.3s ease-out, background-color 0.5s ease-out; }
+    .bubble.final { animation: bubble-final-in 0.6s ease-out; }
+    @keyframes bubble-final-in {
+      0%   { background-color: rgba(46, 160, 67, 0.18); }
+      100% { background-color: var(--panel); }
+    }
     footer {
       padding: 10px 20px; border-top: 1px solid var(--line);
       font-size: 12px; color: var(--dim);

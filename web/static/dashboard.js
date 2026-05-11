@@ -712,8 +712,16 @@
     const finalsEl = _txState.para.querySelector(".finals");
     const liveEl   = _txState.para.querySelector(".live");
     if (ev.is_final) {
-      _txState.finalsText += (ev.text || "");
-      finalsEl.textContent = _txState.finalsText;
+      const chunk = ev.text || "";
+      if (chunk) {
+        // final 定稿：包成 tx-final-flash span 追加（绿色短闪 0.5s fade 回主色）
+        // 不再 finalsEl.textContent = 全文（会刷掉前面 span 的动画），改 appendChild
+        const span = document.createElement("span");
+        span.className = "tx-final-flash";
+        span.textContent = chunk;
+        finalsEl.appendChild(span);
+      }
+      _txState.finalsText += chunk;
       liveEl.textContent = "";
       _txState.lastFinalMs = nowMs;
       // 篇幅自然分段：本段已饱和 → 标记下次 final 开新段
