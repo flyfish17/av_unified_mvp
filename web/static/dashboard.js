@@ -668,12 +668,17 @@
     document.getElementById("ticker-net").textContent = `↑${main.sent_kbps} ↓${main.recv_kbps} KB/s`;
   }
 
-  // 转写卡渲染：仿讯飞「讲解稿」观感 — 连续讲话合并到同一段落，停顿 >60s 才换段。
-  // 段头只显示时间戳（说话人 diarization 当前没接，"说话人 1" 占位反而误导，等接
-  // SOND/cam++ 后再加）。每段内部：.finals 累积所有定稿文字 + 末尾 .live 显示当前
-  // partial（灰色斜体），final 时把 partial 文字并入 finals 并清空 live。
-  // PARA_GAP_SEC：超过此时长没新 final 就开新段落。
+  // 转写卡渲染：仿讯飞「讲解稿」观感 — 连续讲话合并到同一段落。
+  // 三条换段触发（按优先级）：
+  //   1. 静音 >60s（PARA_GAP_SEC）— 主题切换；最强信号
+  //   2. 累积 >=250 字 且 当前句以句末标点收尾（。！？!?）— 篇幅自然分段
+  //   3. 累积 >=400 字（HARD_LIMIT）— 硬切兜底，防一段几千字
+  // 段头只显时间戳（diarization 没接前不显示"说话人 1"占位避免误导）。
+  // 段内：.finals 累积定稿 + 末尾 .live 显 partial（灰），final 时并入 finals 清空 live。
   const PARA_GAP_SEC = 60;
+  const PARA_SOFT_LIMIT = 250;
+  const PARA_HARD_LIMIT = 400;
+  const PARA_ENDS_PUNCT = /[。！？!?]\s*$/;
   const _txState = { para: null, finalsText: "", lastFinalMs: 0 };
   function fmtClock(ts) {
     const d = ts ? new Date(ts * 1000) : new Date();
@@ -711,6 +716,12 @@
       finalsEl.textContent = _txState.finalsText;
       liveEl.textContent = "";
       _txState.lastFinalMs = nowMs;
+      // 篇幅自然分段：本段已饱和 → 标记下次 final 开新段
+      const len = _txState.finalsText.length;
+      const endedClean = PARA_ENDS_PUNCT.test(_txState.finalsText);
+      if (len >= PARA_HARD_LIMIT || (len >= PARA_SOFT_LIMIT && endedClean)) {
+        _txState.para = null;
+      }
     } else {
       liveEl.textContent = ev.text || "";
     }
