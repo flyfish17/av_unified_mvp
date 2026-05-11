@@ -33,17 +33,18 @@ _TAG_RE = re.compile(r"<\|[^|]+\|>")
 
 
 def _find_logitech_device() -> object:
-    """优先 C920/Logitech USB mic，找不到 fallback ALSA plughw:2,0（demo 同款策略）。"""
+    """优先 USB mic（C920/Logitech/WebCamera），找不到 fallback ALSA plughw:2,0（demo 同款策略）。"""
+    patterns = ("C920", "Logitech", "WebCamera", "USB Audio")
     try:
         devices = sd.query_devices()
         for i, dev in enumerate(devices):
             name = dev.get("name", "")
-            if ("C920" in name or "Logitech" in name) and dev.get("max_input_channels", 0) > 0:
+            if any(p in name for p in patterns) and dev.get("max_input_channels", 0) > 0:
                 logger.info(f"[mic] 选中 USB 麦克风: {name} (index={i})")
                 return i
     except Exception as e:
         logger.warning(f"[mic] query_devices 异常: {e}")
-    logger.info("[mic] 未找到 Logitech，fallback plughw:2,0")
+    logger.info("[mic] 未找到 USB 麦克风，fallback plughw:2,0")
     return "plughw:2,0"
 
 
@@ -72,8 +73,20 @@ class AudioProcessorARM:
 
         # SenseVoiceSmall 模型（懒加载）
         self._model = None
-        default_path = "/home/firefly/creator_ai_demo/SenseVoiceSmall"
+        # 默认按主机名：firefly → 3588 demo 路径；jetson/其它 → ~/models/SenseVoiceSmall。
+        # 都可被 config audio.funasr.sense_voice_path 覆盖。
+        default_path = (
+            "/home/firefly/creator_ai_demo/SenseVoiceSmall"
+            if Path("/home/firefly/creator_ai_demo/SenseVoiceSmall").exists()
+            else str(Path.home() / "models" / "SenseVoiceSmall")
+        )
         self._model_path = funasr_cfg.get("sense_voice_path", default_path)
+        # device：cuda 可用就 GPU 推理，否则 cpu（3588 无 CUDA 走 CPU；Jetson 走 GPU）
+        try:
+            import torch
+            self._device = "cuda" if torch.cuda.is_available() else "cpu"
+        except Exception:
+            self._device = "cpu"
 
         # mic 设备（可配置）
         self._mic_device = funasr_cfg.get("mic_device") or _find_logitech_device()
@@ -160,15 +173,16 @@ class AudioProcessorARM:
                 "在 config audio.funasr.sense_voice_path 改）"
             )
         from funasr import AutoModel
-        logger.info(f"加载 SenseVoiceSmall: {self._model_path}")
+        logger.info(f"加载 SenseVoiceSmall: {self._model_path} (device={self._device})")
         t0 = time.time()
         self._model = AutoModel(
             model=self._model_path,
             trust_remote_code=True,
             disable_update=True,
             remote_rdonly=True,
+            device=self._device,
         )
-        logger.info(f"SenseVoiceSmall 加载完成（{time.time()-t0:.1f}s）")
+        logger.info(f"SenseVoiceSmall 加载完成（{time.time()-t0:.1f}s, device={self._device}）")
 
     def _on_audio_pcm(self, indata: np.ndarray, frames: int, time_info, status):
         if status:
