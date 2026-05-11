@@ -635,6 +635,13 @@
     }
     .tx-text .finals { color: var(--text); }                 /* 定稿主色 */
     .tx-text .live { color: var(--text-2); opacity: 0.65; }  /* 未定稿灰 */
+    /* partial 逐字追加闪光（讯飞观感）— 新增字符出现瞬间橙黄高亮 0.5s fade 回灰 */
+    .tx-text .live .tx-flash { animation: tx-flash-in 0.5s ease-out; }
+    .bubble .text .tx-flash    { animation: tx-flash-in 0.5s ease-out; }
+    @keyframes tx-flash-in {
+      0%   { color: var(--live); text-shadow: 0 0 8px rgba(240, 180, 41, 0.85); }
+      100% { color: inherit;     text-shadow: none; }
+    }
     /* 转写卡底部按钮条（停止/导出原文/导出原音/生成纪要） */
     .tx-actions {
       display: flex; gap: 8px; padding: 6px 4px 0;

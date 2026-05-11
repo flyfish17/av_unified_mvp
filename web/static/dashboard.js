@@ -722,8 +722,13 @@
       if (len >= PARA_HARD_LIMIT || (len >= PARA_SOFT_LIMIT && endedClean)) {
         _txState.para = null;
       }
-    } else {
-      liveEl.textContent = ev.text || "";
+    } else if (ev.text) {
+      // partial 增量 append：FunASR 2pass-online 每条 ev.text 是一段新词（非累积）
+      // 包成 flash span 追加到 .live，触发逐字蹦橙黄闪光
+      const span = document.createElement("span");
+      span.className = "tx-flash";
+      span.textContent = ev.text;
+      liveEl.appendChild(span);
     }
     card.scrollTop = card.scrollHeight;
   }

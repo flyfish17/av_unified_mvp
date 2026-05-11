@@ -52,6 +52,12 @@
     }
     .bubble.live .meta::before { content: "● 转写中 · "; color: var(--live); }
     .bubble.final .meta::before { content: "✓ 定稿 · "; color: var(--final); }
+    /* partial 逐字追加闪光（讯飞观感）— 新增字符出现瞬间橙黄高亮 0.5s fade */
+    .bubble .text .tx-flash { animation: tx-flash-in 0.5s ease-out; }
+    @keyframes tx-flash-in {
+      0%   { color: var(--live); text-shadow: 0 0 8px rgba(240, 180, 41, 0.85); }
+      100% { color: inherit;     text-shadow: none; }
+    }
     footer {
       padding: 10px 20px; border-top: 1px solid var(--line);
       font-size: 12px; color: var(--dim);
