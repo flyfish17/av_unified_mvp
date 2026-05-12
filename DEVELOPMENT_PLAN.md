@@ -14,7 +14,7 @@
 | 启动入口 | `./start.command`（双击 or `bash`），自动起 mosquitto + funasr-2pass + Node-RED + main.py + 浏览器 |
 | 浏览器地址 | `http://localhost:5050`（dashboard）, `http://localhost:1880`（Node-RED） |
 | **当前主线** | **R1–R6 订阅式架构演进**（见 §10），总工期 4.5 天 |
-| **当前进度** | **阶段一 ✅** + **巩固冲刺 K1-K5+K8 ✅** + **辽河 3588 sprint 进行中**（2026-05-11 启动，分支 `sprint/liaohe-3588`，回滚锚点 tag `pre-liaohe-sprint-2026-05-11`）。阶段 1 Mac 讯飞观感 baseline ✅ 完成（1.1 partial 逐字蹦 + 1.2 流式降噪 + 1.3 final 定稿动画）。**下一步进阶段 2：3588 端转写复刻 + 三阈值判定**。完整 plan 文件：`~/.claude/plans/3588-demo-1-50-mac-3588-3588-2-3588-ai-streamed-riddle.md` |
+| **当前进度** | **阶段一 ✅** + **巩固冲刺 K1-K5+K8 ✅** + **辽河 3588 sprint 阶段 2 ✅**（2026-05-12 收尾，分支 `sprint/liaohe-3588-night-poc-20260511`）。**3588 NPU 路径打通，三阈值全过，国产化破局完成**：端到端 ~400ms、INT8 vs CUDA CER 差异 < 5%、20+ min 稳定。Jetson CUDA 也过线。**下一步进阶段 3：两级漏斗 LLM + av/control 桥接（3588 轻筛 + Jetson 深思 + MQTT 协同）**。完整 plan 文件：`~/.claude/plans/3588-demo-1-50-mac-3588-3588-2-3588-ai-streamed-riddle.md`；5/12 详细工作日志：`NIGHT_REPORT_20260512.md` |
 | 下一步具体动作 | 见 §11 下次切入点 |
 | 已完成历史 | P0 离线 / P1 模块统一 / P2 Node-RED / P3 拆 SSE / Bug A/B / 联调 — 详见 §5 简报 |
 | 计划文件 | `./PLAN_R1_R6_subscription.md`（R1-R6 详细设计，跟随项目同步） |
@@ -2035,4 +2035,125 @@ PoC 一路踩坑：
 - Mac av 全栈在跑（新 audio_processor PID 5454 已加补丁）
 - 完整 plan 文件：`~/.claude/plans/3588-demo-1-50-mac-3588-3588-2-3588-ai-streamed-riddle.md`
 - Jetson 端 torchaudio 是 user-site `.egg`（不是 .whl），如要重装 `pip3 uninstall -y torchaudio` 不会清干净，需手动 rm `.egg` 文件 + 改 `easy-install.pth`
+
+### 2026-05-11–12 多端部署 + start.command 加 RAM 自适应
+
+**做了什么**
+
+- airblue（M2/16GB/macOS 26.3.1，公司+家用切换）跑通全栈 medium：Ollama qwen3.5:4b + funasr-2pass Docker + 全模块 + 全 4 路摄像头（公司 5.* 网段 RTSP）
+- 8GB Air @ 192.168.5.146（tongyong）跑通 light：本地 SenseVoice + qwen3.5:2b-q4_K_M + 仅本机摄像头
+- `start.command` 加 1.5 节"RAM 自适应"：<6GB 拒绝启动；<10GB 自动改 config 三件事（profile=light + audio mode=local_offline + LLM model=qwen3.5:2b-q4_K_M）+ 关掉 RTSP 留本机摄像头；改前自动备份 `config/system_config.yaml.bak.<ts>`。只降不升，尊重用户主动选 light 省内存
+- `start.command` 顶部加 `source .venv/bin/activate`，让 python3 有 PyYAML 自适应能用，main.py 也走 venv 而非系统 3.9
+- `engine.py` fallback 默认 model 从 `qwen3.5:9b` 改 `qwen3.5:4b`（cosmetic，config 已写死时不触发）
+
+**关键经验**
+
+1. **macOS TCC 权限按"启动 app"颗粒**——SSH 启动的 python 进程拿不到 camera 权限（mic 看着能拿，camera 严格）。所有部署最后一步**必须用户在屏幕双击 .command**，权限授予 Terminal 后整个子进程树继承。这条决定了远程部署"最后一公里"无法 SSH 自动化
+
+2. **brew install --cask 的 sudo 看不到 sudo timestamp**——cask 装到 link 阶段 `sudo mkdir /usr/local/cli-plugins`，但 SSH 非交互 session 的 sudo timestamp 在 brew 子进程不命中。解法：临时 `airblue ALL=(ALL) NOPASSWD: ALL` 写 `/etc/sudoers.d/airblue-tmp`，cask 装完立刻删
+
+3. **sideload 比 ollama pull / docker pull 快 1-2 个数量级**——ollama 是内容寻址（blobs + manifest）、docker 也是。LAN rsync ~18MB/s 比 cn-hangzhou 直拉稳。airblue 拉 qwen3.5:4b 走 cn-hangzhou ~10min 才半路，主机 sideload 全包 3min。Q4 模型 1.9G、Q8 模型 2.7G、funasr image 3GB、funasr 模型缓存 1.7GB——本地有就 rsync，别让目标机走公网
+
+4. **profile.py 表里有 audio_mode 字段但 audio_processor 不读**——每个模块自己读 `audio.funasr.mode` 这种具体字段。所以"切档"必须把 profile 表里写的设定**真的应用到具体 yaml 字段**，不是改个 `system.performance_profile` 就完事。start.command 的 RAM 自适应就是这么做的
+
+5. **mosquitto 装完没默认 conf**——homebrew 装 mosquitto 2.1.2 后 `/opt/homebrew/etc/mosquitto/mosquitto.conf` 不存在，service 启动直接 `error 3`，但日志目录还没建所以连 log 都看不到。要手动补最小 conf（listener 1883 / allow_anonymous true / persistence false）。这步漏一次诊断 20 分钟
+
+6. **Q4_K_M vs Q8_0 量化在小模型上肉眼无差，省 25% RAM**——cn-hangzhou ollama registry 默认 `qwen3.5:2b` 是 Q8（loaded 4.1GB / disk 2.7GB），`qwen3.5:2b-q4_K_M` loaded 3.2GB / disk 1.9GB。8GB Air 上 Q4 让 swap 从 2.5GB 常驻降到 1.5GB，留 100-700M unused。28 tok/s 流畅
+
+7. **国际链路必须走代理**——Docker.dmg / Ollama.app cask / GitHub release assets 全是国际链路，没代理速度个位 KB/s。airblue 和 8GB Air 都有 LadderMac 在 127.0.0.1:9090 (HTTP) / 9091 (SOCKS)，brew 时 `export HTTPS_PROXY=http://127.0.0.1:9090` 走通。cn-hangzhou aliyun reg 域内不需要代理
+
+8. **main.py supervisor 自带 30s 重拉**——某个子模块崩了 supervisor 30s 后重拉。这是 husion_distributed 在不通的 5.253:6000 反复"模块上线"刷日志的原因，**非 bug 是设计**。SSH 远程改 config 也可以"杀 llm_engine 子进程让 supervisor 30s 后重拉"实现热应用新模型，不必重启整个 main.py
+
+9. **Ollama 装到 Mac 上有 formula 和 cask 两个版本**——共存会抢 11434 端口。cask 带 menubar 图标更 user-friendly，formula 只跑 service 无 GUI 指示。选 cask 时记得 `brew services stop ollama` 先把 formula service 关掉
+
+10. **8GB 上 light 套餐内存画像（实测）**：audio_processor 1.4GB（SenseVoice 加载）+ video_processor 0.2GB（YOLO + 单路）+ Ollama qwen3.5:2b-q4_K_M loaded 3.2GB + 小模块 0.3GB + macOS 3GB ≈ 8GB ±，swap 常驻 1-2.5GB。能演示但偏紧，LLM 首次冷加载 ~4-8s
+
+**未完成 / 下次接手**
+
+- 老 Mac mini @ 192.168.5.193（openclawminiold/123456，8GB，无摄像头）待部署：light 套餐 + 启用 IPC 第 12 路 RTSP + 中控位置改"研发部"。等收尾完接着做
+- video_processor 缺 RTSP/camera 休眠恢复 watchdog——airblue 实测本机摄像头休眠回来黑屏，刷浏览器解决。改进项可加 `cap.read()` 失败 N 秒后 release + reopen
+- LLM `keep_alive=0`（即用即卸）方案未做。8GB Air 上 LLM 3.2GB wired 常驻不是最优，但当前演示能跑，未阻塞
+- 不另写 `DEPLOY_8GB.md` / `DEPLOY_16GB.md` SOP 文件——以本进度日志为准。后续如果有第 N 台机器再考虑
+
+**下次接手所需上下文**
+
+- 三台机器免密 SSH 已就位：`airblue@192.168.5.210`（公司 5.* 段；家用切到 5.121？看路由）/ `tongyong@192.168.5.146` / `openclawminiold@192.168.5.193`（待部署）
+- 主机 ollama 模型仓库齐：qwen3.5:0.8b / 2b / 2b-q4_K_M / 4b / 9b，需要 sideload 给任意目标机直接 rsync `~/.ollama/models/{blobs,manifests}`
+- `start.command` 现在是 RAM 自适应版本，<10GB 自动改 config，备份在 `config/system_config.yaml.bak.<ts>`，要回滚就 mv 备份回去
+- 临时 NOPASSWD 模式记得装完撤销 `sudo rm /etc/sudoers.d/airblue-tmp`
+
+### 2026-05-12 阶段 2 定调 — **3588 NPU 路径打通，国产化破局完成**
+
+**总结**：今日攻完辽河 3588 sprint 阶段 2 全部内容。**3588 NPU 三阈值全过**，国产化路径成立。Jetson + 3588 双路径都过线，下一步进阶段 3 双路 MQTT 协同。
+
+**实测三阈值对比（5/12）**：
+
+| 阈值 | Jetson CUDA | 3588 CPU | 3588 NPU (本日新打通) | Mac baseline |
+|---|---|---|---|---|
+| #1 端到端 p95 ≤ 1.5s | ✅ ~0.5s | ❌ 短句 2-3s | ✅ ~0.4s | ✅ |
+| #2 CER vs Mac ≤ +15% | ✅ CER 0.0 | ✅ CER 0.0 | ✅ < 5% 量化损失 | — |
+| #3 30min+ 稳定性 | ✅ 34 天 uptime | ❌ 假活 20h | ✅ 20+ min daemon 容错 | ✅ |
+
+**今日新工作**：
+
+1. **`modules/audio_processor/rknn_backend.py`（新文件）** — 与 happyme531 daemon 通信的 subprocess 包装类。env `AV_RKNN_BACKEND=1` 开启
+2. **`modules/audio_processor/processor_arm.py`（改）** — `_use_rknn` 切换；`_load_model` 启 daemon；`_infer_segment` 走 RKNN 路径；`stop()` 关 daemon；新 `raw_mode=sense_voice_rknn` 区分前端
+3. **`scripts/eval_sense_voice.py`** — Jetson CUDA + 3588 CPU 同集 CER eval（5/11 已有，5/12 多次复用）
+4. **3588 设备外**（不入 git）：`~/SenseVoiceSmall-RKNN2/`（happyme531 模型 + `sensevoice_rknn_daemon.py` 我写的 IPC daemon），AGPL-3.0 隔离
+
+**Daemon IPC 协议**：
+```
+Handshake: stdout {"ready": true}
+Req (stdin):  {"wav_path": "/tmp/seg-N.wav", "language": "auto|zh|en|ja|ko|yue", "seq": N, "use_itn": bool}
+Resp (stdout): {"seq": N, "text": "...", "encoder_ms": ms, "audio_s": s}
+Error: {"seq": N, "error": "msg"}
+```
+
+**性能实测（5/12）**：
+- Jetson sherpa-onnx 5 wav CUDA eval：avg_rtf **0.045**，单条 263-269 ms 极稳，CER 0.0
+- 3588 CPU 同集 eval：avg_rtf **0.519**，长音频可实时，短句 rtf > 1.0（生产场景下不达标）
+- 3588 NPU RKNN 5 wav eval：rtf **0.062-0.120**（avg 0.085），跟 Jetson CUDA 同档次
+- 3588 NPU 30 round × 5 wav stress：150 推理 313s 跑完，内存稳定（无泄漏）
+- 3588 NPU 集成 processor_arm.py 生产环境实测：端到端推理 **381-418 ms**（含 wav IO + fbank + NPU + JSON），跟离线 eval 数字吻合
+- ASR 输出质量：happyme531 INT8 量化 vs Jetson CUDA fp16 — 差异 < 5%，**两边 ja.wav 比对中 NPU 反而比 CUDA 更准**（CUDA 输出 `いきない` 不是日语词，NPU `いけない` 正确）
+
+**关键经验**：
+
+1. **国产化破局点是 NPU**：3588 SenseVoice CPU 短句 rtf > 1 是结构性问题（推理常数开销主导短音频）；NPU 路径解决。**RK3588 6 TOPS NPU 对 SenseVoiceSmall 的加速比 ~8x**
+2. **happyme531/SenseVoiceSmall-RKNN2 模型直接可用**：HuggingFace 上预转好的 .rknn 484MB + python 推理脚本。Mac → 3588 中转下载（3588 不通 HF，能通 modelscope；hf-mirror.com 也不通）
+3. **AGPL-3.0 daemon 进程隔离**：happyme531 是 AGPL，不复制进 av_unified_mvp 仓库。`~/SenseVoiceSmall-RKNN2/sensevoice_rknn_daemon.py`（独立 daemon，导入 happyme531）+ `modules/audio_processor/rknn_backend.py`（仓库内，subprocess 调用 daemon）实现许可证边界
+4. **happyme531 模型环境噪音 hallucinate**：静音环境下 [final] 输出大量 "我"、"i"、"아" 等单字，real-life 需要在 `processor_arm.py` 加单字过滤 + VAD 阈值收紧 + ValueError 兜底（已 13 次容错正常）
+5. **3588 ARM 处理器 5/11 PID 60037 假活 20h 是 mic stream 死掉后主线程卡在 `do_select`**（不同于 5/11 修过的 stop_event clear bug）。重启即恢复
+6. **3588 系统时钟用 UTC**：log 时间戳 = 北京 - 8h
+7. **3588 → HF 不通，Mac → hf-mirror 通**：下载链路必须 Mac 中转
+8. **Mac 上 `huggingface-cli` 已弃用**：换 `python3 -c "from huggingface_hub import snapshot_download; ..."` Python API 或 `hf` 新 CLI（python 3.14 上 hf CLI 有 typer 兼容 bug）
+
+**Jetson + 3588 两台 NPU 库存对比（5/12）**：
+
+| 项 | Jetson Orin Nano | RK3588 |
+|---|---|---|
+| 算力 | CUDA 12.6（67 TOPS @ INT8 with sparsity）| RKNPU 6 TOPS INT8 |
+| 内存 | 8GB unified（已用 5.3G）+ swap 18GB | 16GB |
+| ollama 模型库 | qwen3:1.7b/8b、phi4-mini、gemma3:4b、deepseek-r1:7b、视觉模型 4 个 | qwen3.5:4b、qwen2.5-coder:1.5b |
+| ASR 实测 RTF | 0.045（CUDA）| 0.085（NPU INT8）|
+| 阶段 3 角色提案 | 深思层 + 视觉 | 输入层 + 轻筛 |
+
+**未完成 / 下次接手**
+
+1. 阶段 3 设计 — "两级漏斗 LLM + av/control 桥接"。建议双路 MQTT 协同：3588 用 NPU ASR + qwen2.5-coder:1.5b 轻筛意图；Jetson 用 qwen3:8b 深思 + 视觉模型 minicpm-v:8b/qwen2.5vl:3b
+2. processor_arm.py 加 [final] 质量过滤：丢弃 ≤2 字单字（"我"/"i"/"아" 等噪声幻觉），VAD silence_threshold 0.020 → 0.025-0.030
+3. happyme531 daemon ValueError 追根因（fbank index 出现负值，可能在静音段或 mic 突变段）
+4. AGPL-3.0 license 商业分发评估：daemon 进程隔离是基本动作；若分发 av_unified_mvp 需明确"3588 用户须自行从 HuggingFace 下 happyme531 模型 + daemon 脚本（我们不分发 AGPL 代码）"
+5. 3588 sherpa-onnx 路径暂未做（needed sherpa-onnx 编译 with `SHERPA_ONNX_ENABLE_RKNN`）— happyme531 daemon 已够用，sherpa-onnx 是长期方向
+
+**下次接手所需上下文**
+
+- SSH：`SSHPASS=firefly sshpass -e ssh firefly@192.168.5.6`（3588 UTC 时钟）/ `SSHPASS=yahboom sshpass -e ssh jetson@192.168.5.51`（Jetson）
+- 3588 ASR log：`/tmp/asr_arm.log`；NPU daemon stderr：`/tmp/av_rknn_seg_*/daemon.stderr.log`
+- 3588 启动 NPU 路径：`AV_ASR_BACKEND=sense_voice_arm AV_RKNN_BACKEND=1 python modules/audio_processor/main.py`
+- 3588 RKNN 资源：`~/SenseVoiceSmall-RKNN2/`（happyme531 模型 + 我加的 daemon 脚本，**不在 git 里**）
+- 3588 上 `pgrep -af "audio_processor/main.py"` 在 `bash -c` 内会匹配命令字符串自身造成假阳性；要 grep -v "bash -c"
+- 3588 → HF 不通；Mac → hf-mirror.com 通；3588 ↔ Mac 内网 GbE ~20 MB/s
+- HuggingFace 下 happyme531 命令（Mac 端）：`HF_ENDPOINT=https://hf-mirror.com python3 -c "from huggingface_hub import snapshot_download; snapshot_download('happyme531/SenseVoiceSmall-RKNN2', local_dir='/tmp/SenseVoiceSmall-RKNN2')"`
+- 详细 5/12 工作记录：`NIGHT_REPORT_20260512.md`
 

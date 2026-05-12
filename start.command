@@ -8,6 +8,9 @@ cd "$(dirname "$0")"
 export NO_PROXY="127.0.0.1,localhost,::1"
 export no_proxy="127.0.0.1,localhost,::1"
 
+# venv 激活：RAM 自适应改 yaml 需要 PyYAML；main.py 起来也走 venv 而非系统 python
+[ -f .venv/bin/activate ] && source .venv/bin/activate
+
 # 防止重复双击：已有 main.py 跑着就提示退出
 EXISTING=$(pgrep -f "[Pp]ython.*main\.py" || true)
 if [ -n "$EXISTING" ]; then
@@ -45,6 +48,49 @@ fi
 PROFILE=$(grep -E '^\s*performance_profile:' config/system_config.yaml 2>/dev/null | awk '{print $2}')
 PROFILE=${PROFILE:-medium}
 say "性能档位: $PROFILE  （改 config/system_config.yaml 的 performance_profile 切档）"
+
+# ── 1.5. RAM 自适应：内存不足时自动降档（避免 8GB Air 上 4b LLM 撑爆 OOM）─
+RAM_GB_INT=$(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024))
+say "整机内存：${RAM_GB_INT} GB"
+
+# 推荐档位（与 core/profile.py recommend_profile 对齐）
+if [ "$RAM_GB_INT" -lt 6 ]; then
+    die "内存 ${RAM_GB_INT} GB 不足，最小需要 6 GB"
+elif [ "$RAM_GB_INT" -lt 10 ]; then
+    REC_PROFILE=light
+elif [ "$RAM_GB_INT" -lt 24 ]; then
+    REC_PROFILE=medium
+else
+    REC_PROFILE=heavy
+fi
+
+# 各档权重：只降不升（用户手动选 light 想省内存，不要替他升档）
+profile_weight() { case "$1" in light) echo 1;; medium) echo 2;; heavy) echo 3;; *) echo 2;; esac; }
+CUR_W=$(profile_weight "$PROFILE")
+REC_W=$(profile_weight "$REC_PROFILE")
+if [ "$CUR_W" -gt "$REC_W" ]; then
+    warn "当前 $PROFILE 档对 ${RAM_GB_INT} GB 偏重，自动降到 $REC_PROFILE"
+    cp config/system_config.yaml "config/system_config.yaml.bak.$(date +%Y%m%d-%H%M%S)"
+    python3 -c "import yaml" 2>/dev/null || die "Python 缺 yaml 包，无法自适应（venv 没激活？）"
+    python3 - <<PYEOF
+import yaml, pathlib
+p = pathlib.Path("config/system_config.yaml")
+d = yaml.safe_load(p.read_text())
+d["system"]["performance_profile"] = "$REC_PROFILE"
+if "$REC_PROFILE" == "light":
+    d["audio"]["funasr"]["mode"] = "local_offline"
+    d["llm"]["ollama"]["model_fast"] = "qwen3.5:2b-q4_K_M"
+    d["llm"]["ollama"]["model_smart"] = "qwen3.5:2b-q4_K_M"
+    for src in d["video"]["sources"]:
+        src["enabled"] = (str(src.get("url","")).strip() == "0")
+p.write_text(yaml.safe_dump(d, allow_unicode=True, sort_keys=False))
+PYEOF
+    PROFILE=$REC_PROFILE
+    ok "已应用 light 套餐：mode=local_offline + LLM=qwen3.5:2b + 仅本机摄像头"
+    ok "原配置备份在 config/system_config.yaml.bak.*"
+else
+    ok "内存够用，保持 $PROFILE 档不变"
+fi
 
 # ── 2. mosquitto ────────────────────────────────────────────────
 say "MQTT broker (mosquitto)"

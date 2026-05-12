@@ -157,8 +157,8 @@ class LLMEngine:
     def __init__(self, cfg: dict):
         ollama = cfg.get("ollama", {})
         self.url = ollama.get("url", "http://127.0.0.1:11434/api/generate")
-        self.model_fast = ollama.get("model_fast", "qwen3.5:9b")
-        self.model_smart = ollama.get("model_smart", "qwen3.5:9b")
+        self.model_fast = ollama.get("model_fast", "qwen3.5:4b")
+        self.model_smart = ollama.get("model_smart", "qwen3.5:4b")
         self.timeout = ollama.get("timeout", 30)
         # 不加 threading.Lock：ollama serve 自带请求队列，外部锁多余且在某次连续语音输入时
         # 触发死锁让整个 llm_engine 卡 4+ 分钟（回合 28 实测）。多个 _ask 并发由 ollama 自己排。

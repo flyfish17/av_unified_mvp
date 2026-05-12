@@ -14,6 +14,7 @@ Mic 设备选择：query_devices 找 C920 / Logitech 字串；找不到 fallback
 """
 import collections
 import logging
+import os
 import queue
 import re
 import threading
@@ -73,6 +74,9 @@ class AudioProcessorARM:
 
         # SenseVoiceSmall 模型（懒加载）
         self._model = None
+        # RKNN backend (3588 NPU 路径)。env AV_RKNN_BACKEND=1 切到 daemon。默认 funasr CPU。
+        self._use_rknn = os.environ.get("AV_RKNN_BACKEND", "").strip() in ("1", "true", "True")
+        self._rknn_backend = None  # type: Optional["SenseVoiceRKNNBackend"]
         # 默认按主机名：firefly → 3588 demo 路径；jetson/其它 → ~/models/SenseVoiceSmall。
         # 都可被 config audio.funasr.sense_voice_path 覆盖。
         default_path = (
@@ -155,6 +159,12 @@ class AudioProcessorARM:
         if self._worker_thread is not None:
             self._worker_thread.join(timeout=3)
             self._worker_thread = None
+        if self._rknn_backend is not None:
+            try:
+                self._rknn_backend.stop()
+            except Exception as e:
+                logger.warning(f"RKNN daemon stop 异常: {e}")
+            self._rknn_backend = None
         logger.info("ARM 转写已停止")
 
     def get_pcm_buffer(self) -> bytes:
@@ -164,7 +174,14 @@ class AudioProcessorARM:
     # ── Internals ─────────────────────────────────────────────────────
 
     def _load_model(self) -> None:
-        if self._model is not None:
+        if self._model is not None or self._rknn_backend is not None:
+            return
+        if self._use_rknn:
+            # 3588 NPU 路径 — 启动 happyme531 daemon 子进程
+            from modules.audio_processor.rknn_backend import SenseVoiceRKNNBackend
+            logger.info("启用 RKNN backend (3588 NPU 路径, AV_RKNN_BACKEND=1)")
+            self._rknn_backend = SenseVoiceRKNNBackend()
+            self._rknn_backend.start()
             return
         if not Path(self._model_path).exists():
             raise FileNotFoundError(
@@ -267,20 +284,26 @@ class AudioProcessorARM:
     def _infer_segment(self, audio_f32: np.ndarray) -> None:
         try:
             t0 = time.time()
-            res = self._model.generate(input=audio_f32, batch_size=1)
+            if self._rknn_backend is not None:
+                # NPU 路径：daemon 已剥 meta tags，直接拿干净 text
+                text = self._rknn_backend.recognize(audio_f32, self.sample_rate)
+                raw_mode = "sense_voice_rknn"
+            else:
+                res = self._model.generate(input=audio_f32, batch_size=1)
+                if not res or len(res) == 0:
+                    return
+                text = _TAG_RE.sub("", res[0].get("text", "")).strip()
+                raw_mode = "sense_voice_offline"
             elapsed = time.time() - t0
-            if not res or len(res) == 0:
-                return
-            text = _TAG_RE.sub("", res[0].get("text", "")).strip()
             if not text:
                 return
-            logger.info(f"[final] {text} ({elapsed*1000:.0f}ms, {len(audio_f32)/self.sample_rate:.1f}s 音频)")
+            logger.info(f"[final] {text} ({elapsed*1000:.0f}ms, {len(audio_f32)/self.sample_rate:.1f}s 音频, {raw_mode})")
             ev = TranscriptEvent(
                 text=text,
                 is_final=True,
                 seq_id=self._seq,
                 ts=time.time(),
-                raw_mode="sense_voice_offline",
+                raw_mode=raw_mode,
             )
             self._seq += 1
             if self._callback:
