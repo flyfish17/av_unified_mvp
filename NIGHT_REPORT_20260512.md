@@ -199,6 +199,32 @@ encoder NPU forward 0.29-0.33s 极稳。INT8 量化无明显准确率损失（< 
 3. AGPL-3.0 license：内部 POC 不影响，**商业分发前必须评估**（happyme531 模型用 AGPL，调用方代码可能被传染）
 4. 验收阶段 2 — 决定 Jetson + 3588 双路径 vs 单选 3588（成本/算力性价比对比）
 
+### 15:00 3588 端 creator_ai_demo 停用 + 清理（用户指令）
+
+用户写的 `~/creator_ai_demo/` 厂商 demo，与 av_unified_mvp 平行存在 28h。停掉避免抢资源：
+
+**停掉**：
+- `sudo systemctl stop creator_demo.service && sudo systemctl disable creator_demo.service`
+- 之前持续占 CPU **1d 4h 23min**（uptime 28h），streamlit `:8501` + supervisor bash 一并退出
+- av_unified_mvp processor（PID 974319）+ RKNN daemon（PID 974370）**不受影响**继续跑
+
+**清理 866 MB 无用产物**：
+- `SenseVoiceSmall.tar.gz` (831M, 已展开冗余)
+- `logs/` (34M, demo 旧运行日志)
+- `audio_debug/` (1.1M, demo 调试录音)
+
+**保留（继续复用 / 参考）**：
+- `venv/` — av_unified_mvp processor 在用（path hardcoded 到 `~/creator_ai_demo/venv/bin/python`）
+- `SenseVoiceSmall/` — funasr CPU fallback 路径
+- `pro_av_dashboard_NPU.py` — 阶段 3 两级漏斗 LLM 参考（L 122-139 关键词命中 + qwen2.5-coder:1.5b 兜底实现）
+- `yolov5-*.txt` — 二期 NPU 视觉 class labels
+
+**3588 git repo sync 干净**：从旧 HEAD f9cb8dd reset + checkout 到 `sprint/liaohe-3588-night-poc-20260511`（origin 最新 7d3bca5），processor_arm.py md5 与 Mac 完全一致。
+
+### 15:30 GitHub 分支清理
+
+删除冗余 `origin/sprint/liaohe-3588`（HEAD f9cb8dd 已在 night-poc-20260511 祖先链）。回滚锚点 tag `pre-liaohe-sprint-2026-05-11` 保留。GitHub 当前 3 分支：`main` / `r28-snapshot` / `sprint/liaohe-3588-night-poc-20260511`。
+
 ### 11:30 NPU stress 30 round × 5 wav = 150 推理 — 阈值 #3 ✅
 
 跑了 5min13s 共 150 次推理（30 round × 5 wav）。结果：
