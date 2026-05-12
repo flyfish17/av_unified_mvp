@@ -66,6 +66,10 @@ class AudioProcessorARM:
         self.min_speech_chunks = max(1, 300 // self.chunk_ms)
         # 最长 15s 强制定段（防长段失控）
         self.max_speech_chunks = 15000 // self.chunk_ms
+        # 输出文本最小长度。happyme531 RKNN 模型在低音量段会幻听单字（"我"/"i"/"아"），
+        # 1-char 输出几乎都是噪声，丢弃。Mac/Jetson funasr CPU 路径也共用此过滤，
+        # 即使他们幻听少 — 单字结果对下游意图识别也没用。
+        self.min_text_chars = int(funasr_cfg.get("min_text_chars", 2))
 
         # 降噪流水线（与 Mac processor.py 一致）
         self._denoise_hp_sos = signal.butter(10, 100, btype='hp', fs=self.sample_rate, output='sos')
@@ -296,6 +300,12 @@ class AudioProcessorARM:
                 raw_mode = "sense_voice_offline"
             elapsed = time.time() - t0
             if not text:
+                return
+            if len(text) < self.min_text_chars:
+                logger.info(
+                    f"[final-drop] {text!r} ({elapsed*1000:.0f}ms, "
+                    f"{len(audio_f32)/self.sample_rate:.1f}s 音频, len<{self.min_text_chars})"
+                )
                 return
             logger.info(f"[final] {text} ({elapsed*1000:.0f}ms, {len(audio_f32)/self.sample_rate:.1f}s 音频, {raw_mode})")
             ev = TranscriptEvent(

@@ -2,7 +2,17 @@
 
 端侧"**理解 → 编排 → 执行**"统一系统 — 摄像头 + 麦克风 → 语义事件 → MQTT 总线 → Node-RED 编排 → 前端展示 / 设备执行。**优先离线运行**。
 
-> 完整开发蓝本与回合日志：见 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)（1700+ 行，回合 1-29 详细推演）
+> 完整开发蓝本与回合日志：见 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)（2200+ 行，按时间倒序）
+
+## 文档地图（渐进披露）
+
+| 阶段 | 文档 | 何时读 |
+|---|---|---|
+| 1 分钟概览 | 本文 § R28 能力总览 + § 架构 | 完全没接触过 |
+| 5 分钟接手 | [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) § 0 § 11 | 要接 sprint 任务 |
+| 平台部署 SOP | [docs/deploy/3588-npu.md](./docs/deploy/3588-npu.md) | RK3588 + NPU 路径落地（国产化主推）|
+| | Mac / Jetson SOP | 待补（[DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 进度日志已有内容）|
+| 日工作日志 | NIGHT_REPORT_yyyymmdd.md（按日）| 找昨天/今天具体踩坑细节 |
 
 ## R28-snapshot 能力总览（v1.1 → 当前）
 
