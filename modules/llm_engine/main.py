@@ -47,7 +47,10 @@ class LLMModule(BaseModule):
         super().__init__("llm_engine", cfg, streams=streams)
 
         # 创建引擎
-        self.engine = LLMEngine(cfg.get("llm", {}))
+        self.engine = LLMEngine(
+            cfg.get("llm", {}),
+            default_location=cfg.get("system", {}).get("default_location", ""),
+        )
         self.engine.set_mqtt_publisher(self.publish)
 
         # 订阅音频定稿（主路径：audio_processor → av/audio/command → 意图识别）

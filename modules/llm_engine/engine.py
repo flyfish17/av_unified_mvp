@@ -30,11 +30,14 @@ COMMAND_PROMPT_FALLBACK = (
 )
 
 
-def _build_command_prompt_from_catalog() -> str:
+def _build_command_prompt_from_catalog(default_location_id: str = "") -> str:
     """从 config/device_catalog.json 自动生成完整 76 条指令的 prompt。
 
     回合 28 P0 L2：catalog 即真相源，新加指令零代码改动 LLM prompt 同步。
     包含 also_in 共享指令（如吧台窗帘也展示在二楼餐桌）。
+
+    default_location_id：本机所处默认位置 ID（来自 system_config.yaml 的 system.default_location）。
+    用户语音未明示地点时（如"打开窗帘"），LLM 优先选该位置下的指令，避免歧义命中错位置。
     """
     try:
         catalog_path = Path(__file__).parent.parent.parent / "config" / "device_catalog.json"
@@ -44,6 +47,7 @@ def _build_command_prompt_from_catalog() -> str:
         catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
         loc_to_label = {l["id"]: l["label"] for l in catalog["locations"]}
         device_types = catalog.get("device_types", {})
+        default_location_label = loc_to_label.get(default_location_id, "")
 
         # 按 location 分组（含 also_in 共享）
         groups: dict[str, list[tuple[str, str]]] = {}
@@ -58,14 +62,21 @@ def _build_command_prompt_from_catalog() -> str:
             for loc_id in [c["location"]] + (c.get("also_in") or []):
                 groups.setdefault(loc_id, []).append((cmd_id, short))
 
-        # 拼成"[地点] 设备动作: 指令名, ..."的可读列表
+        # 拼成"[地点] CMD_ID(设备动作), ..."的可读列表
+        # cmd_id 放前面避免 2b 小模型把人类可读 label 误认作 cmd 输出（实测 "窗帘合" hallucinate 被白名单拒）
         lines = []
         for loc_id, items in groups.items():
             label = loc_to_label.get(loc_id, loc_id)
-            line = f"[{label}] " + ", ".join(f"{s}: {cid}" for cid, s in items)
+            line = f"[{label}] " + ", ".join(f"{cid}({s})" for cid, s in items)
             lines.append(line)
         dict_block = "\n".join(lines)
 
+        default_loc_rule = (
+            f"7. 用户未明示地点时（如\"打开窗帘\"\"开灯\"），默认本机所在的 [{default_location_label}]，"
+            f"该位置存在匹配项时直接选它，不要随机命中其他地点\n"
+            if default_location_label
+            else ""
+        )
         prompt = (
             "你是底层音视频中控指令翻译器。"
             "禁止任何思考、推理或废话。无需解释原因。"
@@ -77,12 +88,19 @@ def _build_command_prompt_from_catalog() -> str:
             "3. \"温度高/调高\"= TempUp，\"温度低/调低\"= TempDown\n"
             "4. 忽略输入中的标点、语气词、重复\n"
             "5. 仅当该地点 + 设备真无任何匹配项才输出 {\"cmd\": null}\n"
-            "6. cmd 必须从下方字典中精确逐字选取，禁止编造任何字典外的指令名\n\n"
-            "【可用指令字典】：\n"
+            "6. cmd 字段的值**必须是下方字典里每条括号前的大写英文ID**（如 RDDepartment_Curtain_Open）；"
+            "**禁止输出括号内的中文名**（如 \"窗帘开\"），中文名仅供你理解\n"
+            + default_loc_rule
+            + "\n【输出示例】\n"
+            "用户：\"打开窗帘\"  → {\"cmd\": \"RDDepartment_Curtain_Open\"}\n"
+            "用户：\"关空调\"   → {\"cmd\": \"RDDepartment_AirConditioner_Off\"}\n"
+            "用户：\"播放音乐\" → {\"cmd\": null}\n"
+            "\n【可用指令字典（格式：CMD_ID(中文)）】：\n"
             + dict_block
             + "\n\n用户输入："
         )
-        logger.info(f"prompt 已从 catalog 生成：{len(catalog['commands'])} 条指令，{len(groups)} 个地点")
+        loc_info = f"，默认地点=[{default_location_label}]" if default_location_label else ""
+        logger.info(f"prompt 已从 catalog 生成：{len(catalog['commands'])} 条指令，{len(groups)} 个地点{loc_info}")
         return prompt
     except Exception as e:
         logger.error(f"加载 catalog 生成 prompt 失败，回退到 fallback：{e}")
@@ -154,7 +172,7 @@ class LLMEngine:
     # 暴露给 dashboard 直接拼接：llm.COMMAND_PROMPT + text
     COMMAND_PROMPT = COMMAND_PROMPT
 
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, default_location: str = ""):
         ollama = cfg.get("ollama", {})
         self.url = ollama.get("url", "http://127.0.0.1:11434/api/generate")
         self.model_fast = ollama.get("model_fast", "qwen3.5:4b")
@@ -163,8 +181,8 @@ class LLMEngine:
         # 不加 threading.Lock：ollama serve 自带请求队列，外部锁多余且在某次连续语音输入时
         # 触发死锁让整个 llm_engine 卡 4+ 分钟（回合 28 实测）。多个 _ask 并发由 ollama 自己排。
         self._mqtt_publisher: Optional[Callable[[str, dict], None]] = None
-        # 实例化时从 catalog 重建 prompt + 关键词集
-        self.command_prompt = _build_command_prompt_from_catalog()
+        # 实例化时从 catalog 重建 prompt + 关键词集，default_location 注入 prompt 解歧义
+        self.command_prompt = _build_command_prompt_from_catalog(default_location)
         self._keywords = _build_keywords_from_catalog()
         self._cmd_whitelist = _build_cmd_whitelist_from_catalog()
         logger.info(f"control 关键词集（catalog derive）：{len(self._keywords)} 个")

@@ -2157,3 +2157,63 @@ Error: {"seq": N, "error": "msg"}
 - HuggingFace 下 happyme531 命令（Mac 端）：`HF_ENDPOINT=https://hf-mirror.com python3 -c "from huggingface_hub import snapshot_download; snapshot_download('happyme531/SenseVoiceSmall-RKNN2', local_dir='/tmp/SenseVoiceSmall-RKNN2')"`
 - 详细 5/12 工作记录：`NIGHT_REPORT_20260512.md`
 
+### 2026-05-12（下午）三机部署收尾 + 默认地点解歧义 + 小模型 prompt 加固
+
+**这批 Mac 部署的定位（重要）**
+
+不是单机演示设备 —— **是 av_unified_mvp 跨硬件测试矩阵 + 多场景客户演示池**。
+不同档位 / 不同模型 / 不同摄像头麦克风栈下的可运行性与端到端体验差异，本身就是"成果"的一部分。每台机器的实测画像决定它能去哪种客户场景。
+
+**三机演示矩阵（公司 5.* 网段实测）**
+
+| 维度 | airblue（公司桌面演示） | Mac mini 5.193（研发部固定）| tongyong 8GB（轻量便携） |
+|---|---|---|---|
+| 硬件 | M2 / 16 GB | **M1 / 16 GB** | M2 / 8 GB |
+| 档位 | medium | medium | **light**（RAM 自适应自动降） |
+| ASR | FunASR 2pass（Docker，**partial 流式**+标点+整句修正） | FunASR 2pass | **本地 SenseVoice**（无 Docker，按句切段，无 partial） |
+| LLM | qwen3.5:4b（loaded ~5.8 GB） | **qwen3.5:2b-q4_K_M**（4b 太慢换的，loaded 3.2 GB） | qwen3.5:2b-q4_K_M（loaded 3.2 GB） |
+| 命令推理稳态 | 命令识别正常 | **~3s/句**（用户实测可用） | 28 tok/s，~4s/句（首次冷加载 8s） |
+| 视频源 | 4 路（本机+3 RTSP） | 3 路 RTSP + **USB Logitech MeetUp**（FOV 120° 会议摄像，+4 麦阵列 32kHz→16kHz 自动重采样） | 1 路（M2 Air 内置） |
+| 默认地点 | 默认无（自由判别） | **RDDepartment（研发部）** —— 解决"打开窗帘"被命中到吧台的歧义 | 默认无 |
+| 整机内存 | ~7 GB / 16 GB，余 9 GB，无 swap | wired 5.0 GB + compressor 3.3 GB，余 1.7 GB unused，swap 0.5 GB | wired 4.3 GB + compressor 2.0 GB，常驻 swap 1.5 GB |
+| 适合场景 | 销售用主力演示机 / 多摄像头融合识别样板 | **客户驻场固定演示**（会议室一体化）/ MeetUp 一体化方案展示 | 轻量便携演示 / "8GB Mac 也能跑"下沉案例 |
+| 痛点 | RTSP 流休眠唤醒偶尔黑屏需刷新 | 4b 必须降 2b-q4，长 prompt prefill 偶发 6-9s | LLM 常驻挤 swap，多任务时 SSD I/O 拖累 |
+
+**今天的代码改动（push 完成，跟仓库走）**
+
+- `start.command:11` 加 `export OPENCV_AVFOUNDATION_SKIP_AUTH=0` —— OpenCV 默认跳过 macOS 权限请求，碰到 Camera 无授权直接 fail 不弹窗。设 0 让 cv2 主动调 `AVCaptureDevice.requestAccess` 触发 TCC 弹窗。Mac mini 上是这一个变量缺，导致用户点 dashboard 启用本机摄像头没动静、tccutil reset 也没用。已授权机器无副作用
+- `start.command` RAM 自适应 light 套餐里 model 从 `qwen3.5:2b` 改 `qwen3.5:2b-q4_K_M` —— Q4 比默认 Q8 省 1 GB loaded，8GB Air 上 swap 从 2.5GB 降到 1.5GB
+- `engine.py _build_command_prompt_from_catalog` 加 `default_location_id` 参数：注入"用户未明示地点时默认 [X]"规则到 prompt 末尾。**真相源是 `system_config.yaml` 的 `system.default_location` 字段**，不是 device_catalog.json 的 default_location（后者依然存在但代码不读，事实上废字段）。理由：device_catalog 是仓库共享真相源；机器物理位置是 host-specific，跟 system_config 走更合理
+- `engine.py` prompt 字典格式翻转：`label: cmd_id` → **`cmd_id(label)`**。原因：2b-q4_K_M 小模型实测会把 label（"窗帘合"）误当成 cmd 输出，被 catalog 白名单拒。cmd_id 放前 + 规则 6 强调"括号前 ID" + 加输出示例三件套，2b 也能稳定输出 ID
+- `engine.py LLMEngine.__init__` + `modules/llm_engine/main.py:50`：加 `default_location` 可选参数，从 `cfg["system"]["default_location"]` 读取后传入。`ui/dashboard.py` 那个 caller 没改，向后兼容（default_location="" → prompt 不加 rule 7 = 旧行为）
+- 桌面 launcher 精简：删 `AV 停止.command`（dashboard 上「⏻ 退出系统」按钮 POST /system/shutdown 完全等价，**实际上调的是 main.py 内部 supervisor.stop()，比 stop.command 外部强杀更优雅**），桌面只剩一个图标
+
+**关键经验**
+
+1. **OpenCV 在 macOS 上默认 SKIP_AUTH=1** —— 它会**跳过** TCC 授权请求，碰到没权限直接 fail，不弹窗。Mac mini 上现象是"点启用没反应"、tccutil reset 还是没反应。修法是设 `OPENCV_AVFOUNDATION_SKIP_AUTH=0` 让它主动调 `AVCaptureDevice.requestAccess`。这条值得记一辈子——一个 export 改完所有 Mac
+2. **2b 级小模型对 prompt 字典格式很敏感** —— `label: id` 格式被误读成"label is cmd"。`id(label)` 顺序 + 输出示例后稳。这是 prompt engineering 的通用经验：对小模型，**让你期待的输出格式出现在示例里**比用规则描述更可靠
+3. **default_location 真相源选 system_config 而非 device_catalog** —— 后者跟仓库走（所有机器共享），前者每台机器独立。物理位置是 host-specific 信息，写在共享配置里就是错位
+4. **swap 容忍度三档实测** —— airblue 16GB medium 无 swap；Mac mini 16GB medium 0.5GB swap；tongyong 8GB light **常驻 1.5GB swap 还能跑得动**。8GB 不是死刑，但 LLM 调用峰值会拖 SSD I/O。客户演示这三种状态各有适用场景，**不是越大越好**
+
+**未完成 / 下次接手**
+
+- "当前位置"应该做成 dashboard / 快捷控制模块上的 dropdown（用户原话：**"或者当快捷控制模块的一个选项"**），让现场演示时一键切档（"这台机器现在演的是会议室1场景"）。比改 system_config.yaml 重启更顺手。**中等改动，未做**
+- airblue 和 tongyong 的 system_config.yaml 还没加 `system.default_location` 字段；需要时各自补（不补 = prompt rule 7 不触发 = 旧行为，无歧义解析）
+- `video_processor` 没加 RTSP/cv2 休眠恢复 watchdog，airblue RTSP 流休眠唤醒黑屏依旧
+- LLM `keep_alive=0` 即用即卸方案未做。Mac mini 上 long-prompt prefill 偶发 6-9s 主要瓶颈在 GGUF mmap+swap I/O，keep_alive=0 卸载后再加载只会更慢，**反过来 keep_alive=-1 永驻可能更适合演示场景** —— 这条今天没正式验证，下次有数据再定
+- LLM 推理质量层面 Mac mini 上 2b-q4_K_M 出现过"没判别没执行"（关键词过滤拦截 / LLM 返回 null / hallucinate 被拒）。dashboard 可视化 "为何这条命令没出" 是个调试体验改进，未做
+- 主机 `rsync` 命令默认会覆盖目标机的 `config/system_config.yaml` —— Mac mini 的 `default_location: RDDepartment` 设定容易被覆盖回主机默认。**下次部署 rsync 时记得 `--exclude=config/system_config.yaml`** 或者用户自己 patch。这条今天没自动化，是个流程坑
+
+**下次接手所需上下文**
+
+- 三机当前都跑通（medium / medium / light），**没有 daemon/启动项**，每次双击桌面「AV 启动.command」启；退出走 dashboard「⏻ 退出系统」（等价 stop.command，桌面只剩一个图标）
+- 主机 ollama 模型仓库：qwen3.5:0.8b / 2b / **2b-q4_K_M** / 4b / 9b，sideload 给目标机直接 rsync `~/.ollama/models/{blobs,manifests}`
+- 主机 `/tmp/Docker.dmg`（624MB）+ `/tmp/funasr-image.tar`（3.2GB）保留作 sideload backup，下台 mac 部署可省国际链路下载 + cn-hangzhou pull。要清就 `rm /tmp/Docker.dmg /tmp/funasr-image.tar`
+- airblue WiFi 间歇性不通是常态（家里/公司切换 + 离热点远），ssh 经常 timeout 不是代码问题，重试即可
+- Mac mini 上 Ollama.app 系统自带（旧 0.17.0）+ brew formula ollama 0.23.2 共存，当前跑的是 Ollama.app；4b 模型仓库还在，没 ollama rm
+- **客户演示选机指南（按场景）**：
+  - 4 路摄像头融合 / 转写要 partial 即时反馈 → **airblue (5.210)**
+  - 单地点固定演示 + 会议室一体化（Logitech MeetUp）+ 默认位置解歧义 → **Mac mini (5.193) @ 研发部**
+  - "8GB MacBook Air 也能跑"下沉案例 / 便携 → **tongyong (5.146)**
+- 临时 NOPASSWD 文件（`/etc/sudoers.d/*-tmp`）都已撤销。如果发现哪台机器还留着，`sudo rm /etc/sudoers.d/<user>-tmp`
+

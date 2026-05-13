@@ -8,6 +8,10 @@ cd "$(dirname "$0")"
 export NO_PROXY="127.0.0.1,localhost,::1"
 export no_proxy="127.0.0.1,localhost,::1"
 
+# OpenCV macOS 摄像头授权：默认 SKIP_AUTH=1 跳过权限请求，碰到无权限直接 fail 不弹窗。
+# 设为 0 让 cv2 主动调 AVCaptureDevice.requestAccess，首次会弹 TCC 授权窗口。已授权机器不受影响。
+export OPENCV_AVFOUNDATION_SKIP_AUTH=0
+
 # venv 激活：RAM 自适应改 yaml 需要 PyYAML；main.py 起来也走 venv 而非系统 python
 [ -f .venv/bin/activate ] && source .venv/bin/activate
 
