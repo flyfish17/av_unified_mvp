@@ -13,8 +13,8 @@
 | iCloud 源目录（同步终点） | `/Users/yzj/Library/Mobile Documents/com~apple~CloudDocs/工作/Ai探索/b研发/av_unified_mvp/` |
 | 启动入口 | `./start.command`（双击 or `bash`），自动起 mosquitto + funasr-2pass + Node-RED + main.py + 浏览器 |
 | 浏览器地址 | `http://localhost:5050`（dashboard）, `http://localhost:1880`（Node-RED） |
-| **当前主线** | **R1–R6 订阅式架构演进**（见 §10），总工期 4.5 天 |
-| **当前进度** | **阶段一 ✅** + **巩固冲刺 K1-K5+K8 ✅** + **辽河 3588 sprint 阶段 2 ✅**（2026-05-12 收尾，分支 `sprint/liaohe-3588-night-poc-20260511`）。**3588 NPU 路径打通，三阈值全过，国产化破局完成**：端到端 ~400ms、INT8 vs CUDA CER 差异 < 5%、20+ min 稳定。Jetson CUDA 也过线。**下一步进阶段 3：两级漏斗 LLM + av/control 桥接（3588 轻筛 + Jetson 深思 + MQTT 协同）**。完整 plan 文件：`~/.claude/plans/3588-demo-1-50-mac-3588-3588-2-3588-ai-streamed-riddle.md`；5/12 详细工作日志：`NIGHT_REPORT_20260512.md` |
+| **当前主线** | **Mac 落地阶段 + 两套硬件并行评估**（3588 涉密 / Jetson 非涉密）。产品三形态见 §1.5：① 纯转写+语意执行（辽河需求）② 视频分析+分布式差异点 ③ 利旧桥接+运维 |
+| **当前进度** | **阶段一 ✅** + **巩固冲刺 K1-K5+K8 ✅** + **辽河 3588 sprint 阶段 2 ✅**（5/12）+ **阶段 3 第 2 层 NPU LLM 内核 ✅**（5/13）+ **av/control echo dispatcher ✅**（5/13）。3588 全栈 supervisor 起来，dashboard `http://192.168.5.6:5050` LAN 可达。**下一步**：①漏斗第 1 层 fast-path（关键词 0ms 即回）②video_processor 接 USB 罗技 920 ③NPU 升 Qwen2.5-3B 测试解地点偷换 |
 | 下一步具体动作 | 见 §11 下次切入点 |
 | 已完成历史 | P0 离线 / P1 模块统一 / P2 Node-RED / P3 拆 SSE / Bug A/B / 联调 — 详见 §5 简报 |
 | 计划文件 | `./PLAN_R1_R6_subscription.md`（R1-R6 详细设计，跟随项目同步） |
@@ -36,6 +36,56 @@
 - 所有组件**优先离线**，可在边缘盒子（RK3588/Jetson/Mac mini）独立运行
 
 参考前端订阅风格：`/Users/yzj/Developer/woldmonitor`（单文件 Flask + MJPEG/SSE 长连接 + 原生 JS）
+
+---
+
+## 1.5 产品定型方向（2026-05-13 战略澄清）
+
+**当前阶段定位**：Mac 上跑通程序的落地阶段，两套硬件（3588 / Jetson）并行评估。
+
+### 硬件矩阵
+
+| 硬件 | 场景定位 | 当前状态 |
+|---|---|---|
+| **Mac**（airblue / Mac mini / tongyong 8G） | 开发主战场 + 客户演示主力（多档位演示池）| ✅ 三机跑通（5/12 落地） |
+| **RK3588** | **涉密场景 / 国产化路径**（NPU + 离线 + 国产 SoC） | ✅ ASR + LLM NPU 路径全跑通（5/12-5/13）|
+| **Jetson Orin Nano** | 非涉密 + 性能优先场景（CUDA 67 TOPS / 视觉大模型） | ✅ ASR CUDA 跑通（5/12），LLM 协同未做 |
+
+**硬件选型决策原则**：客户场景定，不预设。涉密走 3588，要性能走 Jetson，省钱走 Mac mini。**三套都跑同一份 av_unified_mvp 代码**，差异通过 env / config 切。
+
+### 产品形态（三条定型方向）
+
+按客户付费意愿排序：
+
+#### 形态 A · 纯转写 + 语意执行（**辽河数码的真实需求**）
+
+- **核心**：讯飞同款实时转写体验（去掉 50 万溢价）+ 语义理解 → 设备控制
+- **差异化护城河**：语义执行准确率 + 端侧延迟 + 设备桥接灵活性（讯飞做不到）
+- **客户接入路径**：av/control → **Node-RED 外露**做最后一公里（不在 av_unified_mvp 内造 husion / 厂商 adapter，避免锁死客户硬件）
+- **当前完成度**：ASR ✅ / NPU LLM 漏斗第 2 层 ✅ / location 反幻觉 ✅ / dispatcher echo ✅ / Node-RED 外露桥接 ⏸（客户硬件枚举到位再做）
+
+#### 形态 B · 视频分析输出（边缘计算盒子，分布式部署）
+
+- **核心**：类似边缘计算盒子，能分析**指定视频源**输出语义事件
+- **差异化护城河 = 分布式**：多盒子组网，**输出"差异点"**（同一区域多视角间的差异；时序前后帧的差异；类别差异等），单机推理盒做不到
+- **客户接入**：MQTT 总线即出口，下游甲方 BI / 报警 / 录像系统订阅
+- **当前完成度**：YOLO 单路 ✅ / 多路 RTSP ✅ / 分布式差异点输出 ⏸（未设计）
+
+#### 形态 C · 甲方利旧系统的桥接与运行维护（**整套应用**）
+
+- **核心**：甲方已有设备/系统（hikvision / 海康威视 / husion / 各种 IPC / 老厂控制柜）大量利旧，我们做**桥接 + 统一编排 + 运维监控**
+- **差异化护城河**：模块化 / MQTT 协议契约 / 跨品牌发现（husion_distributed 已是一例）+ 运维可观测（system_info / network_info 已是基础）
+- **客户接入**：作为乙方整套交付（硬件可选我们或甲方自配）+ SLA 运维
+- **当前完成度**：husion 桥接 ✅ / creator 中控 ✅ / 跨品牌发现机制 ✅ / 运维可观测面板 ✅ / 客户 SLA 流程 ⏸
+
+### 演示策略
+
+整机吃力时**分模块演示**：
+- 形态 A → ASR + LLM + dispatcher（不用视频，Mac mini light 档可跑）
+- 形态 B → video_processor + 多路 RTSP 分析（不用 LLM/ASR）
+- 形态 C → husion_distributed + system_info + network_scanner（运维监控视角）
+
+**演示一致性原则**：3588 dashboard 与 Mac dashboard 保持界面一致（两个界面同样 SSE channel + renderer），客户切硬件无感。
 
 ---
 
@@ -1551,7 +1601,22 @@ iCloud 源项目目录下原本有两个文件名直接含真实 API key 的 .tx
 
 ---
 
-### 阶段二精进路径（按业务价值 / 工时 / 风险排序）
+### 阶段三精进路径（2026-05-13 更新，对齐 §1.5 三形态）
+
+> 注：5/13 起开发主线从"阶段二子模块精进"切到"阶段三差异化护城河 + 形态定型"。下方旧条目（A-C 等）保留作历史；新条目优先级见此节首。
+
+#### 当前活跃 sprint（5/13 用户拍板）
+
+| # | Sprint | 关联形态 | 工时 | 状态 |
+|---|---|---|---|---|
+| 1 | **video_processor 接 USB 罗技 920**（3588 已物理连） | 形态 A 演示 + 形态 B 输入源 | 1h | 🟡 进行中 |
+| 2 | **漏斗第 1 层 fast-path**（关键词 0ms 即回，绕过 NPU LLM） | 形态 A 性能 | 2-3h | ⏸ 排队 |
+| 3 | **NPU 升级 Qwen2.5-3B 测试**（解 1.5B 地点偷换） | 形态 A 准确率 | 1h（含模型下载）| ⏸ 排队 |
+| 4 | **av/control → Node-RED 外露桥接**（不在 av_unified_mvp 内造硬件 adapter） | 形态 A 最后一公里 | 1-2h | ⏸ 客户硬件枚举后 |
+| 5 | **video_processor 多路差异点输出** | 形态 B 护城河 | 2-3 天 | ⏸ 形态 B 优先级排定后 |
+| 6 | **运维可观测扩展**（SLA / 告警 / 远程巡检） | 形态 C 护城河 | 1-2 天 | ⏸ 形态 C 立项后 |
+
+### 阶段二精进路径（5/12 之前规划，部分已完成）
 
 #### 第一梯队（客户演示直接受益 · 总计 2-3 天）
 
