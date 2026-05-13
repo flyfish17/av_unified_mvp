@@ -2287,6 +2287,22 @@ Error: {"seq": N, "error": "msg"}
 - workholic7228 模型 license 调研：HF 模型页 gated 401 未显式声明 license ⚠️。底层 Qwen2.5-1.5B-Instruct 是 **Apache 2.0**（Qwen 2.5 系列已换 Apache，与 1.5/2 系列的 Tongyi Qianwen 不同）。法理上继承但商用举证困难。
 - 短期方案：开发/POC 继续用 workholic7228；商用前替换为 **B（rkllm-toolkit 自转，最干净）** 或 **A（c01zaut/Qwen2.5-1.5B-Instruct-RK3588-1.1.4 显式 Apache 2.0，SDK 1.1.4 兼容性需测）**
 
+**全栈 supervisor 上线（用户主动要求"看见 + 测试"）**
+
+5/13 之前 3588 只跑单进程 `audio_processor`（5/12 起 24h+ uptime 作为长跑稳定性样本，OVERNIGHT_HANDOFF 硬约束不准重启），用户看不到 dashboard，只能 ssh /tmp/asr_arm.log。
+
+5/13 下午 stop 单跑模式 → 改 `main.py` supervisor 托管：
+- 7 模块全起：audio_processor / llm_engine（NPU rknn）/ video_processor / system_info / network_info / network_scanner / husion_distributed
+- Dashboard `http://192.168.5.6:5050`（Flask + SSE 实时流）LAN 可达
+- Video MJPEG `http://192.168.5.6:5051`（0 路视频流，因无摄像头配置）
+- `~/creator_ai_demo/venv` 补装 3 个包：`flask` / `opencv-python-headless` / `ultralytics`（首次启动会自动下载 yolov8n.pt）
+
+`docs/deploy/3588-npu.md` 补 § 11「全栈 supervisor 启动」记录这次落地步骤。
+
+**实测发现 NPU 1.5B 地点偷换比预想更严重**
+
+注入 `打开吧台空调` → 模型输出 `2FDiningTable_AirConditioner_On`（把"吧台"偷成"二楼餐桌"），被 location anti-hallucination filter 拒。这是 stress test 之外又一个未提前覆盖的案例。证明 filter 是正确的安全网。要让"吧台"稳定输出 BarCounter_*，需要：① 用户句式必须包含完整地点 label（"打开吧台的空调"）② 设置 `system.default_location: BarCounter` ③ 升级 Qwen2.5-3B 模型
+
 **关键经验**
 
 1. **rkllm_daemon.py 与 smoke_test.py 强耦合**：daemon 通过 `from smoke_test import ...` 拿 ctypes 绑定。两文件必须同目录，部署也是。这是昨夜赶进度时 RKLLMParam / CALLBACK_TYPE 等 binding 写在 smoke_test 里留的债，后续可考虑抽到 `rkllm_bindings.py` 单文件，但现在不动
