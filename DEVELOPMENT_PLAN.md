@@ -2303,6 +2303,33 @@ Error: {"seq": N, "error": "msg"}
 
 注入 `打开吧台空调` → 模型输出 `2FDiningTable_AirConditioner_On`（把"吧台"偷成"二楼餐桌"），被 location anti-hallucination filter 拒。这是 stress test 之外又一个未提前覆盖的案例。证明 filter 是正确的安全网。要让"吧台"稳定输出 BarCounter_*，需要：① 用户句式必须包含完整地点 label（"打开吧台的空调"）② 设置 `system.default_location: BarCounter` ③ 升级 Qwen2.5-3B 模型
 
+**av/control → 设备 dispatcher (C 方案 echo_only 落地)**
+
+新模块 `modules/control_dispatcher/`：
+- 订阅 av/control 拿 cmd_id → catalog 反查 device/action/location 中文 label
+- 发 `av/control/dispatched`：含 ts/cmd/target/action/device/location/original_text/status="echo_only"/correlation_id
+- 声明 stream `{topic: av/control/dispatched, channel: control_dispatched, kind: kv_table, title: "指令下发执行"}`，dashboard 自动出新面板
+- supervisor MANAGED_MODULES 加它，PID 监管 + 退避重拉
+
+设计契约：`status` 字段 echo_only 是 placeholder，后续接 husion adapter / Node-RED / 厂商 SDK 时改 ok/failed + adapter_latency_ms，协议契约不变；下游订阅方无需改。
+
+8 prompt 端到端实测：1 真命令落地 dispatcher，3 被 NPU filter 正确拒，1 非命令被关键词层拦。漏斗 + dispatcher link 完整。
+
+**husion HDC900 设备调研 — 领域空间不匹配**
+
+5/12 husion_distributed 模块已 expose 9 个设备（discovery payload 实测，今日完整摸清）：
+- host = `192.168.5.253`，协议 TCP :6000 + JSON `{cmd_header, cmd_body}`（PDF "产品系统通讯协议-A_V9.4.8_Husion v9.4.8"）
+- ID 5001-5003 = 无纸化电脑（**有信号**）；5004 = 桌插；5005-5009 = Tx 设备（无信号）
+- 视频流 = `ws://192.168.150.X:15354/live/chn2_sub.flv`（FLV WebSocket）
+
+**关键发现**：husion 是**视频信号源切换/拼接**一体机（白鲨 RX 系列），**不控制家居设备**（灯/空调/窗帘）。av_unified_mvp catalog 当前 76 条 cmd 全是家居设备，属于另一套设备空间。
+
+这意味着 NPU LLM 当前输出的 cmd_id（如 `RDDepartment_AirConditioner_On`）husion **不能**执行。客户真实需求若是 husion 一体机驱动的会议室场景，差异化方向是**语音切换大屏画面**（"把无纸化电脑1切到主屏"），需要：
+- catalog 扩 husion 设备类型 + cmd_id（如 `MainScreen_DisplaySource_5001`）
+- control_dispatcher 加 husion adapter，按设备 host/cmd_header 走 TCP :6000
+
+辽河客户实际硬件 + 协议手册到位后再扩这条。今天 C 方案 echo_only dispatcher 已经把架构口子留好，加 adapter 是 +1 个 if branch。
+
 **关键经验**
 
 1. **rkllm_daemon.py 与 smoke_test.py 强耦合**：daemon 通过 `from smoke_test import ...` 拿 ctypes 绑定。两文件必须同目录，部署也是。这是昨夜赶进度时 RKLLMParam / CALLBACK_TYPE 等 binding 写在 smoke_test 里留的债，后续可考虑抽到 `rkllm_bindings.py` 单文件，但现在不动
