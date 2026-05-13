@@ -2395,6 +2395,32 @@ Error: {"seq": N, "error": "msg"}
 
 辽河客户实际硬件 + 协议手册到位后再扩这条。今天 C 方案 echo_only dispatcher 已经把架构口子留好，加 adapter 是 +1 个 if branch。
 
+**漏斗第 1 层 fast-path 落地（5/13 用户拍板"确认"后做）**
+
+`engine.py` 加 `_build_fastpath_index_from_catalog()` + `_fastpath_match()`：原文同时含 location label + device label + action 别名 → 直接返回 cmd_id 0ms 绕过 NPU。
+
+- action 别名表 `_ACTION_ALIASES` 保守："开"→"开/打开/启动"，"关"→"关/关闭/停"，"温度+"→"调高/升高/升温" 等，避免泛同义词污染
+- 跳过 also_in（共享指令避免歧义命中）+ `_global` 类位置
+- label 去空格（catalog 偶有"灯带 1"含空格，文本通常没空格）
+- 唯一命中返回，多 cmd_id 命中按 location label 长度优先（"二楼餐桌" > "餐桌"），同长度真歧义则回 None 走 LLM
+- 在 `generate_command` 开头加 check，命中即 log `⚡ fast-path 命中` + 直接 return
+
+3588 端到端实测（5/13 17:11）：3/4 prompts fast-path 命中**同秒下发**到 dispatcher（vs 之前 NPU 1.5-3s），漏斗第 1 层 50x 加速对命中 case 生效；"把楼上的灯都关了"等笼统/无地点句式正确回落 NPU LLM。
+
+`open_(label)`/`(label1) (label2) (label3)` 包含关系 + 长度优先消歧 + 11 单测全过。
+
+**3B 模型测试 — 网络阻塞 deferred**
+
+候选已锁定：`c01zaut/Qwen2.5-3B-Instruct-RK3588-1.1.4` (HF 公开 Apache 2.0)，多 w8a8 量化变体（`opt-{0,1}-hybrid-ratio-{0.0,0.5,1.0}`），最优配 `opt-1 hybrid-1.0`。
+
+Mac 实测 hf-mirror 国际线路 ~120KB/s，3.5GB 模型 5 分钟下 1GB → 估计 2-3 小时下完。**curl -m 900 超时半残**。3B 测试不是 blocker（fast-path 已覆盖大部分演示，location filter 已拦错误 cmd 到 av/control 前），deferred 到网络好的时段或者用户主动启动。
+
+候选路径备用：
+- HF：`c01zaut/Qwen2.5-3B-Instruct-RK3588-1.1.4` resolve/main/`Qwen2.5-3B-Instruct-rk3588-w8a8-opt-1-hybrid-ratio-1.0.rkllm`（SDK 1.1.4 转，与 runtime 1.2.3 兼容性需要 smoke test 验）
+- 也可 Mac 装 `rkllm-toolkit` 1.2.3 + 输入 Apache 2.0 官方 `Qwen/Qwen2.5-3B-Instruct` 自转一份（链路最干净，license 完全自控）
+
+测时关注：① 加载耗时 + RSS 峰值（预期 ~3.5GB，3588 当前 free 816Mi available 10G，可能进 swap）② 首 token / decode tok/s 退化幅度（1.5B 198ms/8.9 tok/s 是 baseline）③ 地点偷换率（用同 10 prompt stress test 对比 1.5B 的 50% rate）
+
 **关键经验**
 
 1. **rkllm_daemon.py 与 smoke_test.py 强耦合**：daemon 通过 `from smoke_test import ...` 拿 ctypes 绑定。两文件必须同目录，部署也是。这是昨夜赶进度时 RKLLMParam / CALLBACK_TYPE 等 binding 写在 smoke_test 里留的债，后续可考虑抽到 `rkllm_bindings.py` 单文件，但现在不动
