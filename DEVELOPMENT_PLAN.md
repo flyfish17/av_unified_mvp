@@ -2281,6 +2281,12 @@ Error: {"seq": N, "error": "msg"}
 2. **小模型对地点的"偏置"很强**：每次默认猜"研发部"/"走廊"，说明训练分布里这些词 token 概率高。规则 7（default_location）有缓解但只针对未明示场景；模型偷换还是会发生
 3. **罕见词识别失败模式分两类**：(a) `BarCounter_Light1_On` — 把"射灯"映射到 Light1 但该地点没 Light1 → 白名单拒（好）；(b) `Corridor_LuminousWordLight_Off` — 把"机房"换成"走廊"但 LuminousWordLight cmd 是合法 — 白名单不拦 → 必须 location filter
 
+**License 调研 + LLM 部署 SOP 落地**
+
+- `docs/deploy/3588-npu.md` 补 § 10 LLM 部署 SOP（前置 / 下载 / daemon 部署 / smoke test / 集成 / 端到端 MQTT 验证 / 性能 baseline / 故障排查 / license 评估）
+- workholic7228 模型 license 调研：HF 模型页 gated 401 未显式声明 license ⚠️。底层 Qwen2.5-1.5B-Instruct 是 **Apache 2.0**（Qwen 2.5 系列已换 Apache，与 1.5/2 系列的 Tongyi Qianwen 不同）。法理上继承但商用举证困难。
+- 短期方案：开发/POC 继续用 workholic7228；商用前替换为 **B（rkllm-toolkit 自转，最干净）** 或 **A（c01zaut/Qwen2.5-1.5B-Instruct-RK3588-1.1.4 显式 Apache 2.0，SDK 1.1.4 兼容性需测）**
+
 **关键经验**
 
 1. **rkllm_daemon.py 与 smoke_test.py 强耦合**：daemon 通过 `from smoke_test import ...` 拿 ctypes 绑定。两文件必须同目录，部署也是。这是昨夜赶进度时 RKLLMParam / CALLBACK_TYPE 等 binding 写在 smoke_test 里留的债，后续可考虑抽到 `rkllm_bindings.py` 单文件，但现在不动

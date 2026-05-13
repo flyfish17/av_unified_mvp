@@ -37,6 +37,8 @@ Error     (stdout): {"seq": N, "error": "..."}
 
 ## License
 
-- `rknn-llm` SDK (librkllmrt) — Apache 2.0，商用可用
-- Qwen2.5-1.5B-Instruct 模型 — Tongyi Qianwen LICENSE（社区版商用免费 ≤1 亿月活）
-- HF 上 `workholic7228/Qwen2.5-1.5B-Instruct_W8A8_RK3588` 预转模型 page 未显式 license → 商业分发前要么作者确认，要么用 rkllm-toolkit 1.2.3 自己重转一份
+- `rknn-llm` SDK (librkllmrt) — **Apache 2.0**，商用可用
+- 官方 Qwen2.5-1.5B-Instruct 权重（Alibaba） — **Apache 2.0**（Qwen 2.5 系列已换 Apache，与 1.5/2 系列的 Tongyi Qianwen 不同）
+- HF 上 `workholic7228/Qwen2.5-1.5B-Instruct_W8A8_RK3588` 预转模型 — 页面 gated 401 未显式声明 license ⚠️ 法理上继承上游 Apache 2.0，但商用合规举证困难
+- 备选预转：`c01zaut/Qwen2.5-1.5B-Instruct-RK3588-1.1.4` 显式 Apache 2.0（SDK 1.1.4 转，runtime 兼容性需测）
+- 详见 `docs/deploy/3588-npu.md` § 10.9
