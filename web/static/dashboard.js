@@ -120,13 +120,17 @@
     const overviewActive = (next === "__overview");
     wallSlots.forEach(slot => {
       if (overviewActive && slot.sourceName) {
-        // 重新开始（如果之前停了）
+        // 重新开始（如果之前停了），按 kind 分流
         const ep = videoEndpointsCache.find(e => e.name === slot.sourceName);
         if (ep && ep.enabled) {
           const tileEl = document.getElementById("video-wall")?.querySelector(`[data-slot="${slot.idx}"]`);
-          const img = tileEl?.querySelector(".tile-img");
-          if (img && !slot._stopPoll) {
-            startSnapshotPoll(slot, img, rewriteHost(ep.stream_url || ep.url));
+          const media = tileEl?.querySelector(".tile-img");
+          if (media && !slot._stopPoll) {
+            if (ep.kind === "husion_stream") {
+              startFlvStream(slot, media, rewriteHost(ep.stream_url || ep.url));
+            } else {
+              startSnapshotPoll(slot, media, rewriteHost(ep.stream_url || ep.url));
+            }
           }
         }
       } else if (!overviewActive && slot._stopPoll) {
@@ -322,7 +326,11 @@
 
     // 视频墙：根据 video_processor endpoints 自动分配/刷新画格
     if (name === "video_processor") {
-      videoEndpointsCache = (endpoints || []).filter(e => e.kind === "mjpeg");
+      // 视频墙接 husion_stream（FLV WebSocket）+ mjpeg（HTTP multipart）两种 endpoint。
+      // mjpeg 走 startSnapshotPoll <img>，husion_stream 走 startFlvStream <video>+flv.js。
+      videoEndpointsCache = (endpoints || []).filter(
+        e => e.kind === "mjpeg" || e.kind === "husion_stream"
+      );
       assignWallSlots();
       renderWall();
     }
@@ -355,8 +363,16 @@
   }
 
   function rewriteHost(url) {
-    try { const u = new URL(url); u.hostname = window.location.hostname; return u.toString(); }
-    catch (_) { return url; }
+    // 只对 127.0.0.1 / localhost 这种回环 host 重写到浏览器当前 host（MJPEG 后端写死 127.0.0.1）。
+    // husion FLV 等 URL 用真实内网 IP（192.168.150.X，依赖客户端 ifconfig alias 或同段路由），
+    // 不能被改写成 dashboard host，否则浏览器连不通。
+    try {
+      const u = new URL(url);
+      if (u.hostname === "127.0.0.1" || u.hostname === "localhost" || u.hostname === "::1") {
+        u.hostname = window.location.hostname;
+      }
+      return u.toString();
+    } catch (_) { return url; }
   }
 
   // 视频墙改用 multipart MJPEG 流（/video_feed/）——浏览器原生持续接收，无 polling 竞态。
@@ -408,6 +424,54 @@
     connect();
   }
 
+  // husion FLV WebSocket 流：用 flv.js 起 player attach 到 <video>；销毁时清理 player + media。
+  // 与 startSnapshotPoll 接口对齐（slot._stopPoll 是 cleanup）。
+  function startFlvStream(slot, videoEl, url) {
+    if (!window.flvjs || !window.flvjs.isSupported()) {
+      console.warn(`[wall slot ${slot.idx}] flv.js 不可用，无法播 husion 流`);
+      videoEl.style.opacity = "0.3";
+      return;
+    }
+    let player = null;
+    let stopped = false;
+    function clear() {
+      stopped = true;
+      if (player) {
+        try { player.pause(); player.unload(); player.detachMediaElement(); player.destroy(); }
+        catch (_) {}
+        player = null;
+      }
+      try { videoEl.pause(); } catch (_) {}
+      videoEl.removeAttribute("src");
+      try { videoEl.load(); } catch (_) {}
+    }
+    function connect() {
+      if (stopped) return;
+      if (currentView !== "__overview" || document.hidden) {
+        clear(); slot._stopPoll = null;
+        return;
+      }
+      player = window.flvjs.createPlayer(
+        { type: "flv", url: url, isLive: true, cors: true },
+        { enableStashBuffer: false, stashInitialSize: 128 }
+      );
+      player.attachMediaElement(videoEl);
+      player.load();
+      player.play().catch(() => {});
+      player.on(window.flvjs.Events.ERROR, (errType, errDetail) => {
+        if (stopped) return;
+        console.warn(`[wall slot ${slot.idx}] FLV err`, errType, errDetail);
+        // 错误 → 销毁老 player + 1.5s 后重连
+        try { player.destroy(); } catch (_) {}
+        player = null;
+        setTimeout(connect, 1500);
+      });
+    }
+    videoEl.style.opacity = "1";
+    slot._stopPoll = clear;
+    connect();
+  }
+
   // tab 重新可见时，如果当前在总览，让 wall slots 重启
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && currentView === "__overview") {
@@ -436,10 +500,13 @@
         wirePicker(tileEl, slot);
         return;
       }
-      // 实际画格
+      // 实际画格 — kind=husion_stream 用 <video class="tile-img"> 走 flv.js；mjpeg 用 <img>
       tileEl.className = "tile" + (slot.zoomed ? " zoomed" : "");
+      const mediaEl = (ep.kind === "husion_stream")
+        ? `<video class="tile-img" muted playsinline autoplay style="object-fit:cover;width:100%;height:100%"></video>`
+        : `<img class="tile-img" alt="${escHtml(ep.name)}">`;
       tileEl.innerHTML =
-        `<img class="tile-img" alt="${escHtml(ep.name)}">` +
+        mediaEl +
         `<div class="tile-head">` +
           `<span class="tile-name">${escHtml(ep.name)}</span>` +
           (() => {
@@ -478,15 +545,22 @@
           `<span class="spacer"></span>` +
           (ep.enabled ? `<span class="key">点击放大</span>` : `<span class="key" style="color:var(--warn)">未启用</span>`) +
         `</div>`;
-      const img = tileEl.querySelector(".tile-img");
-      // 先停掉旧的轮询定时器
+      const media = tileEl.querySelector(".tile-img");
+      // 先停掉旧的轮询定时器（mjpeg watchdog 或 flv.js player）
       if (slot._stopPoll) { slot._stopPoll(); slot._stopPoll = null; }
       if (ep.enabled) {
-        // 用 stream_url（multipart MJPEG 长连），不再 snapshot 轮询；fallback 到 snapshot
-        startSnapshotPoll(slot, img, rewriteHost(ep.stream_url || ep.url));
+        if (ep.kind === "husion_stream") {
+          // husion FLV：ws://... URL 走 flv.js；host 重写为浏览器当前 host（5/12 host alias 假设）
+          startFlvStream(slot, media, rewriteHost(ep.stream_url || ep.url));
+        } else {
+          // mjpeg：multipart 长连，不再 snapshot 轮询；fallback 到 snapshot
+          startSnapshotPoll(slot, media, rewriteHost(ep.stream_url || ep.url));
+        }
+      } else if (ep.kind === "husion_stream") {
+        media.style.opacity = "0.3";
       } else {
-        img.src = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
-        img.style.opacity = "0.3";
+        media.src = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
+        media.style.opacity = "0.3";
       }
       wirePicker(tileEl, slot);
       // 启用按钮
