@@ -129,7 +129,12 @@
             if (ep.kind === "husion_stream") {
               startFlvStream(slot, media, rewriteHost(ep.stream_url || ep.url));
             } else {
-              startSnapshotPoll(slot, media, rewriteHost(ep.stream_url || ep.url));
+              // mjpeg：grid 用 annotated stream（带 bbox），与 renderWall 一致
+              let streamUrl = ep.stream_url || ep.url;
+              if (streamUrl && !/\bmode=/.test(streamUrl)) {
+                streamUrl += (streamUrl.includes("?") ? "&" : "?") + "mode=annotated";
+              }
+              startSnapshotPoll(slot, media, rewriteHost(streamUrl));
             }
           }
         }
@@ -553,8 +558,14 @@
           // husion FLV：ws://... URL 走 flv.js；host 重写为浏览器当前 host（5/12 host alias 假设）
           startFlvStream(slot, media, rewriteHost(ep.stream_url || ep.url));
         } else {
-          // mjpeg：multipart 长连，不再 snapshot 轮询；fallback 到 snapshot
-          startSnapshotPoll(slot, media, rewriteHost(ep.stream_url || ep.url));
+          // mjpeg：grid 用 annotated stream（带 YOLO bbox 直接画在帧上），保证视频墙
+          // 一眼看到检测在工作。CPU cost 跟 raw 几乎一样（YOLO 推理是独立 fps，annotated
+          // 只是输出已画框帧 vs 原始帧的差异）。stream_url 末尾 append ?mode=annotated。
+          let streamUrl = ep.stream_url || ep.url;
+          if (streamUrl && !/\bmode=/.test(streamUrl)) {
+            streamUrl += (streamUrl.includes("?") ? "&" : "?") + "mode=annotated";
+          }
+          startSnapshotPoll(slot, media, rewriteHost(streamUrl));
         }
       } else if (ep.kind === "husion_stream") {
         media.style.opacity = "0.3";
@@ -923,6 +934,7 @@
   }
 
   // 总览页 Node-RED 区：先探活，再交给 selector 加载具体页
+  let _noderedReprobeTimer = null;
   async function loadOverviewNodeRed() {
     const url = `http://${window.location.hostname}:1880/`;
     const frame = document.getElementById("overview-nodered-frame");
@@ -939,9 +951,18 @@
           frame.src = `http://${window.location.hostname}:1880/dashboard/`;
         }
       }, 5000);
+      // 探活成功 — 停掉 re-probe 定时器
+      if (_noderedReprobeTimer) { clearInterval(_noderedReprobeTimer); _noderedReprobeTimer = null; }
+      // 同时拉一次 flows 填左导航子项 + 总览页选源（之前 init 时探不到导致 nav 缺）
+      detectNodeRedPages();
     } catch (_) {
       fallback.style.display = "flex";
       frame.style.display = "none";
+      // dashboard 早于 Node-RED 启动是常态（user 先开浏览器再 ./start.command），
+      // 启动 15s 周期 re-probe 直到探活成功（成功后 timer 自停）。
+      if (!_noderedReprobeTimer) {
+        _noderedReprobeTimer = setInterval(loadOverviewNodeRed, 15000);
+      }
     }
   }
 
@@ -1200,8 +1221,9 @@
       if (newMode === "edit") {
         btn.textContent = `保存修改（${name}）`;
         cancelBtn.style.display = "";
-        nameIn.disabled = true;  // 不允许改 name（会破坏后端 endpoints 索引）
-        nameIn.title = "edit 模式下不可改名（删除后重新添加）";
+        // 5/13 改：允许 rename — 后端 _update_source 已支持 old_name 协议
+        nameIn.disabled = false;
+        nameIn.title = "可改名；保存时若新名与已有摄像头冲突将失败";
       } else {
         btn.textContent = "添加并启动";
         cancelBtn.style.display = "none";
@@ -1259,10 +1281,15 @@
       if (!name) { msg.textContent = "请填写摄像头名称"; msg.className = "msg err"; return; }
       const topic = (mode === "edit") ? "av/video/source/update" : "av/video/source/add";
       msg.textContent = (mode === "edit" ? "保存中…" : "添加中…"); msg.className = "msg";
+      // edit 模式带 old_name 让后端按旧名查找；name 字段是新名（可能与旧名同）。
+      // add 模式 old_name 缺省，后端忽略。
+      const payload = (mode === "edit")
+        ? { old_name: editingName, name, url, enabled: true }
+        : { name, url, enabled: true };
       try {
         const r = await fetch("/mqtt/publish", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ topic, payload: { name: editingName || name, url, enabled: true } }),
+          body: JSON.stringify({ topic, payload }),
         });
         const j = await r.json();
         if (j.ok) {

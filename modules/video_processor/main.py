@@ -318,23 +318,46 @@ class VideoModule(BaseModule):
         self._publish_discovery("online")
 
     def _update_source(self, src: dict) -> None:
-        """修改现有摄像头 url（回合 27 P1.3）：按 name 找，原地改 url + reload"""
-        name = src.get("name")
-        target = next((s for s in self._sources if s.get("name") == name), None)
+        """修改现有摄像头 url 或 name（回合 27 P1.3 + 5/13 加 rename）。
+
+        协议：
+          - 旧：{name, url, enabled?}  按 name 查找原地改
+          - 新：{old_name, name, url, enabled?}  按 old_name 查找，改 name + url + enabled
+                若 old_name == name 等同旧协议；前端 ✎ 编辑可改名走这条
+        """
+        old_name = src.get("old_name") or src.get("name")
+        new_name = src.get("name")
+        target = next((s for s in self._sources if s.get("name") == old_name), None)
         if target is None:
-            self.logger.warning(f"修改失败：未找到摄像头 {name}")
+            self.logger.warning(f"修改失败：未找到摄像头 {old_name}")
             return
+        renamed = (old_name != new_name) and new_name
+        if renamed:
+            # rename 前检查冲突
+            if any(s.get("name") == new_name for s in self._sources):
+                self.logger.warning(f"改名失败：新名称 {new_name} 已存在")
+                return
+            target["name"] = new_name
         target["url"] = src["url"]
         if "enabled" in src:
             target["enabled"] = src["enabled"]
-        # 同步 endpoints 的 src_url
+        # 同步 endpoints 的 name + src_url（rename 时 stream URL 也要换）
         for ep in self.endpoints:
-            if ep.get("name") == name:
+            if ep.get("name") == old_name:
+                if renamed:
+                    ep["name"] = new_name
+                    qn = quote(str(new_name))
+                    ep["url"]           = f"http://127.0.0.1:{MJPEG_PORT}/snapshot/{qn}?mode=raw"
+                    ep["annotated_url"] = f"http://127.0.0.1:{MJPEG_PORT}/snapshot/{qn}?mode=annotated"
+                    ep["stream_url"]    = f"http://127.0.0.1:{MJPEG_PORT}/video_feed/{qn}"
                 ep["src_url"] = src["url"]
                 if "enabled" in src:
                     ep["enabled"] = src["enabled"]
         self.processor.reload_sources(self._sources)
-        self.logger.info(f"修改摄像头: {name} → {src['url']}")
+        if renamed:
+            self.logger.info(f"修改摄像头: {old_name} → 改名 {new_name} + url={src['url']}")
+        else:
+            self.logger.info(f"修改摄像头: {old_name} → url={src['url']}")
         self._persist_sources()
         self._publish_discovery("online")
 
