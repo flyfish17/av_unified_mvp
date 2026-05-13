@@ -261,6 +261,16 @@ class LLMEngine:
         self.model_fast = ollama.get("model_fast", "qwen3.5:4b")
         self.model_smart = ollama.get("model_smart", "qwen3.5:4b")
         self.timeout = ollama.get("timeout", 30)
+        # 阶段 3 第 3 层（深思）escalate 协议字段：5/14 双路 MQTT POC
+        # escalate_to_jetson: 当 fast-path miss + LLM/filter 都没拿到合法 cmd 时，
+        #   把意图升级到 Jetson 深思层。默认关，向后兼容（3588 现有 5/13 行为不变）。
+        # escalate_receiver: Jetson 端开关，订阅 av/llm/escalate 并跑深思。
+        # host_label: 写到 escalate / av/control payload 区分来源（3588 / jetson）。
+        self.escalate_to_jetson = bool(cfg.get("escalate_to_jetson", False))
+        self.escalate_receiver = bool(cfg.get("escalate_receiver", False))
+        self.host_label = cfg.get("host_label", "unknown")
+        self._last_miss_reason: Optional[str] = None
+        self._last_cmd_attempt: Optional[str] = None
         # 不加 threading.Lock：ollama serve 自带请求队列，外部锁多余且在某次连续语音输入时
         # 触发死锁让整个 llm_engine 卡 4+ 分钟（回合 28 实测）。多个 _ask 并发由 ollama 自己排。
         self._mqtt_publisher: Optional[Callable[[str, dict], None]] = None
@@ -373,9 +383,28 @@ class LLMEngine:
                 if cmd and self._mqtt_publisher:
                     self._mqtt_publisher("av/control", {
                         "topic_type": "event",
-                        "payload": {**cmd, "original_text": text},
+                        "payload": {**cmd, "original_text": text, "source_host": self.host_label},
                         "metadata": {"correlation_id": correlation_id},
                     })
+                elif (cmd is None
+                        and self.escalate_to_jetson
+                        and self._mqtt_publisher
+                        and self._last_miss_reason in (
+                            "llm_returned_null",
+                            "filter_rejected_whitelist",
+                            "filter_rejected_location",
+                        )):
+                    # 阶段 3 第 3 层 escalate：本层失败 → 升级到深思层
+                    self._mqtt_publisher("av/llm/escalate", {
+                        "text": text,
+                        "escalate_reason": self._last_miss_reason,
+                        "original_cmd_attempt": self._last_cmd_attempt,
+                        "correlation_id": correlation_id,
+                        "source_host": self.host_label,
+                    })
+                    logger.info(
+                        f"⤴ escalate → Jetson：reason={self._last_miss_reason} text={text!r}"
+                    )
             else:
                 self._publish_event(
                     event_type="intent_classified",
@@ -386,6 +415,48 @@ class LLMEngine:
                 )
         except Exception as e:
             logger.error(f"process_command 异常: {e}")
+
+    def handle_escalate(self, payload: dict) -> None:
+        """阶段 3 第 3 层（深思）接收 av/llm/escalate 调用。
+
+        与 process_command 不同：
+          - 不发 av/llm/event（已由源端发过 command_generated/None）
+          - 不二次 escalate（这一层就是终点）
+          - 输出到 av/control 时透传 escalated_from / escalate_reason
+        """
+        try:
+            inner = payload.get("payload") if isinstance(payload, dict) else None
+            if not isinstance(inner, dict):
+                inner = payload if isinstance(payload, dict) else {}
+            text = inner.get("text", "")
+            correlation_id = inner.get("correlation_id") or (
+                (payload.get("header") or {}).get("msg_id") if isinstance(payload, dict) else None
+            )
+            escalate_reason = inner.get("escalate_reason", "unknown")
+            source_host = inner.get("source_host", "unknown")
+            if not text:
+                return
+            logger.info(f"⤴ 收到 escalate from {source_host}: reason={escalate_reason} text={text!r}")
+            cmd = self.generate_command(text)
+            if cmd and self._mqtt_publisher:
+                self._mqtt_publisher("av/control", {
+                    "topic_type": "event",
+                    "payload": {
+                        **cmd,
+                        "original_text": text,
+                        "source_host": self.host_label,
+                        "escalated_from": source_host,
+                        "escalate_reason": escalate_reason,
+                    },
+                    "metadata": {"correlation_id": correlation_id},
+                })
+                logger.info(f"⤴↻ escalate 处理成功：{cmd['cmd']} ← {text!r}")
+            else:
+                logger.warning(
+                    f"⤴✗ escalate 深思失败：{text!r} miss={self._last_miss_reason}"
+                )
+        except Exception as e:
+            logger.error(f"handle_escalate 异常: {e}")
 
     # ── 对外接口 ──────────────────────────────────────────────────────
 
@@ -418,13 +489,16 @@ class LLMEngine:
         """
         # 去标点 + 空白：提升 LLM 对 FunASR ITN 加标点的鲁棒
         text_clean = self._PUNCT_RE.sub("", text or "")
+        self._last_cmd_attempt = None
         if not text_clean:
+            self._last_miss_reason = "empty_text"
             return None
         # 漏斗第 1 层 fast-path：原文同时含 location label + device label + action 别名 →
         # 直接命中 cmd_id 0ms 返回，绕过 NPU/ollama。
         # 仅当唯一命中时走，多歧义命中则回落 LLM 让模型权衡。
         fp_hit = self._fastpath_match(text_clean)
         if fp_hit:
+            self._last_miss_reason = None
             logger.info(f"⚡ fast-path 命中：{fp_hit} ← {text!r}")
             return {"cmd": fp_hit}
         prompt = self.command_prompt + text_clean + "\n系统输出："
@@ -440,12 +514,16 @@ class LLMEngine:
         elif isinstance(parsed, str):
             cmd_str = parsed
         if not cmd_str or not isinstance(cmd_str, str):
+            self._last_miss_reason = "llm_returned_null"
             return None
         cmd_str = cmd_str.strip()
         if not cmd_str or cmd_str.lower() == "null":
+            self._last_miss_reason = "llm_returned_null"
             return None
         if self._cmd_whitelist and cmd_str not in self._cmd_whitelist:
             logger.warning(f"LLM hallucinate 拒绝：{cmd_str!r} 不在 catalog 白名单（{len(self._cmd_whitelist)} 项）")
+            self._last_cmd_attempt = cmd_str
+            self._last_miss_reason = "filter_rejected_whitelist"
             return None
         # 地点反幻觉：cmd 前缀的 location label 必须出现在用户原文中，或等于本机 default_location。
         # 缘由：NPU 1.5B 实测会"偷换地点"（说"机房"输出 Corridor_xxx，cmd_id 合法但地点错），
@@ -462,7 +540,10 @@ class LLMEngine:
                         f"location hallucinate 拒绝：cmd={cmd_str!r} 但原文 {text!r} "
                         f"不含地点'{loc_label}'，也非 default_location"
                     )
+                    self._last_cmd_attempt = cmd_str
+                    self._last_miss_reason = "filter_rejected_location"
                     return None
+        self._last_miss_reason = None
         return {"cmd": cmd_str}
 
     def analyze_scene(self, detections: list, camera_name: str) -> Optional[dict]:

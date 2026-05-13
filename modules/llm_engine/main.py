@@ -53,12 +53,19 @@ class LLMModule(BaseModule):
         )
         self.engine.set_mqtt_publisher(self.publish)
 
-        # 订阅音频定稿（主路径：audio_processor → av/audio/command → 意图识别）
-        self.subscribe(cfg.get("mqtt", {}).get("topics", {}).get("audio_command", "av/audio/command"))
-        # 向后兼容：允许直接向 av/llm/command 注入文本（测试 / 手动调用）
-        self.subscribe("av/llm/command")
+        # 是否订阅主路径（av/audio/command + av/llm/command）。默认 true 保留 5/13 行为；
+        # Jetson 深思层应设 false，避免 escalate_receiver 与主路径并跑（每条 cmd 跑两遍 LLM 浪费）。
+        if cfg.get("llm", {}).get("audio_command_subscribe", True):
+            # 订阅音频定稿（主路径：audio_processor → av/audio/command → 意图识别）
+            self.subscribe(cfg.get("mqtt", {}).get("topics", {}).get("audio_command", "av/audio/command"))
+            # 向后兼容：允许直接向 av/llm/command 注入文本（测试 / 手动调用）
+            self.subscribe("av/llm/command")
         # 运行时开关命令：dashboard toggle → POST /mqtt/publish av/llm/cmd {action: enable|disable}
         self.subscribe("av/llm/cmd")
+        # 阶段 3 第 3 层（深思）escalate 接收端：Jetson 端配 escalate_receiver=true 才订阅
+        if cfg.get("llm", {}).get("escalate_receiver", False):
+            self.subscribe("av/llm/escalate")
+            self.logger.info("escalate_receiver 模式：订阅 av/llm/escalate")
 
         signal.signal(signal.SIGINT, lambda s, f: self.stop())
         signal.signal(signal.SIGTERM, lambda s, f: self.stop())
@@ -84,7 +91,13 @@ class LLMModule(BaseModule):
         return payload
 
     def _handle_message(self, topic: str, payload: dict) -> None:
-        """av/audio/command 和 av/llm/command 触发 process_command；av/llm/cmd 是开关。"""
+        """av/audio/command 和 av/llm/command 触发 process_command；av/llm/cmd 是开关；
+        av/llm/escalate 是深思层入口（仅 escalate_receiver=true 时订阅）。"""
+        if topic == "av/llm/escalate":
+            if not self.enabled:
+                return
+            self.engine.handle_escalate(payload)
+            return
         if topic == "av/llm/cmd":
             inner = payload.get("payload", payload) if isinstance(payload, dict) else {}
             action = inner.get("action") or (payload.get("action") if isinstance(payload, dict) else None)
