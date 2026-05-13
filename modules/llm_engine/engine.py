@@ -191,6 +191,66 @@ def _build_location_lookup_from_catalog() -> dict:
     return {}
 
 
+def _build_fastpath_index_from_catalog() -> list:
+    """漏斗第 1 层 fast-path 索引：[(cmd_id, location_label, device_label, action_labels[])]
+
+    每条 cmd 展平为元组，generate_command 阶段用 O(N) 扫描判断"原文是否同时包含三件套
+    label"。N=76 / 早期，可接受；后续 catalog 长起来再换 Trie 或 token-set index。
+
+    action_labels 用列表是因为一个 action（如 On）多别名（"打开"/"开"/"启动"），
+    catalog 当前未直接给同义词表，所以 action_labels = [actions_label[action]] + 同 action
+    族的小辅助词（"打开"="开"等），见函数内 _ACTION_ALIASES。
+
+    跳过 also_in（共享指令）；only 走 primary location，否则一条 cmd 多个 (loc, ...)
+    会导致 fast-path 在原文同时含 2 地点时歧义命中。
+    """
+    # action 同义词（小、保守、确定不歧义）。避免泛同义词污染。
+    _ACTION_ALIASES = {
+        "开": ("开", "打开", "启动"),
+        "关": ("关", "关闭", "停"),
+        "合": ("合", "关闭", "拉合", "拉上"),
+        "停": ("停", "停止"),
+        "温度+": ("调高", "升高", "升温"),
+        "温度-": ("调低", "降低", "降温"),
+        "开始": ("开始", "启动"),
+        "结束": ("结束", "停止", "关掉"),
+    }
+    index: list = []
+    try:
+        catalog_path = Path(__file__).parent.parent.parent / "config" / "device_catalog.json"
+        if not catalog_path.exists():
+            return index
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        loc_to_label = {l["id"]: l["label"] for l in catalog.get("locations", [])}
+        device_types = catalog.get("device_types", {})
+        for c in catalog.get("commands", []):
+            cid = c.get("id")
+            if not cid:
+                continue
+            loc_id = c.get("location", "")
+            loc_label = loc_to_label.get(loc_id, "")
+            if not loc_label or loc_label.startswith("_"):
+                continue  # _global 等不参与 fast-path
+            dev = c.get("device", "")
+            dev_meta = device_types.get(dev, {})
+            dev_label = dev_meta.get("label", "")
+            if not dev_label:
+                continue
+            action = c.get("action", "")
+            action_label = (dev_meta.get("actions_label") or {}).get(action, action)
+            if not action_label:
+                continue
+            # 去 label 内空白：catalog 偶有 "灯带 1" 这种含空格 label，用户文本不会带空格。
+            # text 在 generate_command 已用 _PUNCT_RE 去标点空白，所以这里 label 也跟着去。
+            loc_label_norm = loc_label.replace(" ", "")
+            dev_label_norm = dev_label.replace(" ", "")
+            aliases = tuple(a.replace(" ", "") for a in _ACTION_ALIASES.get(action_label, (action_label,)))
+            index.append((cid, loc_label_norm, dev_label_norm, aliases))
+    except Exception as e:
+        logger.warning(f"fast-path 索引加载失败：{e}")
+    return index
+
+
 class LLMEngine:
     # 暴露给 dashboard 直接拼接：llm.COMMAND_PROMPT + text
     COMMAND_PROMPT = COMMAND_PROMPT
@@ -209,10 +269,12 @@ class LLMEngine:
         self._keywords = _build_keywords_from_catalog()
         self._cmd_whitelist = _build_cmd_whitelist_from_catalog()
         self._location_lookup = _build_location_lookup_from_catalog()
+        self._fastpath_index = _build_fastpath_index_from_catalog()
         self._default_location_id = default_location
         logger.info(f"control 关键词集（catalog derive）：{len(self._keywords)} 个")
         logger.info(f"cmd 白名单（catalog derive）：{len(self._cmd_whitelist)} 个")
         logger.info(f"location 集（地点反幻觉过滤）：{len(self._location_lookup)} 个，default={default_location or '<未设>'}")
+        logger.info(f"fast-path 索引（漏斗第 1 层）：{len(self._fastpath_index)} 条")
         # ollama 必走本机直连：trust_env=False 完全忽略 http_proxy/https_proxy 环境变量，
         # 防 Clash 等系统代理把 127.0.0.1 流量也劫走（NO_PROXY 在某些 requests 版本不可靠）。
         self._http = requests.Session()
@@ -358,6 +420,13 @@ class LLMEngine:
         text_clean = self._PUNCT_RE.sub("", text or "")
         if not text_clean:
             return None
+        # 漏斗第 1 层 fast-path：原文同时含 location label + device label + action 别名 →
+        # 直接命中 cmd_id 0ms 返回，绕过 NPU/ollama。
+        # 仅当唯一命中时走，多歧义命中则回落 LLM 让模型权衡。
+        fp_hit = self._fastpath_match(text_clean)
+        if fp_hit:
+            logger.info(f"⚡ fast-path 命中：{fp_hit} ← {text!r}")
+            return {"cmd": fp_hit}
         prompt = self.command_prompt + text_clean + "\n系统输出："
         raw = self._ask_fast(prompt)
         parsed = self._parse_json(raw)
@@ -417,6 +486,36 @@ class LLMEngine:
         return entities
 
     # ── 内部 ──────────────────────────────────────────────────────────
+
+    def _fastpath_match(self, text: str) -> Optional[str]:
+        """fast-path 唯一命中返回 cmd_id；歧义 / 不命中返回 None 让上层走 LLM。
+
+        三件套都要 substring 包含：location label + device label + 任一 action alias。
+        多条命中按优先级：location label 更长（更具体）的优先（"二楼餐桌" > "餐桌"）；
+        同位置同设备多 action 命中（如 "开窗帘关吧台灯" 复合）回 None 走 LLM。
+        """
+        hits = []
+        for cid, loc_label, dev_label, action_aliases in self._fastpath_index:
+            if loc_label not in text:
+                continue
+            if dev_label not in text:
+                continue
+            if not any(a in text for a in action_aliases):
+                continue
+            hits.append((cid, loc_label))
+        if not hits:
+            return None
+        # 同 cmd_id 命中多次（aliases 重叠）去重
+        unique = {cid for cid, _ in hits}
+        if len(unique) == 1:
+            return next(iter(unique))
+        # 多 cmd_id 命中：取 location label 最长的（"二楼餐桌" > "餐桌"避免歧义）。
+        # 若长度也相同（不同 loc 同 device 同 action 命中）说明真歧义 → 回落 LLM。
+        max_loc_len = max(len(loc) for _, loc in hits)
+        finalists = [cid for cid, loc in hits if len(loc) == max_loc_len]
+        if len(set(finalists)) == 1:
+            return finalists[0]
+        return None
 
     def _ask_fast(self, prompt: str) -> str:
         """generate_command 的后端路由：rknn 走 NPU daemon，否则 ollama fast 模型。
