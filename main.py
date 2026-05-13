@@ -55,6 +55,9 @@ MANAGED_MODULES = [
     "modules.network_scanner.main",
     # 跨品牌桥接：husion HDC900 一体机分布式终端发现
     "modules.husion_distributed.main",
+    # av/control → 设备 dispatcher（当前 echo_only，dashboard 反馈用；
+    # 接真硬件后扩 husion / Node-RED / 厂商 adapter）
+    "modules.control_dispatcher.main",
 ]
 
 MAX_RETRY_DELAY = 60   # 最大退避秒数
