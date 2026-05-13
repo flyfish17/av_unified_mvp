@@ -2421,6 +2421,28 @@ Mac 实测 hf-mirror 国际线路 ~120KB/s，3.5GB 模型 5 分钟下 1GB → �
 
 测时关注：① 加载耗时 + RSS 峰值（预期 ~3.5GB，3588 当前 free 816Mi available 10G，可能进 swap）② 首 token / decode tok/s 退化幅度（1.5B 198ms/8.9 tok/s 是 baseline）③ 地点偷换率（用同 10 prompt stress test 对比 1.5B 的 50% rate）
 
+**5/13 下午收尾 — Node-RED + 视频墙 4 路 + 综合压测**
+
+接下来用户拍板的 5 件事一次推完：
+
+1. **Node-RED 启动** — `nohup node-red --max-old-space-size=512` 在 :1880，dashboard 中控面板 iframe 可加载。demo flow 的 ffmpeg rtsp 截图 5.211/.215 不通是已知 noise（CPU 微浪费 ~10%）
+2. **视频墙 4 路 husion FLV 扩展** — `web/static/dashboard.js` 视频墙 `videoEndpointsCache` 包含 `mjpeg + husion_stream`，按 `ep.kind` 分流：mjpeg 走 `<img>` + multipart 长连，husion_stream 走 `<video>` + `flv.js`。新增 `startFlvStream()` 模拟 `startSnapshotPoll` 接口。**修 `rewriteHost()` bug**：原版无条件改 hostname → dashboard host，对 mjpeg 127.0.0.1 正确但对 husion 真 IP（192.168.150.X）完全连不通；修为只对 127.0.0.1/localhost/::1 回环 rewrite，真 IP 保留。依赖客户端浏览器主机能路由 192.168.150.X（Mac 上 5/12 已配 ifconfig alias）。
+3. **3588 负荷压测** — 8 模块 + Node-RED + USB C920 + 2 NPU daemon 并发：mem 3.2GB/15GB（10GB available，**swap 0**）；load 4.5-5.5（8 核约 60% 利用）；NPU Core0 5%（idle）；`video_processor` 357% CPU 是 YOLOv8n CPU 推理主消耗。3 路 husion FLV 在浏览器端解码，3588 不增 CPU，**4 路混播无瓶颈**
+4. **12 prompt 综合压测漏斗全链路** —
+   - fast-path 命中 5（42%）：研发部空调开/吧台灯带关/二楼餐桌空调开/机房空调温度-/走廊轨道灯关，全部同秒落 av/control + dispatched
+   - NPU LLM 命中 1（8%）："把吧台灯关了"笼统"灯"走 NPU 规则 2 优先级匹配 → `BarCounter_Light_Off`
+   - location filter 拦错命令 2（17%）：洽谈室→研发部 / 机房→走廊
+   - whitelist 拦 hallucinate 2（17%）：楼上/请帮我开灯 NPU 强加 RDDepartment 前缀但白名单拒
+   - 关键词层拦非命令 2（17%）：今天天气/你好啊
+   - **有效控制率 6/8 控制类 = 75%；错误命令落地率 0%**
+
+5. **5/13 当日成果总览**（按 §1.5 三形态对齐）：
+   - **形态 A** 纯转写+语意执行：fast-path + NPU LLM + location filter + dispatcher 漏斗完整，端到端 75% 控制率 / 0% 错命令；NPU 1.5B 模型 license 调研完结 + 备选 3B 路径已记
+   - **形态 B** 视频分析+分布式：USB 罗技 C920 接入 video_processor + YOLO + MJPEG :5051 单路 OK；视频墙扩 4 路 husion FLV（前端浏览器渲染）；多路差异点输出还未做
+   - **形态 C** 利旧桥接+运维：control_dispatcher echo_only 占位 + dashboard "指令下发执行"面板；husion 9 设备发现 + Node-RED 中控面板；运维可观测面板（system_info/network_info）已在。真实硬件 adapter 等客户场景
+
+5/13 提交记录（合计 11 commits）：`ea82230/c27f86b/74050b4/dc8f0b0/73fb40c/87a87d8/27de4c4/ef7072a/61fc64f/841b288/42e845b`，全 push 在 `sprint/liaohe-3588-night-poc-20260511`。
+
 **关键经验**
 
 1. **rkllm_daemon.py 与 smoke_test.py 强耦合**：daemon 通过 `from smoke_test import ...` 拿 ctypes 绑定。两文件必须同目录，部署也是。这是昨夜赶进度时 RKLLMParam / CALLBACK_TYPE 等 binding 写在 smoke_test 里留的债，后续可考虑抽到 `rkllm_bindings.py` 单文件，但现在不动
