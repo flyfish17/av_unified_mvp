@@ -173,6 +173,24 @@ def _build_cmd_whitelist_from_catalog() -> set:
     return set()
 
 
+def _build_location_lookup_from_catalog() -> dict:
+    """{location_id: location_label}，用于地点 anti-hallucination 后置过滤。
+
+    NPU 1.5B 实测会"偷换地点"：用户说"机房发光字灯"模型输出 `Corridor_LuminousWordLight_Off`
+    （设备对，地点错），cmd_id 在白名单内不被拦 → 错命令真落到 av/control。
+    用此映射做后置校验：cmd 前缀 location 的 label 必须出现在原始 text 中
+    （或等于本机 default_location），否则拒绝。
+    """
+    try:
+        catalog_path = Path(__file__).parent.parent.parent / "config" / "device_catalog.json"
+        if catalog_path.exists():
+            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+            return {l["id"]: l["label"] for l in catalog.get("locations", []) if l.get("id")}
+    except Exception as e:
+        logger.warning(f"location lookup 加载失败：{e}")
+    return {}
+
+
 class LLMEngine:
     # 暴露给 dashboard 直接拼接：llm.COMMAND_PROMPT + text
     COMMAND_PROMPT = COMMAND_PROMPT
@@ -190,8 +208,11 @@ class LLMEngine:
         self.command_prompt = _build_command_prompt_from_catalog(default_location)
         self._keywords = _build_keywords_from_catalog()
         self._cmd_whitelist = _build_cmd_whitelist_from_catalog()
+        self._location_lookup = _build_location_lookup_from_catalog()
+        self._default_location_id = default_location
         logger.info(f"control 关键词集（catalog derive）：{len(self._keywords)} 个")
         logger.info(f"cmd 白名单（catalog derive）：{len(self._cmd_whitelist)} 个")
+        logger.info(f"location 集（地点反幻觉过滤）：{len(self._location_lookup)} 个，default={default_location or '<未设>'}")
         # ollama 必走本机直连：trust_env=False 完全忽略 http_proxy/https_proxy 环境变量，
         # 防 Clash 等系统代理把 127.0.0.1 流量也劫走（NO_PROXY 在某些 requests 版本不可靠）。
         self._http = requests.Session()
@@ -357,6 +378,22 @@ class LLMEngine:
         if self._cmd_whitelist and cmd_str not in self._cmd_whitelist:
             logger.warning(f"LLM hallucinate 拒绝：{cmd_str!r} 不在 catalog 白名单（{len(self._cmd_whitelist)} 项）")
             return None
+        # 地点反幻觉：cmd 前缀的 location label 必须出现在用户原文中，或等于本机 default_location。
+        # 缘由：NPU 1.5B 实测会"偷换地点"（说"机房"输出 Corridor_xxx，cmd_id 合法但地点错），
+        # 白名单不拦但执行就是错命令。最长前缀匹配避开 "DiningTable" vs "2FDiningTable" 歧义。
+        if self._location_lookup:
+            matches = [lid for lid in self._location_lookup if cmd_str.startswith(lid + "_")]
+            if matches:
+                loc_id = max(matches, key=len)
+                loc_label = self._location_lookup.get(loc_id, "")
+                # _global 是合法的全局指令前缀，不需要在 text 出现
+                if loc_id != "_global" and loc_id != self._default_location_id \
+                        and loc_label and loc_label not in text:
+                    logger.warning(
+                        f"location hallucinate 拒绝：cmd={cmd_str!r} 但原文 {text!r} "
+                        f"不含地点'{loc_label}'，也非 default_location"
+                    )
+                    return None
         return {"cmd": cmd_str}
 
     def analyze_scene(self, detections: list, camera_name: str) -> Optional[dict]:

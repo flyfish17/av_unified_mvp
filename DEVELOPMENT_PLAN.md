@@ -2238,7 +2238,7 @@ Error: {"seq": N, "error": "msg"}
 
 **3588 联跑验证**（5/13 上午）
 
-不动 av_processor PID 974319 + sensevoice daemon PID 974370，把 `rknn_backend.py` + 一份独立 test 脚本 scp 到 3588 `/tmp/` 跑：
+**轮 1 · 直调 wrapper**：不动 guard 进程 974319 / 974370，把 `rknn_backend.py` + 独立 test scp 到 3588 `/tmp/` 直调 `RKLLMBackend.ask()`：
 
 | prompt | e2e | NPU 输出 | 评 |
 |---|---|---|---|
@@ -2246,7 +2246,40 @@ Error: {"seq": N, "error": "msg"}
 | "把空调关掉" | 1.8s | `{"cmd":"RDDepartment_AirConditioner_Off"}` | ✅ |
 | "今天天气真好" | 0.8s | `{"cmd": null}` | ✅ 正确拒绝非命令 |
 
-冷启 2.2s + RSS 1.75GB 与昨夜数据吻合。两个 guard 进程全程存活。Mem 12GB 余量。
+**轮 2 · 全模块 MQTT 端到端**：3588 上 `git pull` 拉今天 3 commit，`AV_LLM_BACKEND=rknn python3 modules/llm_engine/main.py` 后台起，`mosquitto_pub -t av/llm/command` 注入 5 prompts，`mosquitto_sub -t av/control -t av/llm/event` 同时抓：
+
+| 输入 | NPU cmd | av/control 落地 | latency |
+|---|---|---|---|
+| 把研发部空调打开 | `RDDepartment_AirConditioner_On` | ✅ | first |
+| 关掉吧台灯 | `BarCounter_Light_Off` | ✅ | ~1.6s |
+| 调高二楼餐桌空调温度 | `2FDiningTable_AirConditioner_TempUp` | ✅ | ~2.3s |
+| 今天天气怎么样 | `intent_classified is_command:false` | (无 — 非命令) | <10ms 关键词过滤拦 |
+| 拉开吧台窗帘 | `BarCounter_Curtain_Open` | ✅ | ~1.7s |
+
+每条命令都正确生成 cmd_id 并发到 av/control。意图分类（关键词层）也对 — "今天天气"在 LLM 之前就被 classify_intent 关键词过滤拦下，省下一次 NPU 推理（漏斗第 1 层正确发挥）。
+
+冷启 2.2s + RSS 1.75GB 与昨夜数据吻合。两个 guard 进程（974319 av_processor + 974370 sensevoice daemon）全程存活，Mem 12GB 余量。测试后停掉 test llm_engine 进程留干净状态给后续真实场景。
+
+**轮 3 · 10-prompt 困难 case 压测 + location 反幻觉过滤上线**
+
+注入 10 个困难 case（罕见设备词 / 地点错位 / 复合指令 / 语气词 / 非命令），暴露 NPU 1.5B 关键失败模式：**模型偷换地点**（用户说"机房"输出 `Corridor_xxx`、说"会议室1"输出 `RDDepartment_xxx`），cmd_id 落在白名单内不被拦 → 错命令真发到 av/control。
+
+修法：`engine.py` 加 `_build_location_lookup_from_catalog()` + `generate_command` 末段 **location anti-hallucination 后置过滤** —— cmd 前缀 location 的 label 必须出现在用户原文中，或等于本机 `default_location`，或是 `_global`，否则拒绝。最长前缀匹配避开 `DiningTable` vs `2FDiningTable` 歧义。
+
+| 指标 | filter 前 | filter 后 |
+|---|---|---|
+| av/control 落地命令 | 6（含 3 个错位地点 ❌） | 4（全部正确 ✅） |
+| location hallucinate 拦截 | 0 | **3** |
+| cmd 白名单拦截 | 2（罕见词 hallucinate） | 2（同） |
+| 真正确数 | 3 | 4 |
+
+副作用评估：filter conservative — 仅当地点既不在原文也不等于 default_location 才拒。Mac mini @ RDDepartment 演示场景"开窗帘"→ cmd 前缀 RDDepartment == default → 通过；airblue/tongyong 无 default 但用户必说地点（"打开吧台空调"）→ 通过。**罕见设备词识别失败是模型能力上限**（"射灯"、"虚光"），prompt 改不了，需要换 3B 模型或 RAG。
+
+**关键经验**
+
+1. **白名单不够 — 还得加 location anti-hallucination**：NPU 1.5B 经常输出"设备对+地点错"的合法 cmd_id，白名单过得了但实际是错命令。Deterministic 后置过滤比改 prompt 更可靠（prompt 加规则反而被小模型 noise 淹没）
+2. **小模型对地点的"偏置"很强**：每次默认猜"研发部"/"走廊"，说明训练分布里这些词 token 概率高。规则 7（default_location）有缓解但只针对未明示场景；模型偷换还是会发生
+3. **罕见词识别失败模式分两类**：(a) `BarCounter_Light1_On` — 把"射灯"映射到 Light1 但该地点没 Light1 → 白名单拒（好）；(b) `Corridor_LuminousWordLight_Off` — 把"机房"换成"走廊"但 LuminousWordLight cmd 是合法 — 白名单不拦 → 必须 location filter
 
 **关键经验**
 
