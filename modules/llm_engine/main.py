@@ -63,7 +63,19 @@ class LLMModule(BaseModule):
         signal.signal(signal.SIGINT, lambda s, f: self.stop())
         signal.signal(signal.SIGTERM, lambda s, f: self.stop())
 
-        self.logger.info(f"LLM Engine 初始化完成，Ollama: {self.engine.url}，意图判断: {'ON' if self.enabled else 'OFF'}")
+        self.logger.info(
+            f"LLM Engine 初始化完成，backend={self.engine.backend}，"
+            f"意图判断: {'ON' if self.enabled else 'OFF'}"
+        )
+
+    def stop(self) -> None:
+        # NPU daemon 走 subprocess，必须显式 close 否则 systemd/supervisor
+        # 重拉时 fd 1 / NPU handle 没释放。ollama backend 走 HTTP 无 state，close() no-op。
+        try:
+            self.engine.close()
+        except Exception as e:
+            self.logger.warning(f"engine.close 异常：{e}")
+        super().stop()
 
     def _discovery_payload(self, event: str) -> dict:
         # 在公告里带 enabled，让前端 header toggle 实时同步当前状态

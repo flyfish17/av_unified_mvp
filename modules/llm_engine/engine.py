@@ -6,9 +6,14 @@ LLM 决策引擎 - 意图识别 + 项目指令字典翻译
 支持两种调用方式：
   - 直接调用: classify_intent / generate_command / analyze_scene（主程模式）
   - MQTT:    set_mqtt_publisher() + process_command()（独立模块订阅 av/llm/command）
+
+后端：默认 ollama HTTP；3588 等 NPU 设备可设 env `AV_LLM_BACKEND=rknn` 或
+config `llm.backend: rknn` 走 RKLLM daemon（仅 generate_command 走 NPU；
+analyze_scene 仍走 ollama smart 模型）。
 """
 import json
 import logging
+import os
 import re
 import threading
 from pathlib import Path
@@ -191,6 +196,39 @@ class LLMEngine:
         # 防 Clash 等系统代理把 127.0.0.1 流量也劫走（NO_PROXY 在某些 requests 版本不可靠）。
         self._http = requests.Session()
         self._http.trust_env = False
+        # 后端选择：env 优先 cfg 其次；rknn 启动失败回退 ollama 不阻塞。
+        backend = (os.environ.get("AV_LLM_BACKEND") or cfg.get("backend") or "ollama").lower()
+        self._rknn = None
+        self.backend = "ollama"
+        if backend == "rknn":
+            try:
+                from modules.llm_engine.rknn_backend import RKLLMBackend
+                rknn_cfg = cfg.get("rknn", {})
+                self._rknn = RKLLMBackend(
+                    daemon_dir=rknn_cfg.get("daemon_dir"),
+                    model_path=rknn_cfg.get("model_path"),
+                    lib_path=rknn_cfg.get("lib_path"),
+                    max_context_len=rknn_cfg.get("max_context_len", 2048),
+                    max_new_tokens=rknn_cfg.get("max_new_tokens", 200),
+                )
+                ack = self._rknn.start()
+                self.backend = "rknn"
+                logger.info(f"LLM 后端: rknn (NPU)，daemon ack={ack}")
+            except Exception as e:
+                logger.error(f"RKLLM 后端启动失败，回退 ollama：{e}")
+                self._rknn = None
+                self.backend = "ollama"
+        if self.backend == "ollama":
+            logger.info(f"LLM 后端: ollama @ {self.url}，fast={self.model_fast} smart={self.model_smart}")
+
+    def close(self):
+        """模块退出时清理 NPU daemon。ollama 无 state 无需 close。"""
+        if self._rknn is not None:
+            try:
+                self._rknn.stop()
+            except Exception as e:
+                logger.warning(f"关闭 RKLLM daemon 异常：{e}")
+            self._rknn = None
 
     # ── MQTT 集成 ─────────────────────────────────────────────────────
 
@@ -300,7 +338,7 @@ class LLMEngine:
         if not text_clean:
             return None
         prompt = self.command_prompt + text_clean + "\n系统输出："
-        raw = self._ask(self.model_fast, prompt)
+        raw = self._ask_fast(prompt)
         parsed = self._parse_json(raw)
         cmd_str: Optional[str] = None
         if isinstance(parsed, dict):
@@ -342,6 +380,17 @@ class LLMEngine:
         return entities
 
     # ── 内部 ──────────────────────────────────────────────────────────
+
+    def _ask_fast(self, prompt: str) -> str:
+        """generate_command 的后端路由：rknn 走 NPU daemon，否则 ollama fast 模型。
+
+        NPU daemon 死掉会自动回退 ollama（不让 NPU 故障阻塞主链路）。
+        """
+        if self.backend == "rknn" and self._rknn is not None:
+            if self._rknn.is_alive():
+                return self._rknn.ask(prompt)
+            logger.warning("RKLLM daemon 已死，本次回退 ollama")
+        return self._ask(self.model_fast, prompt)
 
     def _ask(self, model: str, prompt: str, think: bool = False) -> str:
         """调用 Ollama API。返回去除 <think> 标签后的 response 字段。

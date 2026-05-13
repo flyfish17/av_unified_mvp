@@ -1,0 +1,11 @@
+[
+  {"id": "s1", "group": "short", "prompt": "你好"},
+  {"id": "s2", "group": "short", "prompt": "今天天气怎么样"},
+  {"id": "s3", "group": "short", "prompt": "1+1=?"},
+  {"id": "m1", "group": "medium", "prompt": "请用一句话介绍清华大学"},
+  {"id": "m2", "group": "medium", "prompt": "我家厨房的灯坏了，怎么办？给我列三个步骤"},
+  {"id": "m3", "group": "medium", "prompt": "把这句话翻译成英文：今晚月色真美"},
+  {"id": "l1", "group": "long_intent", "prompt": "你是一个家居设备语音助手。请从下面这条用户指令中提取意图，只输出 JSON 格式 {\"device\":\"...\",\"action\":\"...\",\"room\":\"...\"}。\n用户指令：把客厅的空调温度调到 26 度。\nJSON:"},
+  {"id": "l2", "group": "long_intent", "prompt": "你是一个家居设备语音助手。请从下面这条用户指令中提取意图，只输出 JSON 格式 {\"device\":\"...\",\"action\":\"...\",\"room\":\"...\"}。\n用户指令：关闭餐桌上方的射灯。\nJSON:"},
+  {"id": "l3", "group": "long_intent", "prompt": "你是一个家居设备语音助手。请从下面这条用户指令中提取意图，只输出 JSON 格式 {\"device\":\"...\",\"action\":\"...\",\"room\":\"...\"}。\n用户指令：把书房的窗帘拉开一半，并打开台灯。\nJSON:"}
+]

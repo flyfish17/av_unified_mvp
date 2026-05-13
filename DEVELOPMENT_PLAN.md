@@ -2217,3 +2217,57 @@ Error: {"seq": N, "error": "msg"}
   - "8GB MacBook Air 也能跑"下沉案例 / 便携 → **tongyong (5.146)**
 - 临时 NOPASSWD 文件（`/etc/sudoers.d/*-tmp`）都已撤销。如果发现哪台机器还留着，`sudo rm /etc/sudoers.d/<user>-tmp`
 
+### 2026-05-13 阶段 3 漏斗第 2 层 NPU 后端入仓 + 集成验证
+
+**承接昨夜**：`OVERNIGHT_REPORT_20260513.md` 自主推进 7 milestone 全过，Qwen2.5-1.5B INT8 在 RK3588 NPU 跑通（首 token 198-274ms 比 ollama CPU 快 4-7×、decode 8.9 tok/s、1.75GB RAM、27 prompt × 3 round 无衰减）。产物当时未入仓，今日收口。
+
+**今天的代码改动**
+
+- `scripts/templates/rkllm/`（新目录）入仓 6 文件 + README：
+  - `rkllm_daemon.py`（常驻 daemon，librkllmrt ctypes，stdin/stdout JSON 协议）
+  - `smoke_test.py`（ctypes 绑定定义，daemon import 复用）
+  - `benchmark.py` / `ollama_bench.py` / `daemon_client_test.py` / `prompts.json`（重现昨夜实测脚本 + 数据集）
+  - 与 `scripts/templates/sensevoice_rknn_daemon.py` 平行：仓库内不直接 import，由 `modules/llm_engine/rknn_backend.py` 通过 subprocess 拉起。AGPL 隔离虽不必（rknn-llm SDK 是 Apache 2.0）但模式统一 + 方便单独 rsync 到 3588 不带整个仓库
+- `modules/llm_engine/rknn_backend.py`（新文件）`RKLLMBackend` 类，与 `modules/audio_processor/rknn_backend.py` 镜像：`start()`/`stop()`/`ask(prompt)`/`is_alive()`。stdin/stdout JSON 协议；soft timeout 用 helper 线程 + `readline()`（readline 没原生 timeout）
+- `modules/llm_engine/engine.py` 加后端路由：
+  - `__init__` 读 `AV_LLM_BACKEND` env / cfg `llm.backend`；`rknn` 则启动 `RKLLMBackend`，**失败自动回退 ollama 不阻塞**
+  - 新 `_ask_fast(prompt)` 内部路由：`backend==rknn` 走 NPU daemon；daemon 死掉单次回退 ollama；其它情况走原 `_ask(self.model_fast, prompt)`
+  - `generate_command` 改调 `_ask_fast`；`analyze_scene` 仍走 `_ask(self.model_smart, ...)`（视觉场景分析继续 ollama smart 模型，NPU 仅承担漏斗第 2 层意图翻译）
+  - 新 `close()` 释放 daemon（ollama no-op）
+- `modules/llm_engine/main.py` `LLMModule.stop()` 显式调 `self.engine.close()` 后再 `super().stop()` —— NPU daemon 必须释放，否则 supervisor 30s 重拉时 NPU handle 没释放
+
+**3588 联跑验证**（5/13 上午）
+
+不动 av_processor PID 974319 + sensevoice daemon PID 974370，把 `rknn_backend.py` + 一份独立 test 脚本 scp 到 3588 `/tmp/` 跑：
+
+| prompt | e2e | NPU 输出 | 评 |
+|---|---|---|---|
+| "打开窗帘" | 3.1s | `{"cmd":"RDDepartment_Curtain_Open"}` | ✅ catalog 白名单可过 |
+| "把空调关掉" | 1.8s | `{"cmd":"RDDepartment_AirConditioner_Off"}` | ✅ |
+| "今天天气真好" | 0.8s | `{"cmd": null}` | ✅ 正确拒绝非命令 |
+
+冷启 2.2s + RSS 1.75GB 与昨夜数据吻合。两个 guard 进程全程存活。Mem 12GB 余量。
+
+**关键经验**
+
+1. **rkllm_daemon.py 与 smoke_test.py 强耦合**：daemon 通过 `from smoke_test import ...` 拿 ctypes 绑定。两文件必须同目录，部署也是。这是昨夜赶进度时 RKLLMParam / CALLBACK_TYPE 等 binding 写在 smoke_test 里留的债，后续可考虑抽到 `rkllm_bindings.py` 单文件，但现在不动
+2. **后端路由放 `_ask_fast` 而不是 `_ask`**：NPU 只承担 generate_command（漏斗第 2 层意图），scene 分析继续 ollama smart 模型。一个 hint 方法分两条路，不污染原 `_ask`
+3. **NPU 失败回退 ollama**：daemon 启动失败 / 推理时死掉都回退；NPU 故障不能阻塞主链路，符合"长期技术底座"原则
+4. **subprocess readline soft-timeout 用 helper 线程**：Python `readline()` 没原生 timeout 参数；`selectors` 处理过 pipe 但 helper 线程 + `Thread.join(timeout)` 最短最直观，daemon 同步推理一般 < 30s 不会浪费太多
+
+**未完成 / 下次接手**
+
+1. **3588 上跑全模块集成测试**：用 `AV_LLM_BACKEND=rknn` 启 llm_engine module，把 ASR (sensevoice daemon) → MQTT av/audio/command → LLM (NPU daemon) → av/control 端到端串起来，30 min+ 真实音频流量回放
+2. **NPU prompt 工程加固**：昨夜实测 Qwen2.5-1.5B 对复杂/罕见词意图（"餐桌上方射灯"等）会破坏 schema 输出多 JSON。需 few-shot + "output exactly one JSON object" + 设备词表收紧。当前 prompt 已是 5/12 下午 `cmd_id(label)` 加固版，但 NPU 模型对 prompt 敏感度高于 ollama Q4，可能需要单独 prompt 模板
+3. **`docs/deploy/3588-npu.md` 补 LLM 段**：当前是 ASR-only 部署 SOP，补 NPU LLM 部署步骤（SDK 落点 + 模型获取 + daemon 路径 + 环境变量）
+4. **License 调研**：HF 上 `workholic7228/Qwen2.5-1.5B-Instruct_W8A8_RK3588` 预转模型 page 未显式 license；商业前要么找作者确认，要么用 rkllm-toolkit 1.2.3 自己重转一份（README 已记）
+5. **fix_freq_rk3588.sh** 没跑，跑了应可再压 5-10% 延迟；先确认对 av_processor 不冲突
+
+**下次接手所需上下文**
+
+- 3588 已有部署：`~/rkllm-poc/{artifacts/rknn-llm/, artifacts/Qwen2.5-1.5B-Instruct_W8A8_RK3588.rkllm, daemon/*.py}`
+- 部署仓库内模板到 3588：`rsync -av scripts/templates/rkllm/ firefly@192.168.5.6:~/rkllm-poc/daemon/`
+- 启用 NPU 后端：`AV_LLM_BACKEND=rknn python modules/llm_engine/main.py`（可选 `AV_RKLLM_DAEMON_DIR` 覆盖路径）
+- 不启用就是原 ollama 行为（默认）
+- guard 进程 PID 974319（av_processor）+ 974370（sensevoice daemon）今日仍存活，5/12 起 24h+ uptime，作为长跑稳定性样本不要重启
+
