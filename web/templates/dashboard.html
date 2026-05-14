@@ -1381,6 +1381,7 @@
     // 离线兜底：如果 LLM 慢/失败，sentence 字段里附带 fallback_cmd，3s 超时后直发 av/control
     (function initDemoBar() {
       const DEMOS = [
+        // 家居控制 5 个
         { no: 1, text: '把研发部空调打开',     fallback: 'RDDepartment_AirConditioner_On',
           hint: 'av/llm/command → 期望 cmd=RDDepartment_AirConditioner_On' },
         { no: 2, text: '关闭吧台灯带',         fallback: 'BarCounter_Light_Off',
@@ -1391,6 +1392,17 @@
           hint: 'av/llm/command → 期望 cmd=MeetingRoom1_Curtain_Open' },
         { no: 5, text: '把运营中心灯带打开',   fallback: 'OperateCentre_Light_On',
           hint: 'av/llm/command → 期望 cmd=OperateCentre_Light_On' },
+        // husion 视频墙 5 个 (5/14 落地, 真切大屏)
+        { no: 6, text: '把视频墙切到单屏',     fallback: 'Husion_VideoWall_SinglePanel',
+          hint: 'av/llm/command → 期望 cmd=Husion_VideoWall_SinglePanel (husion 大屏 1x1)' },
+        { no: 7, text: '视频墙切四分屏',       fallback: 'Husion_VideoWall_FourSplit',
+          hint: 'av/llm/command → 期望 cmd=Husion_VideoWall_FourSplit (husion 大屏 2x2)' },
+        { no: 8, text: '视频墙切九宫格',       fallback: 'Husion_VideoWall_NineSplit',
+          hint: 'av/llm/command → 期望 cmd=Husion_VideoWall_NineSplit (husion 大屏 3x3)' },
+        { no: 9, text: '视频墙应急模式',       fallback: 'Husion_VideoWall_Emergency',
+          hint: 'av/llm/command → 期望 cmd=Husion_VideoWall_Emergency (应急预案)' },
+        { no: 10, text: '视频墙开漫游模式',    fallback: 'Husion_VideoWall_Roam',
+          hint: 'av/llm/command → 期望 cmd=Husion_VideoWall_Roam (轮播)' },
       ];
       const FALLBACK_TIMEOUT_MS = 4500;  // LLM 没回应这么久 → 直发 av/control 演示兜底
 
