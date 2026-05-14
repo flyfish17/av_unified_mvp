@@ -36,6 +36,7 @@ window.Renderers.kv_table = function makeKvTableRenderer(feed) {
     if (ev.type === "progress" && ev.scan_id) return { kind: "scan_progress", sticky: "scan_progress" };
     if (ev.type === "result" && ev.alive_hosts) return { kind: "scan_result", sticky: null };
     if (ev.target || ev.action) return { kind: "control", sticky: null };
+    if (ev.scene) return { kind: "scene", sticky: null };
     const body = ev.payload || ev;
     if (body.original_text) return { kind: "intent", sticky: null };
     if (ev.detections || ev.camera) return { kind: "video", sticky: null };
@@ -93,6 +94,18 @@ window.Renderers.kv_table = function makeKvTableRenderer(feed) {
     return `${escHtml(ev.camera || "?")}: ${summary}`;
   }
 
+  function fmtScene(ev) {
+    const cls = (ev.detection_classes || []).join(", ") || "—";
+    const lat = ev.vlm_latency_ms ? `${ev.vlm_latency_ms}ms` : "?";
+    const mem = ev.mem_avail_mb_before ? `${ev.mem_avail_mb_before}MB` : "?";
+    const tag = ev.vlm_load_ms && ev.vlm_load_ms > 1000 ? "❄️冷" : "🔥暖";
+    return (
+      `<div><b>${escHtml(ev.camera || "?")}</b> <span class="meta">[${escHtml(cls)}]</span></div>` +
+      `<div style="margin-top:2px;line-height:1.5">${escHtml(ev.scene || "")}</div>` +
+      `<div class="meta" style="margin-top:2px">${tag} ${lat} · mem ${mem} · ${escHtml(ev.vlm_model || "")}</div>`
+    );
+  }
+
   function fmtFallback(ev) {
     const s = JSON.stringify(ev);
     return s.length > 120 ? escHtml(s.slice(0, 117)) + "…" : escHtml(s);
@@ -107,6 +120,7 @@ window.Renderers.kv_table = function makeKvTableRenderer(feed) {
       case "control":       return fmtControl(ev);
       case "intent":        return fmtIntent(ev);
       case "video":         return fmtVideo(ev);
+      case "scene":         return fmtScene(ev);
       default:              return fmtFallback(ev);
     }
   }

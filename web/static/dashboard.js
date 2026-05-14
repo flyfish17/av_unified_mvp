@@ -17,6 +17,7 @@
     system_info:     "主机指标",
     network_info:    "网络状态",
     network_scanner: "LAN 扫描",
+    scene_analyzer:  "视觉深思",
   };
   const MODULE_GROUP = {
     // node_red 单独一组
@@ -24,6 +25,7 @@
     llm_engine: "ai", supervisor: "ai",
     system_info: "sys", network_info: "sys",
     network_scanner: "tools",
+    scene_analyzer:  "ai",
   };
   const GROUP_DEF = [
     { id: "fixed",     title: "" },                          // 总览 / Node-RED
@@ -728,6 +730,9 @@
       pushOverviewHost(data);
     } else if (channel === "video") {
       pushOverviewVideo(data);
+    } else if (channel === "scene_analysis") {
+      setTickerScene(data);
+      pushOverviewScene(data);
     }
   }
 
@@ -751,6 +756,31 @@
     const main = (d.interfaces || []).find(i => i.sent_kbps > 0 || i.recv_kbps > 0) || (d.interfaces || [])[0];
     if (!main) return;
     document.getElementById("ticker-net").textContent = `↑${main.sent_kbps} ↓${main.recv_kbps} KB/s`;
+  }
+  function setTickerScene(d) {
+    const el = document.getElementById("ticker-scene");
+    if (!el) return;
+    const cam = d.camera || "?";
+    const scene = (d.scene || "").trim();
+    const short = scene.length > 50 ? scene.slice(0, 48) + "…" : scene;
+    el.textContent = `${cam}: ${short}`;
+    el.style.color = "var(--accent)";
+  }
+  function pushOverviewScene(ev) {
+    const card = document.querySelector('[data-overview="scene"] .strip-card-body');
+    if (!card) return;
+    clearEmpty(card);
+    pulseEl(card.closest(".strip-card"));
+    const row = document.createElement("div");
+    row.className = "row final";
+    const cls = (ev.detection_classes || []).join(",") || "—";
+    const lat = ev.vlm_latency_ms ? `${ev.vlm_latency_ms}ms` : "?";
+    row.innerHTML = `<div><b>${escHtml(ev.camera || "?")}</b> [${escHtml(cls)}]</div>` +
+                    `<div style="margin-top:2px;line-height:1.4">${escHtml(ev.scene || "")}</div>` +
+                    `<div class="meta" style="margin-top:2px;opacity:.7">${lat}</div>`;
+    card.appendChild(row);
+    while (card.querySelectorAll(".row").length > 6) card.firstChild.remove();
+    card.scrollTop = card.scrollHeight;
   }
 
   // 转写卡渲染：仿讯飞「讲解稿」观感 — 连续讲话合并到同一段落。
