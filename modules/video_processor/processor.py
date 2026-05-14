@@ -64,6 +64,10 @@ class VideoProcessor:
         # L3.1：每路摄像头亮度上次发布时间（节流到 10s/次）
         self._last_brightness_publish: dict[str, float] = {}
         self._brightness_interval_s = float(yolo_cfg.get("brightness_interval_s", 10))
+        # 5/14：空 detect 心跳 — 即便 YOLO 无目标也定期发空 detect，让下游
+        # keyframe_filter 能走 idle_force 路径触发 VLM 巡检（避免画面静态时整条链路饿死）
+        self._last_detect_publish: dict[str, float] = {}
+        self._idle_detect_interval_s = float(yolo_cfg.get("idle_detect_interval_s", 15))
 
     # ── MQTT 集成 ─────────────────────────────────────────────────────
 
@@ -238,9 +242,14 @@ class VideoProcessor:
                 if ann_jpeg:
                     self._latest_annotated_jpeg[name] = ann_jpeg
 
-            if detections:
+            # 有目标必发；无目标按 idle_detect_interval_s 节流 publish 一次空 detect 作为心跳
+            should_publish = bool(detections) or (
+                now - self._last_detect_publish.get(name, 0) >= self._idle_detect_interval_s
+            )
+            if should_publish:
                 self._publish_detection(name, now, detections)
-                if self._callback:
+                self._last_detect_publish[name] = now
+                if detections and self._callback:
                     try:
                         self._callback(DetectionEvent(
                             camera_name=name, timestamp=now,

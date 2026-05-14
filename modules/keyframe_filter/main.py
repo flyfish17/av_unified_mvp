@@ -112,7 +112,26 @@ class KeyframeFilterModule(BaseModule):
         camera = inner.get("camera") or payload.get("camera")
         detections = inner.get("detections") or payload.get("detections") or []
         det_time = inner.get("time") or payload.get("time") or time.time()
-        if not camera or not detections:
+        if not camera:
+            return
+        # 空 detect 心跳 — 走 idle_force 路径（首次必发；之后按 idle_seconds 节流），
+        # 让画面静态时 VLM 也能周期巡检（"画面整体是否正常 / 有无静止异常"）
+        if not detections:
+            now = time.time()
+            last_key_ts = self._last_key_ts.get(camera, 0.0)
+            if last_key_ts == 0 or (now - last_key_ts) > self._kf["idle_seconds"]:
+                reason = "first_detect_empty" if last_key_ts == 0 else "idle_force_empty"
+                self.publish(self._kf["key_topic"], {
+                    "camera": camera,
+                    "time": det_time,
+                    "detections": [],
+                    "key_reason": reason,
+                    "prev_summary": (self._prev.get(camera) or {}).get("class_counts", {}),
+                })
+                self._last_key_ts[camera] = now
+                self._stats["forced_idle"] += 1
+                self._stats["key_published"] += 1
+                self.logger.info(f"⚡ key_event camera={camera} reason={reason}")
             return
 
         # 当前帧摘要
