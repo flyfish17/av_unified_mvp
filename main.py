@@ -320,6 +320,8 @@ class AVSupervisor:
         self.mqtt.subscribe("av/system/host_stats", self._on_host_stats)
         self.mqtt.subscribe("av/system/network", self._on_network)
         self.mqtt.subscribe("av/system/lan_scan/+", self._on_lan_scan)
+        # 5/14 Sub-7：open-vocab 检测命中 → openvocab SSE channel（dashboard timeline 面板）
+        self.mqtt.subscribe("av/video/openvocab", self._on_openvocab)
 
     def _on_audio_partial(self, topic: str, payload: dict):
         """BaseModule 双层载荷 → 提取内层推到 transcript SSE"""
@@ -363,6 +365,14 @@ class AVSupervisor:
     def _on_lan_scan(self, topic: str, payload: dict):
         """扫描进度 / 结果 → lan_scan SSE channel"""
         self._web_push("lan_scan", payload)
+
+    def _on_openvocab(self, topic: str, payload: dict):
+        """openvocab_filter 命中 → openvocab SSE channel（dashboard 化工安全 timeline 面板）。
+
+        BaseModule.publish 把 payload 字段平铺到顶层（含 hits / camera / inference_ms 等），
+        加一个 header key；前端 pushOverviewOpenvocab 直接读顶层即可。
+        """
+        self._web_push("openvocab", payload)
 
     def _on_discovery_mqtt(self, topic: str, payload: dict):
         """MQTT av/system/discovery/# → discovery SSE channel，驱动前端动态面板"""

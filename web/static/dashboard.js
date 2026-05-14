@@ -724,6 +724,8 @@
     } else if (channel === "scene_analysis") {
       setTickerScene(data);
       pushOverviewScene(data);
+    } else if (channel === "openvocab") {
+      pushOverviewOpenvocab(data);
     }
   }
 
@@ -772,6 +774,29 @@
     card.appendChild(row);
     while (card.querySelectorAll(".row").length > 6) card.firstChild.remove();
     card.scrollTop = card.scrollHeight;
+  }
+  function pushOverviewOpenvocab(ev) {
+    // openvocab_filter 命中 timeline：每行 camera + hits + 推理耗时。
+    // payload (modules/openvocab_filter/main.py _infer): {camera, ts, hits:[{class, conf, bbox}], inference_ms, key_reason, ...}
+    const card = document.querySelector('[data-overview="openvocab"] .strip-card-body');
+    if (!card) return;
+    clearEmpty(card);
+    pulseEl(card.closest(".strip-card"));
+    const row = document.createElement("div");
+    row.className = "row final";
+    const hits = (ev.hits || []).map(h => `${h.class}(${Math.round((h.conf || 0) * 100)}%)`).join(", ") || "—";
+    const reason = ev.key_reason ? ` · ${ev.key_reason}` : "";
+    row.innerHTML = `<div><b>${escHtml(ev.camera || "?")}</b> [${escHtml(hits)}]</div>` +
+                    `<div class="meta" style="margin-top:2px;opacity:.7">${ev.inference_ms || "?"}ms${escHtml(reason)}</div>`;
+    card.appendChild(row);
+    while (card.querySelectorAll(".row").length > 6) card.firstChild.remove();
+    card.scrollTop = card.scrollHeight;
+    // badge → 命中数
+    const badge = document.getElementById("overview-openvocab-badge");
+    if (badge) {
+      badge.textContent = `${(ev.hits || []).length} 命中`;
+      badge.style.color = "var(--live)";
+    }
   }
 
   // 转写卡渲染：仿讯飞「讲解稿」观感 — 连续讲话合并到同一段落。
@@ -1045,6 +1070,8 @@
     { id: "overview-transcript",    title: "语意理解 · 转写" },
     { id: "overview-intent",        title: "意图 / 控制流" },
     { id: "overview-scene",         title: "视觉深思 · 场景分析" },
+    { id: "overview-husion",        title: "husion 视频墙控制" },
+    { id: "overview-openvocab",     title: "开放词检测" },
     { id: "overview-online-stream", title: "在线视频源" },
     { id: "overview-add-source",    title: "添加视频源" },
     { id: "overview-lan-scan",      title: "LAN 扫描" },
@@ -1176,6 +1203,70 @@
     const s = loadVisibility();
     MODULES_META.forEach(m => { if (s[m.id] === false) hideModule(m.id); });
   }
+
+  // ── 客户视图开关（顶栏 toggle · 默认关）──────────────────────────
+  // 进入客户视图：备份当前可见性偏好，仅显示 CUSTOMER_VIEW_MODULES 列出的模块
+  // 退出客户视图：把备份的可见性偏好写回，并按其重新 apply
+  const CUSTOMER_VIEW_KEY = "customer_view";
+  const CV_VISIBILITY_BACKUP_KEY = "av_overview_visibility__cv_backup";
+  // 任务定义的客户视图保留集（husion / openvocab 若 future 加入 MODULES_META 也会自动尊重）
+  const CUSTOMER_VIEW_MODULES = new Set([
+    "overview-video",
+    "overview-intent",
+    "overview-quick-control",
+    "overview-online-stream",
+    "overview-husion",
+    "overview-openvocab",
+  ]);
+
+  function setCustomerView(on) {
+    document.body.classList.toggle("customer-view", on);
+    const btn = document.getElementById("cv-toggle");
+    const lbl = document.getElementById("cv-toggle-label");
+    if (btn) btn.classList.toggle("on", !!on);
+    if (lbl) lbl.textContent = on ? "客户视图 · 开" : "客户视图";
+
+    if (on) {
+      // 备份用户原可见性偏好（仅在尚未备份时；防止反复 toggle 把 CV 强制态当成原始）
+      if (localStorage.getItem(CV_VISIBILITY_BACKUP_KEY) === null) {
+        localStorage.setItem(
+          CV_VISIBILITY_BACKUP_KEY,
+          localStorage.getItem(VISIBILITY_KEY) || "{}"
+        );
+      }
+      MODULES_META.forEach(m => {
+        if (CUSTOMER_VIEW_MODULES.has(m.id)) showModule(m.id);
+        else hideModule(m.id);
+      });
+    } else {
+      // 还原：先把备份写回 VISIBILITY_KEY，再 showAll 清干净 + applyVisibility 重放
+      const backup = localStorage.getItem(CV_VISIBILITY_BACKUP_KEY);
+      if (backup !== null) {
+        try { localStorage.setItem(VISIBILITY_KEY, backup); } catch (_) {}
+        localStorage.removeItem(CV_VISIBILITY_BACKUP_KEY);
+      }
+      MODULES_META.forEach(m => showModule(m.id));  // 重置为全显
+      applyVisibility();                             // 然后按用户偏好再隐藏
+    }
+    localStorage.setItem(CUSTOMER_VIEW_KEY, on ? "1" : "0");
+    // 刷新布局 popup（如果开着）
+    buildLayoutPopupBody();
+  }
+
+  function setupCustomerViewToggle() {
+    const btn = document.getElementById("cv-toggle");
+    if (!btn) return;
+    btn.addEventListener("click", () => {
+      const on = !document.body.classList.contains("customer-view");
+      setCustomerView(on);
+    });
+    // 首次加载：按 localStorage 还原
+    const saved = localStorage.getItem(CUSTOMER_VIEW_KEY);
+    if (saved === "1") setCustomerView(true);
+  }
+
+  // 给页面 / 调试暴露
+  window.setCustomerView = setCustomerView;
 
   // ── P1.3 添加 / 修改 / 删除视频源 ─────────────────────────────────
   // url 反推：rtsp://user:pwd@ip:port/Streaming/Channels/N → IPC；rtsp://ip:port/path → 分布式；纯数字 → 本机
@@ -1444,6 +1535,122 @@
     }
   }
 
+  // ── 5/14 Sub-7 husion 视频墙控制面板 ──────────────────────────────
+  // 10s 轮询 /api/husion/state；前台可见才拉，避免 idle tab 一直打 husion。
+  // 9 设备列表（id 5001-5009：name + ip + dev_type + online）+ 5 个场景按钮（rx_id=5008）。
+  function setupHusionPanel() {
+    const card = document.querySelector('[data-overview="husion"]');
+    if (!card) return;
+    const devEl   = card.querySelector("#husion-devices");
+    const sceneEl = card.querySelector("#husion-scenes");
+    const badge   = document.getElementById("overview-husion-badge");
+    if (!devEl || !sceneEl) return;
+
+    function setBadge(text, color) {
+      if (!badge) return;
+      badge.textContent = text;
+      badge.style.color = color || "";
+    }
+
+    async function refresh() {
+      if (document.hidden) return;
+      try {
+        const r = await fetch("/api/husion/state", { cache: "no-store" });
+        if (!r.ok) {
+          setBadge(`${r.status}`, "var(--warn,#f57c00)");
+          devEl.innerHTML = `<div style="color:var(--warn);font-size:11px">husion 不可达 (HTTP ${r.status})</div>`;
+          return;
+        }
+        const data = await r.json();
+        if (!data.ok) {
+          setBadge("错误", "var(--warn,#f57c00)");
+          devEl.innerHTML = `<div style="color:var(--warn);font-size:11px">${escHtml(data.error || "未知错误")}</div>`;
+          return;
+        }
+        renderDevices(data.devices || [], data.wall || []);
+      } catch (e) {
+        setBadge("离线", "var(--dim)");
+        devEl.innerHTML = `<div style="color:var(--dim);font-size:11px">${escHtml(String(e))}</div>`;
+      }
+    }
+
+    function renderDevices(devices, wall) {
+      // husion get_all_equ data 字段大致：id, name, ip, dev_type, online (0/1), hls...
+      // 容错：字段缺失时回退到 "?".
+      if (!Array.isArray(devices) || devices.length === 0) {
+        devEl.innerHTML = `<div style="color:var(--dim);font-size:11px">无设备</div>`;
+        setBadge("0/0", "var(--dim)");
+        return;
+      }
+      // wall 是 list[{wall_id, win_id, tx_id, tx_name, ...}]
+      const wallTx = new Set();
+      (wall || []).forEach(w => { if (w.tx_id) wallTx.add(String(w.tx_id)); });
+
+      const html = devices.map(d => {
+        const id   = String(d.id || d.equ_id || "");
+        const name = d.name || d.equ_name || "(无名)";
+        const ip   = d.ip || "";
+        const type = d.dev_type || d.type || "";
+        // online 多种格式：1/0、true/false、"online"
+        const onRaw = d.online != null ? d.online : d.state;
+        const online = onRaw === 1 || onRaw === "1" || onRaw === true || onRaw === "online";
+        const onWall = wallTx.has(id) ? " <span class=\"husion-dev-type\" style=\"color:var(--accent)\">[墙上]</span>" : "";
+        return `<div class="husion-dev-row">` +
+          `<span class="husion-dev-dot ${online ? "on" : "off"}" title="${online ? "online" : "offline"}"></span>` +
+          `<span class="husion-dev-name" title="${escHtml(name)}">${escHtml(name)}</span>` +
+          `<span class="husion-dev-ip">${escHtml(ip)}</span>` +
+          `<span class="husion-dev-type">${escHtml(type)}</span>${onWall}` +
+          `</div>`;
+      }).join("");
+      devEl.innerHTML = html;
+
+      const onlineCount = devices.filter(d => {
+        const o = d.online != null ? d.online : d.state;
+        return o === 1 || o === "1" || o === true || o === "online";
+      }).length;
+      setBadge(`${onlineCount}/${devices.length}`, onlineCount === devices.length ? "var(--ok,#4caf50)" : "var(--accent-2)");
+    }
+
+    // 场景按钮点击 → POST /api/husion/scene
+    sceneEl.querySelectorAll(".husion-scene-btn").forEach(btn => {
+      btn.onclick = async () => {
+        const scene = btn.dataset.scene;
+        const rxId  = btn.dataset.rx || "5008";
+        if (!scene) return;
+        const orig = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "切换中…";
+        try {
+          const r = await fetch("/api/husion/scene", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rx_id: rxId, scene_name: scene }),
+          });
+          const data = await r.json().catch(() => ({}));
+          if (r.ok && data.ok) {
+            btn.textContent = "✓ " + orig;
+            setBadge(`切到 ${scene}`, "var(--ok,#4caf50)");
+            // 切完后立刻刷一次状态（墙窗口变了）
+            setTimeout(refresh, 600);
+          } else {
+            btn.textContent = "✗ " + orig;
+            setBadge(`失败: ${(data.error || data.husion_resp?.message || "")}`.slice(0, 30), "var(--warn,#f57c00)");
+            console.warn("[husion] 切场景失败", data);
+          }
+        } catch (e) {
+          btn.textContent = "✗ " + orig;
+          setBadge("网络错误", "var(--warn,#f57c00)");
+          console.warn("[husion] fetch 异常", e);
+        } finally {
+          setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 1500);
+        }
+      };
+    });
+
+    refresh();
+    setInterval(refresh, 10000);
+  }
+
   // ── P0 快捷控制（creator 中控 ASCII 转发） ────────────────────────
   async function setupQuickControl() {
     const locSel    = document.getElementById("quick-ctrl-location");
@@ -1547,9 +1754,11 @@
   injectHideButtons();
   setupLayoutPopup();
   applyVisibility();
+  setupCustomerViewToggle();
   setupAddSourceForm();
   setupLanScan();
   setupQuickControl();
+  setupHusionPanel();
   setupSystemExit();
   setupIntentToggle();
   setupTranscriptActions();

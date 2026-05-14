@@ -420,6 +420,28 @@
     .ctrl-btn.ctrl-btn-warn:hover { background: var(--live); color: #0d1117; }
     .ctrl-btn.ctrl-btn-cool { border-color: var(--accent-2); color: var(--accent-2); }
     .ctrl-btn.ctrl-btn-cool:hover { background: var(--accent-2); color: #0d1117; }
+    /* husion 视频墙控制面板（overview-husion）*/
+    .husion-scene-btn {
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--line); border-radius: 4px;
+      padding: 5px 10px; font-size: 11px;
+      font-family: inherit; cursor: pointer;
+      white-space: nowrap; transition: all 0.1s;
+    }
+    .husion-scene-btn:hover { background: var(--accent); color: #0d1117; border-color: var(--accent); }
+    .husion-scene-btn:active { transform: translateY(1px); }
+    .husion-scene-btn:disabled { opacity: 0.5; cursor: wait; }
+    .husion-dev-row {
+      display: flex; align-items: center; gap: 6px;
+      padding: 2px 0; border-bottom: 1px dashed var(--line);
+    }
+    .husion-dev-row:last-child { border-bottom: none; }
+    .husion-dev-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .husion-dev-dot.on  { background: var(--ok, #4caf50); }
+    .husion-dev-dot.off { background: var(--dim, #666); }
+    .husion-dev-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .husion-dev-ip   { color: var(--dim); font-size: 10px; }
+    .husion-dev-type { color: var(--accent-2); font-size: 10px; }
     #quick-ctrl-location {
       background: rgba(13,17,23,0.85); color: var(--text);
       border: 1px solid var(--line); border-radius: 4px;
@@ -884,14 +906,134 @@
     #demo-toast.show { display: block; }
     #demo-toast.ok  { border-color: var(--final); color: var(--final); }
     #demo-toast.err { border-color: var(--warn);  color: var(--warn); }
+
+    /* ── 客户视图开关（顶栏右上 toggle）────────────────────────────── */
+    .cv-toggle {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin-left: 8px; padding: 3px 10px;
+      border: 1px solid var(--line); border-radius: 999px;
+      background: transparent; color: var(--dim);
+      font-size: 11px; font-family: ui-monospace, monospace;
+      cursor: pointer; user-select: none;
+      letter-spacing: 0.05em;
+    }
+    .cv-toggle:hover { color: var(--text); border-color: var(--accent-2); }
+    .cv-toggle .cv-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--dim);
+    }
+    .cv-toggle.on {
+      color: var(--accent-2); border-color: var(--accent-2);
+      background: rgba(126, 232, 232, 0.08);
+    }
+    .cv-toggle.on .cv-dot {
+      background: var(--accent-2); box-shadow: 0 0 6px var(--accent-2);
+    }
+
+    /* ── 客户视图态：放大 LOGO、隐藏开发元素、隐藏 nav ─────────────── */
+    body.customer-view {
+      /* nav 折叠：留 0，把 stage 拉满 */
+      grid-template-columns: 0 1fr;
+    }
+    body.customer-view nav { display: none; }
+    body.customer-view header { padding: 0 24px; }
+    body.customer-view .brand .logo {
+      font-size: 18px; font-weight: 800;
+      color: var(--text);
+      letter-spacing: 0.08em;
+    }
+    body.customer-view .brand .tag {
+      font-size: 11px; padding: 2px 8px;
+    }
+    body.customer-view .brand .cv-subtitle {
+      display: inline-flex !important;
+      align-items: center; gap: 6px;
+      margin-left: 10px;
+    }
+    .brand .cv-subtitle { display: none; }
+    .brand .cv-subtitle .chip {
+      font-size: 10px; padding: 2px 7px;
+      border: 1px solid var(--accent-2); color: var(--accent-2);
+      border-radius: 999px; letter-spacing: 0.1em;
+      background: rgba(126, 232, 232, 0.06);
+    }
+    /* 客户视图：隐藏开发态提示文字 / 旧页跳链 / 退出按钮（保留 ⚙ 布局给 demo 时调整） */
+    body.customer-view .view-head .topic { display: none; }
+    body.customer-view #brand-sub,
+    body.customer-view header > span[style*="margin-left:8px"],
+    body.customer-view #btn-system-exit { display: none !important; }
+    body.customer-view .module-card .drag-handle { display: none; }
+    /* 客户视图保留 modules-pill / header-status / clock — 现场展示状态用 */
+
+    /* ── 启动 splash（首次加载 1.5s fade-out）─────────────────────── */
+    #splash {
+      position: fixed; inset: 0;
+      background: radial-gradient(800px 500px at 50% 40%, rgba(88,166,255,0.12), transparent 70%), var(--bg);
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 18px;
+      z-index: 9999;
+      animation: fadeOutSplash 0.6s ease-in 1.5s forwards;
+      pointer-events: none;
+    }
+    #splash.skip { display: none !important; }
+    #splash .splash-logo {
+      font-size: 38px; font-weight: 800;
+      color: var(--text); letter-spacing: 0.12em;
+      text-shadow: 0 0 20px rgba(88,166,255,0.4);
+    }
+    #splash .splash-logo .badge {
+      font-size: 14px; vertical-align: middle;
+      padding: 3px 10px; margin-left: 10px;
+      border: 1px solid var(--accent-2); color: var(--accent-2);
+      border-radius: 4px; letter-spacing: 0.2em;
+    }
+    #splash .splash-sub {
+      font-size: 14px; color: var(--text-2);
+      letter-spacing: 0.08em;
+    }
+    #splash .splash-bar {
+      width: 220px; height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      opacity: 0.6;
+    }
+    @keyframes fadeOutSplash {
+      to { opacity: 0; visibility: hidden; }
+    }
   </style>
 </head>
 <body>
+  <!-- 启动 splash：首次加载短暂全屏 LOGO；?nosplash 跳过 -->
+  <div id="splash">
+    <div class="splash-logo">CREATOR AI 视听理解平台<span class="badge">CREATOR</span></div>
+    <div class="splash-sub">端侧视频 + 语音 + 意图统一中控 · 国产化解决方案</div>
+    <div class="splash-bar"></div>
+  </div>
+  <script>
+    // 早期同步：URL ?nosplash 跳过；动画结束 2.5s 后彻底移除（防止挡点击）
+    (function () {
+      var sp = document.getElementById("splash");
+      if (!sp) return;
+      try {
+        if (/[?&]nosplash(=|&|$)/.test(location.search)) {
+          sp.classList.add("skip");
+          return;
+        }
+      } catch (_) {}
+      setTimeout(function () { if (sp && sp.parentNode) sp.parentNode.removeChild(sp); }, 2500);
+    })();
+  </script>
+
   <header>
     <div class="brand">
-      <span class="logo">Ai 视听信息理解</span>
+      <span class="logo">CREATOR AI 视听理解平台</span>
       <span class="tag">CREATOR</span>
       <span class="sub" id="brand-sub" style="display:none">v1.x</span>
+      <!-- 客户视图：副标语 chip（默认隐藏，body.customer-view 时显示） -->
+      <span class="cv-subtitle">
+        <span class="chip">端侧</span>
+        <span class="chip">多模态</span>
+        <span class="chip">跨品牌</span>
+      </span>
     </div>
     <span class="spacer"></span>
     <span class="pill" id="modules-pill">模块 0/0</span>
@@ -900,6 +1042,10 @@
     <span style="font-size:11px;color:var(--dim);margin-left:8px">
       <a href="/transcript" target="_blank">旧页 ↗</a>
     </span>
+    <!-- 客户视图开关（默认关；localStorage["customer_view"]=="1" 时启用） -->
+    <button id="cv-toggle" class="cv-toggle" title="切换客户演示视图：隐藏开发面板 / 放大 LOGO">
+      <span class="cv-dot"></span><span id="cv-toggle-label">客户视图</span>
+    </button>
     <button id="btn-system-exit" title="停止 supervisor + 关闭后台 mosquitto / Node-RED / FunASR"
             style="margin-left:10px;font-size:11px;padding:3px 10px;border-radius:4px;
                    background:transparent;color:var(--warn);border:1px solid var(--warn);
@@ -1048,6 +1194,54 @@
               <div class="module-body">
                 <div class="strip-card-body">
                   <div class="strip-empty">等待 Jetson 视觉深思事件…<br><small style="color:var(--dim)">配 Jetson scene_analyzer + 3588 keyframe_filter 后，关键帧 VLM 描述会出现在此</small></div>
+                </div>
+              </div>
+            </div>
+           </div>
+          </div>
+
+          <!-- husion 视频墙控制（5/14 Sub-7 落地 · 9 设备状态 + 5 场景按钮） -->
+          <div class="grid-stack-item" gs-id="overview-husion" gs-x="0" gs-y="42" gs-w="6" gs-h="5" gs-min-w="4" gs-min-h="4">
+           <div class="grid-stack-item-content">
+            <div class="module-card" data-module-id="overview-husion" data-overview="husion">
+              <div class="module-header">
+                <span class="drag-handle" title="拖动重排">⋮⋮</span>
+                <span class="module-title">husion 视频墙控制
+                  <span class="module-sub">/api/husion/state ↻ + 场景切换</span>
+                </span>
+                <span class="module-badge" id="overview-husion-badge">等待</span>
+                <div class="module-actions"></div>
+              </div>
+              <div class="module-body" style="padding:8px;display:flex;flex-direction:column;gap:8px;overflow:hidden">
+                <div id="husion-devices" style="flex:1;overflow-y:auto;font-size:11px;line-height:1.5">
+                  <div style="color:var(--dim)">加载 husion 设备…</div>
+                </div>
+                <div id="husion-scenes" style="display:flex;flex-wrap:wrap;gap:4px;border-top:1px solid var(--border,#333);padding-top:6px">
+                  <button class="husion-scene-btn" data-scene="单屏" data-rx="5008">单屏</button>
+                  <button class="husion-scene-btn" data-scene="四分屏" data-rx="5008">四分屏</button>
+                  <button class="husion-scene-btn" data-scene="九宫格" data-rx="5008">九宫格</button>
+                  <button class="husion-scene-btn" data-scene="应急模式" data-rx="5008">应急</button>
+                  <button class="husion-scene-btn" data-scene="漫游" data-rx="5008">漫游</button>
+                </div>
+              </div>
+            </div>
+           </div>
+          </div>
+
+          <!-- 开放词检测 · 化工安全（5/14 Sub-7 落地 · yolov8-world + CLIP hits timeline） -->
+          <div class="grid-stack-item" gs-id="overview-openvocab" gs-x="6" gs-y="42" gs-w="6" gs-h="5" gs-min-w="4" gs-min-h="3">
+           <div class="grid-stack-item-content">
+            <div class="module-card" data-module-id="overview-openvocab" data-overview="openvocab">
+              <div class="module-header">
+                <span class="drag-handle" title="拖动重排">⋮⋮</span>
+                <span class="module-title">开放词检测 · 化工安全
+                  <span class="module-sub">av/video/openvocab · yolov8-world</span>
+                </span>
+                <span class="module-badge" id="overview-openvocab-badge">等待</span>
+              </div>
+              <div class="module-body">
+                <div class="strip-card-body">
+                  <div class="strip-empty">等待 open-vocab 命中…<br><small style="color:var(--dim)">openvocab_filter 订阅 av/video/key_event → yolov8-world 推理，fire / smoke / 未戴安全帽 等命中会出现在此</small></div>
                 </div>
               </div>
             </div>

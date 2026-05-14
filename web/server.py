@@ -19,6 +19,7 @@ import pathlib
 import queue
 import re
 import threading
+import time
 from collections import defaultdict
 from typing import Callable, Dict, List, Optional
 
@@ -153,6 +154,42 @@ def husion_devices():
         "online": snap.get("event") == "online",
         "ts": snap.get("ts"),
     }
+
+
+@_app.get("/api/husion/state")
+def husion_state():
+    """读 husion 9 设备 + 当前墙状态（合并）。
+
+    每次请求 fresh fetch husion (3s login + 3s 内拿设备/墙)；不缓存（状态变化频繁）。
+    成功返回 {ok, devices, wall, ts}；失败返回 {ok:false, error} 502。
+    """
+    from modules.web_browser.main import husion_login, husion_get
+    try:
+        token = husion_login(timeout=3)
+        devices = husion_get("/api/get_all_equ", token, timeout=3).get("data") or []
+        wall = husion_get("/api/wall/w?wall_id=1", token, timeout=3).get("data") or []
+        return {"ok": True, "devices": devices, "wall": wall, "ts": time.time()}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}, 502
+
+
+@_app.post("/api/husion/scene")
+def husion_scene_switch():
+    """触发 husion 切场景 — dashboard 按钮直调。
+
+    body: {rx_id, scene_name}；返回 {ok, husion_resp}。
+    """
+    from modules.web_browser.main import husion_switch_scene
+    body = _flask.request.get_json(force=True, silent=True) or {}
+    rx_id = body.get("rx_id", "5008")
+    scene = body.get("scene_name")
+    if not scene:
+        return {"ok": False, "error": "scene_name required"}, 400
+    try:
+        resp = husion_switch_scene(rx_id, scene, timeout=8)
+        return {"ok": resp.get("code") == 0, "husion_resp": resp}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}, 502
 
 
 @_app.get("/transcript")
