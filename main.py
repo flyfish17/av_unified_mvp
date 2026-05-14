@@ -58,6 +58,9 @@ MANAGED_MODULES = [
     # av/control → 设备 dispatcher（当前 echo_only，dashboard 反馈用；
     # 接真硬件后扩 husion / Node-RED / 厂商 adapter）
     "modules.control_dispatcher.main",
+    # 关键帧过滤：av/video/detect → av/video/key_event，减少 Jetson VLM
+    # 无效触发（密集场景从 8 Hz 降到 ~0.1-0.5 Hz）
+    "modules.keyframe_filter.main",
 ]
 
 MAX_RETRY_DELAY = 60   # 最大退避秒数

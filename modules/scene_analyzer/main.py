@@ -47,7 +47,10 @@ DEFAULTS = {
     "vlm_model": "qwen2.5vl:3b",
     "ollama_url": "http://127.0.0.1:11434/api/generate",
     "mjpeg_base_url": "http://192.168.5.6:5051",
-    "detect_topic": "av/video/detect",
+    # detect_topic 默认订关键帧 key_event（非每个 detect），减少 VLM 无效触发。
+    # 5/14 起 keyframe_filter 模块独立上线 → scene_analyzer 自然只看关键帧。
+    # 旧行为（每 detect 都看）可 yaml 设 detect_topic: av/video/detect 覆盖。
+    "detect_topic": "av/video/key_event",
     "analysis_topic": "av/video/scene_analysis",
     "throttle_seconds": 10.0,
     "mem_min_mb": 400,
