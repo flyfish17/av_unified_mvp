@@ -61,6 +61,9 @@ MANAGED_MODULES = [
     # 关键帧过滤：av/video/detect → av/video/key_event，减少 Jetson VLM
     # 无效触发（密集场景从 8 Hz 降到 ~0.1-0.5 Hz）
     "modules.keyframe_filter.main",
+    # 开放词检测：订 av/video/key_event → yolov8s-world (CLIP) → av/video/openvocab
+    # 化工/安全场景 (火/烟/未戴安全帽/跌倒/打架) — 5/14 落地，3588 CPU ~1.6s/帧
+    "modules.openvocab_filter.main",
 ]
 
 MAX_RETRY_DELAY = 60   # 最大退避秒数
