@@ -386,20 +386,42 @@ def run(host: str = "0.0.0.0", port: int = 5050) -> None:
     K4：Flask 启动失败（典型 OSError "Address already in use" :5050 被占）以前
     在 daemon thread 内 swallow，supervisor 看不到。改成抛错前先调 _run_error_handler
     通知主循环停机；user 在终端看到清晰 ERROR 而不是"启动成功但页面打不开"。
+
+    5/14 加 retry：supervisor 重启时旧 socket TIME_WAIT 占着 5050 致 Flask 启动
+    失败 → dashboard 翻车 user 找半天。3 次重试 × 8s 间隔，覆盖 TIME_WAIT 默认
+    释放时间（Linux 60s 但 SO_REUSEADDR 通常更快）。
     """
-    logger.info(f"演示页: http://{host}:{port}  (SSE 订阅制，动态 channel)")
-    try:
-        _app.run(host=host, port=port, threaded=True, debug=False, use_reloader=False)
-    except OSError as e:
-        logger.error(f"Flask 启动失败 :{port} — {e}")
-        logger.error(f"  → 通常是端口被占。检查：lsof -nP -iTCP:{port} -sTCP:LISTEN")
-        logger.error(f"  → 或 kill 残留 main.py：pkill -f 'python3 main.py'，等 :{port} TIME_WAIT 释放再起")
-        if _run_error_handler is not None:
-            try:
-                _run_error_handler(e)
-            except Exception:
-                pass
-        raise
+    import time as _time
+    max_retries = 3
+    retry_delay_s = 8
+    last_err = None
+    for attempt in range(max_retries):
+        if attempt > 0:
+            logger.warning(f"Flask :{port} 第 {attempt + 1}/{max_retries} 次启动尝试...")
+        else:
+            logger.info(f"演示页: http://{host}:{port}  (SSE 订阅制，动态 channel)")
+        try:
+            _app.run(host=host, port=port, threaded=True, debug=False, use_reloader=False)
+            return  # Flask 正常退出（外部停 / sigterm）
+        except OSError as e:
+            last_err = e
+            logger.warning(f"Flask :{port} 启动失败 (attempt {attempt + 1}): {e}")
+            if attempt + 1 < max_retries:
+                logger.info(f"  → {retry_delay_s}s 后重试（等 TIME_WAIT 释放）")
+                _time.sleep(retry_delay_s)
+                continue
+            # 3 次仍失败 → 通知 supervisor + 抛错
+            logger.error(f"Flask :{port} {max_retries} 次重试均失败 — 放弃")
+            logger.error(f"  → 检查：lsof -nP -iTCP:{port} -sTCP:LISTEN")
+            logger.error(f"  → 或 pkill -f 'python3 main.py' 等 TIME_WAIT 完全释放")
+            if _run_error_handler is not None:
+                try:
+                    _run_error_handler(e)
+                except Exception:
+                    pass
+            raise
+    if last_err is not None:
+        raise last_err
 
 
 if __name__ == "__main__":
