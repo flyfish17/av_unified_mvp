@@ -1672,20 +1672,45 @@ iCloud 源项目目录下原本有两个文件名直接含真实 API key 的 .tx
 
 ---
 
-### 阶段三精进路径（2026-05-13 更新，对齐 §1.5 三形态）
+### 阶段三精进路径（2026-05-14 重排，GTM 优先级 P0/P1/P2）
 
-> 注：5/13 起开发主线从"阶段二子模块精进"切到"阶段三差异化护城河 + 形态定型"。下方旧条目（A-C 等）保留作历史；新条目优先级见此节首。
+> 5/14 用户拍板战略转向：从"技术驱动"切到"市场驱动" — 先包装出门拿项目，再深耕技术。Sprint 按 P0 / P1 / P2 三档排，P0 出门必备（演示包 / 客户化 / 销售材料）, P1 进入正循环（深思层 / 跨品牌 / AI 跟踪）, P2 待客户反馈再投入（旧 #4 真接硬件等）。
 
-#### 当前活跃 sprint（5/13 用户拍板）
+#### P0 · 出门必备 — 阻塞客户拿单（5/14 一天集中干完）
 
-| # | Sprint | 关联形态 | 工时 | 状态 |
-|---|---|---|---|---|
-| 1 | **video_processor 接 USB 罗技 920**（3588 已物理连） | 形态 A 演示 + 形态 B 输入源 | 1h | 🟡 进行中 |
-| 2 | **漏斗第 1 层 fast-path**（关键词 0ms 即回，绕过 NPU LLM） | 形态 A 性能 | 2-3h | ⏸ 排队 |
-| 3 | **NPU 升级 Qwen2.5-3B 测试**（解 1.5B 地点偷换） | 形态 A 准确率 | 1h（含模型下载）| ⏸ 排队 |
-| 4 | **av/control → Node-RED 外露桥接**（不在 av_unified_mvp 内造硬件 adapter） | 形态 A 最后一公里 | 1-2h | ⏸ 客户硬件枚举后 |
-| 5 | **video_processor 多路差异点输出** | 形态 B 护城河 | 2-3 天 | ⏸ 形态 B 优先级排定后 |
-| 6 | **运维可观测扩展**（SLA / 告警 / 远程巡检） | 形态 C 护城河 | 1-2 天 | ⏸ 形态 C 立项后 |
+| # | Sprint | 状态 | 备注 |
+|---|---|---|---|
+| 1 | **3588 演示一键启动 + dashboard 浮球**（10 颗预设句式 + 离线兜底）| ✅ commit `0ef01e1` + `0ae5dac` | scripts/3588-demo-start.sh + 5 家居 + 5 husion |
+| 2 | **dashboard 客户视图开关 + LOGO splash** | ✅ commit `48bb4c1` | 顶栏 #cv-toggle pill / customer_view localStorage / 5 截图 |
+| 3 | **销售内训材料 3 份**（pitch + 视频脚本 + FAQ）| ✅ commit `c95c403` | docs/sales/ 449 行；价位 ¥TBD 待 user 后补 |
+
+#### P1 · 进入正循环 — 拿到项目后反哺研发
+
+| # | Sprint | 状态 | 备注 |
+|---|---|---|---|
+| 4 | **husion 浏览器模块**（Playwright 登 husion + 9 设备 + 切场景）| ✅ commit `5687a5f` `97fcc86` `c67f114` | modules/web_browser/ + catalog 5 场景 + control_dispatcher husion adapter，实测 200ms 切大屏 |
+| 5 | **形态 B 视觉深度理解三层链路** | ✅ keyframe_filter `f070527` + scene_analyzer Jetson VLM `587f230` + openvocab_filter `5571c7b` | 三层链路全落地，化工"火/烟/未戴安全帽/跌倒"零训练 |
+| 6 | **AI 先进项目跟踪机制** | ✅ commit `9f1bdcc` | docs/roadmap/ai-landscape-20260514.md 186 行 + reality check 修正 |
+| 7 | **dashboard 加 husion + openvocab 主面板** | 🟡 Sub-7 进行中 | server.py /api/husion/* 路由已落 (commit `48bb4c1`)，前端槽待补 |
+
+#### P2 · 技术深化 — 销售反馈来了再投入
+
+| # | Sprint | 状态 | 备注 |
+|---|---|---|---|
+| 8 | **av/control → 客户真实硬件** | ⏸ 客户场景特定 | 5/14 仅 husion 路径落地，其它厂商 adapter 按客户现场 enroll |
+| 9 | **NPU 升 Qwen3-4B w8a8**（替代当前 1.5B）| ⏸ 下载链路阻断 | 5/14 Sub-1 试下载 hf-mirror 154KB/s × 8.7h 放弃；长期 x86 GPU 工作站自转 |
+| 10 | **手势识别 MediaPipe**（化工非接触控制）| ⏸ sprint 收口后做 | 5/14 Sub-4 调研完成 7-9h 工时，海康/大华没做这个 |
+| 11 | **MCP 协议接智能家居**（HA 原生支持）| ⏸ 5/14 调研 | landscape D2c，第三步 C 路径 |
+| 12 | **真修 Flask 5050 retry**（5/14 raised：werkzeug print+sys.exit 绕过 OSError 抛错）| ⏸ task #52 | 5/14 demo 中翻车一次，supervisor 整体 stop()。短期 sleep+重启可复，长期需 socket.bind 测试 |
+
+#### 已废弃 / 修正方向
+
+| 项 | 原计划 | 修正后 |
+|---|---|---|
+| ~~YOLO26n 升级~~ | landscape "43% 提速 + open-vocab" | 5/14 Sub-2 实测 **慢 5% + open-vocab API 缺失**；改 yolov8-world + CLIP（Sub-5 实测命中 person without hardhat conf 0.36 / falling 0.67-0.80）|
+| ~~av/control → Node-RED 外露桥接~~ | 原 P0 但客户硬件未枚举 | 改"等客户硬件 enroll 后扩 dispatcher adapter"；当前 husion 路径已直 REST 验证 |
+
+### 阶段二精进路径（5/12 之前规划，部分已完成）
 
 ### 阶段二精进路径（5/12 之前规划，部分已完成）
 
@@ -2537,3 +2562,87 @@ Mac 实测 hf-mirror 国际线路 ~120KB/s，3.5GB 模型 5 分钟下 1GB → �
 - 不启用就是原 ollama 行为（默认）
 - guard 进程 PID 974319（av_processor）+ 974370（sensevoice daemon）今日仍存活，5/12 起 24h+ uptime，作为长跑稳定性样本不要重启
 
+
+### 2026-05-14 GTM 战略转向 + 三形态全链路落地（25+ commits 一天）
+
+**当日定调（user 拍板）**：从"技术驱动"切到"市场驱动" — 先包装出门拿项目，再深耕技术。所有 sprint 重排 P0/P1/P2，P0 出门必备（演示包+客户化+销售材料）一天内集中干完。
+
+**关键战略发现**：
+- 原 §11 sprint 看板第 1 优先级"av/control → 真硬件" **是死锁项**（要先有客户才枚举硬件，但要演示才有客户）→ 重排为 P2 "客户场景特定"
+- 缺失"演示包包装"独立 sprint → 加 P0 #1-3
+- AI 项目跟踪机制空白 → 加 P1 #6 (docs/roadmap/ai-landscape)
+
+**关键实测 reality check（修正 5/13 乐观估计）**：
+- ❌ YOLO26n 反预期慢 5% + open-vocab API 缺失 → 改 yolov8s-world + CLIP（Sub-5 实测 conf 0.36-0.80 命中"未戴安全帽 / 跌倒"）
+- ❌ Qwen3-4B 下载链路阻断（hf-mirror 154KB/s 要 8.7h）→ 保留 1.5B 现状，长期 x86 GPU 自转
+- ✅ husion REST API 256 个 endpoint 全部反查 + 真切大屏 200ms（实测）→ 形态 C 跨品牌融合**核心落地**
+- ✅ yolov8-world 化工 prompt 实锤可演示 → 形态 B 第三层 openvocab_filter 模块落地
+- ✅ 三层视觉链路: YOLOv8n 8Hz → keyframe_filter 0.01Hz → (Jetson VLM scene_analyzer 70s) + (3588 yolov8-world openvocab 2s) 全部跑通
+
+**Subagent 协作模式立功**：9 个 Subagent 并行（含 1 个失败发现修正方向），W3 主对话协调 + 0 大块整段时间投入。
+
+**5/14 25+ commits 列表**（精选）：
+
+| commit | 内容 |
+|---|---|
+| `c95c403` | docs(sales): 内训材料 3 份（pitch + 视频脚本 + FAQ） |
+| `48bb4c1` | feat(dashboard): 客户视图开关 + LOGO splash + openvocab SSE 桥 |
+| `5571c7b` | feat(openvocab_filter): yolov8-world open-vocab 模块 |
+| `0ae5dac` | feat(dashboard): 演示浮球加 husion 5 场景按钮 |
+| `5687a5f` | feat(control_dispatcher): husion adapter + catalog 5 场景 |
+| `97fcc86` | feat(web_browser): _husion_switch_scene 真接入（200ms 切大屏） |
+| `ed0298a` | docs: Sub-5 yolov8-world 实测报告（命中 person without hardhat 0.36） |
+| `019253f` | fix(web): Flask 启动 3 次 retry（**5/14 后期发现没生效** — werkzeug print+sys.exit 绕过 OSError，task #52 真修） |
+| `a0d12cd` | fix(dashboard): 视频墙改回 raw 流畅模式 |
+| `c67f114` | feat(web_browser): husion 真登录 + 256 API 索引 + hls 直拉发现 |
+| `0ef01e1` | feat(demo-pack): 3588 演示一键启动 + dashboard 浮球 |
+| `9f1bdcc` | docs(roadmap): AI 视听边缘 / VLM / 多模态调研报告（186 行）|
+| `d4ed9d5` | feat(web_browser): husion Playwright POC 模块框架 |
+| `d4fca4c` | feat(dashboard): 视觉深思主面板 + MODULES_META 注册 |
+| `f070527` | feat(keyframe_filter): 关键帧过滤模块（差异检测 0.01Hz）|
+
+**三机分工矩阵 (5/14 14:00 状态)**：
+
+| 设备 | 模块 | 用途 |
+|---|---|---|
+| **3588** (192.168.5.6) | 10 模块全栈 (audio + video + llm + 4 个 filter/analyzer + 4 个 obs/dispatch) | 国产化主推 / 涉密客户 |
+| **Jetson** (192.168.5.51) | scene_analyzer (qwen2.5vl:3b VLM) | 视觉深思 / 非涉密 |
+| **Mac mini** (192.168.5.193) | escalate llm_engine (qwen3.5:4b) | 文本兜底深思 |
+
+**已验证演示能力（客户可见）**：
+- 语音控制家居 5 颗按钮 + 语音控制大屏 5 颗按钮（共 10 颗演示浮球）
+- 视频墙 4 路 raw 流畅 + 检测 badge 叠加显示
+- husion 大屏切场景 200ms（实测 1×1 / 2×2）
+- 形态 B 化工识别（"未戴安全帽" 实锤）
+- 客户视图开关（顶栏 pill 切开发/演示视图）
+- 启动 splash 1.5s LOGO
+
+**Subagent 报告归档**：
+- OVERNIGHT_REPORT_3588_20260514.md（L1 烧机 5.3h 0 crash）
+- OVERNIGHT_REPORT_JETSON_VLM_20260514.md（Jetson 形态 B 5h M1-M6）
+- OVERNIGHT_REPORT_MACMINI_20260514.md（深思层迁移 qwen3.5:4b）
+- OVERNIGHT_REPORT_DEMO_PACKAGE_20260514.md（P0 演示包）
+- OVERNIGHT_REPORT_HUSION_BROWSER_POC_20260514.md（早 Playwright POC）
+- OVERNIGHT_REPORT_HUSION_REAL_LOGIN_20260514.md（中 admin/123456 真登录）
+- OVERNIGHT_REPORT_YOLO26_TEST_20260514.md（YOLO26 反预期）
+- OVERNIGHT_REPORT_YOLOV8_WORLD_20260514.md（实锤路径）
+- OVERNIGHT_REPORT_GESTURE_RESEARCH_20260514.md（手势识别 MediaPipe）
+- OVERNIGHT_REPORT_QWEN3_4B_TEST_20260514.md（下载阻断）
+- OVERNIGHT_REPORT_OPENVOCAB_FILTER_20260514.md（模块落地）
+- docs/roadmap/ai-landscape-20260514.md（AI 项目调研）
+- docs/sales/{one-page-pitch, demo-video-script-5min, faq-sales}.md（销售材料）
+- docs/protocol/husion-rest-api-index-20260514.json（256 API 索引）
+
+**未完成 / 下次接手**：
+1. **Sub-7 dashboard husion + openvocab 主面板**仍在跑（main.py / server.py 已合并入 commit `48bb4c1`，前端槽待 Sub-7 完成后合）
+2. **task #52 Flask retry 真修** — werkzeug print+sys.exit 绕过 OSError，需 socket.bind 测试 + make_server 路径
+3. **plan §11 sprint 看板**已重排 P0/P1/P2 三档（5/14 当日完成 P0 + P1 大半）
+4. **客户硬件枚举**仍是 P2 入场门槛 — 等销售带回真客户场景
+5. **husion 后台预编排**只画了"单屏 / 四分屏"两个场景，演示浮球 6/7 真切 ✓，8/9/10（九宫格/应急/漫游）需 user 去 husion 后台预编排
+
+**下次接手所需上下文**：
+- 12 份 OVERNIGHT_REPORT_*_20260514 全在仓库根，逐份读懂当日全貌
+- §11 sprint 看板已重排 P0/P1/P2，新接手按这个排
+- 三机配合（3588 主 + Jetson 视觉深思 + Mac mini 文本兜底）broker 都连 3588:1883
+- husion 真切大屏 = GET /api/wall/rx_scene?wall_id=5008&scene={场景名}（Authorization Bearer 走 modules/web_browser/main.py husion_switch_scene helper）
+- dashboard force reload (Cmd+Shift+R) 顶栏右上 pill 切客户视图，10 颗浮球按钮 1-5 家居 / 6-10 husion 视频墙
