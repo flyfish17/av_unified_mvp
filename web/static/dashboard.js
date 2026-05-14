@@ -131,12 +131,8 @@
             if (ep.kind === "husion_stream") {
               startFlvStream(slot, media, rewriteHost(ep.stream_url || ep.url));
             } else {
-              // mjpeg：grid 用 annotated stream（带 bbox），与 renderWall 一致
-              let streamUrl = ep.stream_url || ep.url;
-              if (streamUrl && !/\bmode=/.test(streamUrl)) {
-                streamUrl += (streamUrl.includes("?") ? "&" : "?") + "mode=annotated";
-              }
-              startSnapshotPoll(slot, media, rewriteHost(streamUrl));
+              // 5/14 改：grid raw 流畅模式，检测靠 detect overlay badge 叠加
+              startSnapshotPoll(slot, media, rewriteHost(ep.stream_url || ep.url));
             }
           }
         }
@@ -560,14 +556,9 @@
           // husion FLV：ws://... URL 走 flv.js；host 重写为浏览器当前 host（5/12 host alias 假设）
           startFlvStream(slot, media, rewriteHost(ep.stream_url || ep.url));
         } else {
-          // mjpeg：grid 用 annotated stream（带 YOLO bbox 直接画在帧上），保证视频墙
-          // 一眼看到检测在工作。CPU cost 跟 raw 几乎一样（YOLO 推理是独立 fps，annotated
-          // 只是输出已画框帧 vs 原始帧的差异）。stream_url 末尾 append ?mode=annotated。
-          let streamUrl = ep.stream_url || ep.url;
-          if (streamUrl && !/\bmode=/.test(streamUrl)) {
-            streamUrl += (streamUrl.includes("?") ? "&" : "?") + "mode=annotated";
-          }
-          startSnapshotPoll(slot, media, rewriteHost(streamUrl));
+          // 5/14 用户反馈：grid 用原始流畅 raw 流（不要 burn-in bbox 让画面不流畅）。
+          // 检测信号通过 detect overlay badge（text-only, "person×2 phone×1"）叠加显示。
+          startSnapshotPoll(slot, media, rewriteHost(ep.stream_url || ep.url));
         }
       } else if (ep.kind === "husion_stream") {
         media.style.opacity = "0.3";
