@@ -166,19 +166,42 @@ class WebBrowserModule(BaseModule):
         details = self._husion_get(f"/api/wall/wall_details?idWall={wall_id}", token).get("data") or {}
         return {"windows": windows, "details": details}
 
-    def _husion_switch_source(self, wall_id: int, win_id: int, tx_id: int, token: str | None = None) -> dict:
-        """切换视频墙某窗口的信号源 (将 win_id 的输入切到 tx_id)。
+    def _husion_switch_scene(self, rx_id: int | str, scene_name: str, token: str | None = None) -> dict:
+        """切换 RX 显示器到指定预编排场景（5/14 user 实操 XHR 抓取后接入）。
 
-        注意: 当前 (5/14 Sub-C) 仅完成 endpoint 定位, payload 字段未实操验证。
-        候选 endpoint (按 JS 扫描结果排序):
-          1. POST /api/wall/switch   {wall_id, win_id, tx_id}     ← 最可能
-          2. POST /api/wall/editWin  {wall_id, win_id, tx_id, ...}
-          3. POST /api/wall/buildWin {wall_id, ...}               ← 新建窗口
-        硬约束: 用前要先在 husion web 后台手动点一次切换并抓 XHR 确认 payload。
+        Args:
+            rx_id: RX 显示器设备 ID（如 5008 对应"输出至 CR 分布式"显示端）
+            scene_name: husion 后台预编排好的场景名（如"单屏" / "四分屏" / 客户自定义）
+            token: 可选 JWT；不传则自动登录
+
+        Returns: husion 完整响应 dict
+          {statusCode, code, message, data: [{rxid, scenename, audio, hdmi, mode, switchList}]}
+          - mode: "1x1" / "2x2" / "3x3" 等布局模式
+          - switchList: [{win, name, hls, txid}] 每个 win 实际播的信号源
+
+        实测路径（5/14 13:09 user 抓 XHR 确认）：
+          GET /api/wall/rx_scene?wall_id={rx_id}&scene={scene_name URL-encoded}
+          切"单屏": wall_id=5008&scene=%E5%8D%95%E5%B1%8F
+          切"四分屏": wall_id=5008&scene=%E5%9B%9B%E5%88%86%E5%B1%8F
+
+        ⚠️ 前提: 场景必须先在 husion 后台 web "预编排" 模式手动定义好。
+        我们只触发"切到已定义场景"，不动态新建窗口（避免脏 husion 配置）。
+        """
+        import urllib.parse
+        if token is None:
+            token = self._husion_login()
+        scene_enc = urllib.parse.quote(str(scene_name))
+        path = f"/api/wall/rx_scene?wall_id={rx_id}&scene={scene_enc}"
+        return self._husion_get(path, token)
+
+    # 旧名向后兼容（5/14 Sub-3 写的占位接口）
+    def _husion_switch_source(self, wall_id, win_id, tx_id, token=None):
+        """已废弃 — 真实 husion 协议是按"场景"切换，不是按 win/tx 切。
+        请改用 _husion_switch_scene(rx_id, scene_name)。
         """
         raise NotImplementedError(
-            "husion video-wall switch endpoint located but payload not yet verified. "
-            "Capture real XHR via Playwright before enabling — see /tmp/husion_all_apis.json"
+            "husion 切换协议实际按预编排场景名切，不是 win/tx 三元组。"
+            "请用 _husion_switch_scene(rx_id, scene_name)，参考 docstring。"
         )
 
 
