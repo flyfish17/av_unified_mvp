@@ -1053,6 +1053,7 @@
     { id: "overview-video",         title: "视频墙" },
     { id: "overview-transcript",    title: "语意理解 · 转写" },
     { id: "overview-intent",        title: "意图 / 控制流" },
+    { id: "overview-scene",         title: "视觉深思 · 场景分析" },
     { id: "overview-online-stream", title: "在线视频源" },
     { id: "overview-add-source",    title: "添加视频源" },
     { id: "overview-lan-scan",      title: "LAN 扫描" },
