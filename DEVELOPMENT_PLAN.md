@@ -89,6 +89,77 @@
 
 ---
 
+## 1.6 三步演进框架（2026-05-14 用户拍板）
+
+项目从架构验证 → 系统落地 → 中间件桥接的整体路线图。
+
+### 第一步 · 验证解耦式模块订阅制【✅ 完成】
+
+- MQTT 总线 + 模块独立 supervisor 拉起 + dashboard SSE 自适应
+- 完成时间：5/8 阶段一收口 + 5/13 阶段 3 第 2 层 NPU 完整漏斗
+- 关键产出：modules/ 全独立、main.py supervisor、dashboard 动态 + 各种 renderer
+
+### 第二步 · 找合适硬件落地 + 系统包装【🔵 当前】
+
+**三机分工**（5/14 对齐）：
+
+| 设备 | 角色 | 跑啥模块 | 客户意义 |
+|---|---|---|---|
+| **3588** | 国产化主推 / 涉密 | audio_processor (NPU ASR) + llm_engine (NPU 1.5B) + control_dispatcher + 4 路 video_processor + Node-RED + 8 模块 supervisor + dashboard 主入口 | 全国产化方案 — 解决语义理解 + 视频分析 + MQTT 编排，**80% 系统就绪**，剩 20% 是客户场景特定接入 |
+| **Jetson** | 视觉深思层 / 非涉密 | audio_processor (CUDA ASR 备份) + scene_analyzer (qwen2.5vl:3b VLM) + 跨帧 diff | 视觉差异化护城河 — 单机推理盒做不到的"看图思考 + 跨帧 diff"，文本 LLM 替代不了 |
+| **Mac mini** | 兜底深思 / 演示池 | escalate_receiver llm_engine (qwen3.5:4b) + 5/12 演示 supervisor | 文本意图 escalate — 3588 漏斗 miss 时升级处理 |
+
+**第二步检查点**：
+- 解决"语义理解 + 视频分析"两大基础能力 → 系统自洽
+- 3588 全功能演示就绪（5/14 烧机 5.3h 0 crash 验证）
+- Jetson 视觉护城河成立（5/14 VLM e2e 通）
+- 三机统一 dashboard 界面 + 共享 MQTT 总线
+
+### 第三步 · 旧系统中间件 / 利旧 / 跨品牌【⏸ 未来】
+
+定位"中间件" — 用户旧系统运维、桥接、利旧、跨品牌、跨系统衔接。三个具体场景：
+
+| 子场景 | 价值 | 技术路径 | 硬件需求 |
+|---|---|---|---|
+| **A. 涉密 HDMI 视觉识别** | 应急中心 / 公安场景：中心终端只能进密网，AI 不进密网。Jetson VLM 看 HDMI 信号识别屏幕内容（5/14 Jetson VLM 落地是这条的基础）| HDMI USB capture stick → Jetson scene_analyzer → 富语义事件输出 | HDMI 采集器 ¥200 + Jetson 现有 |
+| **B. 浏览器模块** | 登录 husion 等 web server，查询、预览、操作 — 极大简化融合过程 | Playwright / Selenium 驱动浏览器登录后台 → 截图给 VLM 分析 → av/control 反查 | 软件，无新硬件 |
+| **C. 智能家居桥接** | 华为 / 绿米 aqara / 小米等 — 增加系统感知能力 + 低成本智能化 | Home Assistant MQTT 桥 或 厂商 SDK → av/control 出口扩 adapter | aqara M2 网关等 ¥300 |
+
+**第三步检查点**：
+- 不替代客户已有系统，做"上层中间件"
+- ABC 三场景至少一个客户落地
+- catalog 设备类型扩展支持厂商 device type（不只是 76 通用 cmd）
+
+### 跨步演进准则
+
+- **每步内有"工程产出 + 客户案例"双锚点** — 不能只验证技术不落客户
+- **每步硬件矩阵开放** — 见 §1.6 下方 "产品化硬件路线图"
+- **演示一致性** — 三步切换时 dashboard 界面 + MQTT 协议契约不变
+
+### 产品化硬件路线图（5/14 调研）
+
+按客户场景分类的硬件矩阵：
+
+| 路线 | 设备 | 价位 | 适用 |
+|---|---|---|---|
+| **国产涉密主推**（当前）| RK3588 工业版 | ¥1500-3000 | 政企 / 涉密 / 当前演示主力 |
+| 国产涉密升级 | RK3588 Plus 16GB | ¥3000-5000 | 客户要更大 VLM 时 |
+| 国产涉密重负载 | 昇腾 Atlas 200I DK A2 | ¥2500-5500 | NPU 更强 / 政企涉密更高级别 |
+| 国产视频专精 | 算丰 SE9 (BM1684X) 32TOPS | ¥5000-8000 | 多路视频分析重负载 |
+| **非涉密性能**（当前）| Jetson Orin Nano 8GB | ¥3000 | 视觉深思 / 5/14 已用 |
+| 非涉密性能升级 | Jetson Orin NX 16GB | ¥6000 | 跑大 VLM / 多 worker 并发 |
+| 非涉密极限 | Jetson AGX Orin 32-64GB | ¥12000-25000 | "AI 中控盒" / 70B 模型 |
+| **客户驻场** | Mac mini M4 Pro 24-48GB | ¥10000-18000 | 当前 mini 升级 / escalate 大模型 |
+| 新兴价比 | AMD Ryzen AI HX370 NPU 50 TOPS | ¥4000-8000 | 非涉密 / 性能价比 |
+| 国产批量价比 | 算能 BM1688 16 TOPS | ¥1500-2500 | 边缘盒子批量部署 |
+
+**短期建议**（5/14）：
+1. 主线不变（3588 涉密主推 + Jetson VLM）
+2. 试 1 台 **昇腾 Atlas 200I DK A2** — 国产化更高级别替代评估
+3. 等客户性能要求清晰再决定是否上 Jetson Orin NX 16GB
+
+---
+
 ## 2. 目标架构（六层）
 
 ```
