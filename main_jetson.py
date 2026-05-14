@@ -36,6 +36,7 @@ JETSON_MANAGED_MODULES = [
     "modules.system_info.main",
     "modules.network_info.main",
     "modules.control_dispatcher.main",
+    "modules.scene_analyzer.main",
 ]
 
 MAX_RETRY_DELAY = 60

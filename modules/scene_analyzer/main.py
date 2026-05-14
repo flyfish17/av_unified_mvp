@@ -1,0 +1,338 @@
+#!/usr/bin/env python3
+"""
+modules/scene_analyzer/main.py
+视觉深思层 — 订阅 av/video/detect，拉 mjpeg snapshot，喂 ollama VLM (qwen2.5vl:3b)，
+发场景语义到 av/video/scene_analysis。
+
+设计契约：
+  - 每个 camera 节流 throttle_seconds 一次（默认 10s）
+  - RAM 守门：psutil 看 mem_avail < mem_min_mb 直接 skip 当帧（避免触发硬终止器）
+  - 单 worker ThreadPool：Orin Nano 7.4G RAM 跑 qwen2.5vl:3b 不能并发
+  - inflight=True 时直接 drop 后续 detect，不在 queue 堆积
+  - 异常 / 超时全部 log warning + skip，绝不抛
+  - 只在 Jetson 副本启用（main.py MANAGED_MODULES 不加它，main_jetson.py 加）
+
+Topic:
+  订阅 av/video/detect（payload：{camera, time, detections:[{class, confidence, bbox}]}）
+  发布 av/video/scene_analysis（payload：{camera, time, detection_classes, scene,
+       vlm_model, vlm_latency_ms, vlm_prompt_eval_ms, mem_avail_mb_before, source_host}）
+"""
+import base64
+import logging
+import signal
+import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from urllib.parse import quote
+
+import psutil
+import requests
+import yaml
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from core.base_module import BaseModule
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+
+
+DEFAULTS = {
+    "enabled": True,
+    "vlm_model": "qwen2.5vl:3b",
+    "ollama_url": "http://127.0.0.1:11434/api/generate",
+    "mjpeg_base_url": "http://192.168.5.6:5051",
+    "detect_topic": "av/video/detect",
+    "analysis_topic": "av/video/scene_analysis",
+    "throttle_seconds": 10.0,
+    "mem_min_mb": 400,
+    "vlm_timeout_s": 120,
+    "snapshot_timeout_s": 5,
+    "snapshot_mode": "raw",
+    "num_predict": 80,
+    "prompt": "用一句话描述这张图里看到了什么，重点是人、物体、动作。",
+    "host_label": "jetson",
+    "diff_enabled": False,  # 开启后每次 inference 完再调 1 次纯文本 VLM 跟上一帧 scene 对比
+    "diff_num_predict": 40,
+    "diff_timeout_s": 30,
+    "diff_prompt": "上一帧场景: {prev}\n本次场景: {curr}\n用一句话指出关键变化（人数/位置/动作/物品出现或消失）；若两段几乎相同输出 NO_CHANGE。",
+    "dashboard_sse_url": None,  # 例: "http://192.168.5.5:5050"；非空时 POST 一份到 dashboard /mock/scene_analysis 让前端 SSE 也能拿到
+}
+
+
+class SceneAnalyzerModule(BaseModule):
+
+    HEARTBEAT_INTERVAL = 30
+
+    def __init__(self, config_path: str):
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+
+        # scene_analyzer 自己的子配置；缺省全走 DEFAULTS
+        sa = dict(DEFAULTS)
+        sa.update(cfg.get("scene_analyzer", {}) or {})
+        self._sa = sa
+
+        streams = [{
+            "topic": sa["analysis_topic"],
+            "channel": "scene_analysis",
+            "kind": "kv_table",
+            "title": "视觉深思 · 场景分析",
+        }]
+        super().__init__("scene_analyzer", cfg, streams=streams)
+
+        self._last_inference_ts: dict[str, float] = {}
+        self._inflight_lock = threading.Lock()
+        self._inflight = False
+        self._last_scene_per_camera: dict[str, str] = {}
+        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vlm")
+        self._stats = {
+            "detect_received": 0,
+            "throttled": 0,
+            "inflight_skipped": 0,
+            "mem_guard_skipped": 0,
+            "snapshot_failed": 0,
+            "vlm_failed": 0,
+            "vlm_published": 0,
+            "diff_published": 0,
+            "diff_failed": 0,
+        }
+
+        signal.signal(signal.SIGINT, lambda s, f: self.stop())
+        signal.signal(signal.SIGTERM, lambda s, f: self.stop())
+
+        if not sa["enabled"]:
+            self.logger.info("scene_analyzer 配置 enabled=false，仅占位不工作")
+            return
+        self.subscribe(sa["detect_topic"])
+        self.logger.info(
+            f"订阅 {sa['detect_topic']} | VLM={sa['vlm_model']} | "
+            f"节流={sa['throttle_seconds']}s | mem_min={sa['mem_min_mb']}MB"
+        )
+
+    def _handle_message(self, topic: str, payload: dict) -> None:
+        if topic != self._sa["detect_topic"]:
+            return
+        if not self._sa["enabled"]:
+            return
+        self._stats["detect_received"] += 1
+        # video_processor 发的 payload：{header, camera, time, detections}
+        camera = payload.get("camera")
+        det_time = payload.get("time") or time.time()
+        detections = payload.get("detections") or []
+        if not camera:
+            return
+        classes = sorted({d.get("class") for d in detections if d.get("class")})
+        # 节流
+        now = time.time()
+        last = self._last_inference_ts.get(camera, 0.0)
+        if now - last < self._sa["throttle_seconds"]:
+            self._stats["throttled"] += 1
+            return
+        # 单 worker，inflight 就丢；不排队（防 detect 高频堆积）
+        with self._inflight_lock:
+            if self._inflight:
+                self._stats["inflight_skipped"] += 1
+                return
+            self._inflight = True
+        # 抢占式更新 last_ts：避免同 camera 紧跟着多次进入
+        self._last_inference_ts[camera] = now
+        self._pool.submit(self._analyze, camera, det_time, classes)
+
+    def _analyze(self, camera: str, det_time: float, classes: list) -> None:
+        try:
+            mem_avail_mb = psutil.virtual_memory().available // (1024 * 1024)
+            if mem_avail_mb < self._sa["mem_min_mb"]:
+                self._stats["mem_guard_skipped"] += 1
+                self.logger.warning(
+                    f"mem_avail={mem_avail_mb}MB < {self._sa['mem_min_mb']}MB，"
+                    f"skip {camera}"
+                )
+                return
+            t_snap0 = time.monotonic()
+            jpg = self._fetch_snapshot(camera)
+            t_snap_ms = (time.monotonic() - t_snap0) * 1000
+            if jpg is None:
+                self._stats["snapshot_failed"] += 1
+                return
+            img_b64 = base64.b64encode(jpg).decode("ascii")
+            t_vlm0 = time.monotonic()
+            result = self._call_vlm(img_b64)
+            t_vlm_ms = (time.monotonic() - t_vlm0) * 1000
+            if result is None:
+                self._stats["vlm_failed"] += 1
+                return
+            scene = result.get("response", "").strip()
+            if not scene:
+                self._stats["vlm_failed"] += 1
+                return
+            # 可选：跨帧 diff（第二次 VLM 调用，纯文本对比；默认关）
+            prev_scene = self._last_scene_per_camera.get(camera)
+            diff_text = None
+            diff_ms = 0
+            if self._sa.get("diff_enabled") and prev_scene:
+                t_diff0 = time.monotonic()
+                diff_text = self._call_diff(prev_scene, scene)
+                diff_ms = int((time.monotonic() - t_diff0) * 1000)
+                if diff_text:
+                    self._stats["diff_published"] += 1
+                else:
+                    self._stats["diff_failed"] += 1
+            payload_out = {
+                "camera": camera,
+                "time": det_time,
+                "detection_classes": classes,
+                "scene": scene,
+                "vlm_model": self._sa["vlm_model"],
+                "vlm_latency_ms": int(t_vlm_ms),
+                "vlm_load_ms": result.get("load_duration", 0) // 1_000_000,
+                "vlm_prompt_eval_ms": result.get("prompt_eval_duration", 0) // 1_000_000,
+                "vlm_eval_ms": result.get("eval_duration", 0) // 1_000_000,
+                "vlm_eval_count": result.get("eval_count", 0),
+                "snapshot_latency_ms": int(t_snap_ms),
+                "mem_avail_mb_before": int(mem_avail_mb),
+                "source_host": self._sa["host_label"],
+            }
+            if prev_scene is not None:
+                payload_out["prev_scene"] = prev_scene
+            if diff_text is not None:
+                payload_out["diff"] = diff_text
+                payload_out["diff_vlm_ms"] = diff_ms
+            self._last_scene_per_camera[camera] = scene
+            self.publish(self._sa["analysis_topic"], payload_out)
+            self._stats["vlm_published"] += 1
+            self._push_to_dashboard({**payload_out, "ts": time.time()})
+            self.logger.info(
+                f"[scene] {camera} cls={classes} | "
+                f"VLM {int(t_vlm_ms)}ms | mem→{mem_avail_mb}MB | "
+                f"\"{scene[:50]}{'...' if len(scene) > 50 else ''}\""
+            )
+        except Exception as e:
+            self._stats["vlm_failed"] += 1
+            self.logger.warning(f"_analyze 异常 camera={camera}: {e}")
+        finally:
+            with self._inflight_lock:
+                self._inflight = False
+
+    def _fetch_snapshot(self, camera: str) -> bytes | None:
+        url = (
+            f"{self._sa['mjpeg_base_url']}/snapshot/"
+            f"{quote(camera)}?mode={self._sa['snapshot_mode']}"
+        )
+        try:
+            r = requests.get(url, timeout=self._sa["snapshot_timeout_s"])
+            if r.status_code != 200 or not r.content:
+                self.logger.warning(
+                    f"snapshot 失败 camera={camera} status={r.status_code} "
+                    f"len={len(r.content)}"
+                )
+                return None
+            return r.content
+        except Exception as e:
+            self.logger.warning(f"snapshot 异常 camera={camera}: {e}")
+            return None
+
+    def _call_vlm(self, img_b64: str) -> dict | None:
+        body = {
+            "model": self._sa["vlm_model"],
+            "prompt": self._sa["prompt"],
+            "images": [img_b64],
+            "stream": False,
+            "options": {"num_predict": self._sa["num_predict"]},
+        }
+        try:
+            r = requests.post(
+                self._sa["ollama_url"],
+                json=body,
+                timeout=self._sa["vlm_timeout_s"],
+            )
+            if r.status_code != 200:
+                self.logger.warning(
+                    f"VLM HTTP {r.status_code}: {r.text[:200]}"
+                )
+                return None
+            return r.json()
+        except requests.Timeout:
+            self.logger.warning(f"VLM 超时 {self._sa['vlm_timeout_s']}s")
+            return None
+        except Exception as e:
+            self.logger.warning(f"VLM 异常: {e}")
+            return None
+
+    def _call_diff(self, prev_scene: str, curr_scene: str) -> str | None:
+        """纯文本 VLM 调用，做前后帧 scene 对比；同 model（model 已暖）只是 prompt 不带图。"""
+        prompt = self._sa["diff_prompt"].format(prev=prev_scene, curr=curr_scene)
+        body = {
+            "model": self._sa["vlm_model"],
+            "prompt": prompt,
+            "stream": False,
+            "options": {"num_predict": self._sa["diff_num_predict"]},
+        }
+        try:
+            r = requests.post(
+                self._sa["ollama_url"],
+                json=body,
+                timeout=self._sa["diff_timeout_s"],
+            )
+            if r.status_code != 200:
+                self.logger.warning(f"diff VLM HTTP {r.status_code}")
+                return None
+            text = r.json().get("response", "").strip()
+            return text or None
+        except Exception as e:
+            self.logger.warning(f"diff VLM 异常: {e}")
+            return None
+
+    def _push_to_dashboard(self, payload: dict) -> None:
+        """可选：把场景事件直接 POST 到 dashboard 的 /mock/scene_analysis SSE 桥。
+        默认关；配 dashboard_sse_url 后开。失败仅 warn，不影响主路径。
+        """
+        url = self._sa.get("dashboard_sse_url")
+        if not url:
+            return
+        try:
+            requests.post(
+                f"{url.rstrip('/')}/mock/scene_analysis",
+                json=payload, timeout=2,
+            )
+        except Exception as e:
+            self.logger.warning(f"dashboard push 失败: {e}")
+
+    def run(self) -> None:
+        """主循环：心跳 + 每 60s 打一次统计行（便于跨夜 log 抓数据）。"""
+        self.start()
+        last_heartbeat = time.time()
+        last_stats = time.time()
+        try:
+            while self._running.is_set():
+                time.sleep(1)
+                now = time.time()
+                if now - last_heartbeat >= self.HEARTBEAT_INTERVAL and self._connected:
+                    self._publish_discovery("heartbeat")
+                    last_heartbeat = now
+                if now - last_stats >= 60:
+                    self.logger.info(f"[stats] {self._stats}")
+                    last_stats = now
+        except KeyboardInterrupt:
+            self.logger.info("收到键盘中断信号")
+        finally:
+            self._pool.shutdown(wait=False, cancel_futures=True)
+            self.stop()
+
+
+def main():
+    config_path = Path(__file__).parent.parent.parent / "config" / "system_config.yaml"
+    if not config_path.exists():
+        print(f"配置文件不存在: {config_path}")
+        sys.exit(1)
+    module = SceneAnalyzerModule(str(config_path))
+    module.run()
+
+
+if __name__ == "__main__":
+    main()
