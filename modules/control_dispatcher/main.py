@@ -36,9 +36,10 @@ logging.basicConfig(
 
 
 def _build_cmd_lookup() -> dict:
-    """{cmd_id: {device, action, location, device_label, action_label, location_label}}
+    """{cmd_id: {device, action, location, device_label, action_label, location_label, **adapter_params}}
 
     一次性从 catalog 摊开，避免每条 av/control 都重读 catalog。
+    adapter_params 透传 cmd 上的额外字段（如 husion 的 scene_name / rx_id）给 adapter。
     """
     catalog_path = Path(__file__).parent.parent.parent / "config" / "device_catalog.json"
     if not catalog_path.exists():
@@ -54,6 +55,8 @@ def _build_cmd_lookup() -> dict:
         dev = c.get("device", "")
         action = c.get("action", "")
         dev_meta = device_types.get(dev, {})
+        # 透传 cmd 上除核心字段外的额外字段（adapter 用，如 scene_name / rx_id）
+        extra = {k: v for k, v in c.items() if k not in ("id", "device", "action", "location", "label", "also_in")}
         out[cid] = {
             "device": dev,
             "action": action,
@@ -61,6 +64,7 @@ def _build_cmd_lookup() -> dict:
             "device_label": dev_meta.get("label", dev),
             "action_label": (dev_meta.get("actions_label") or {}).get(action, action),
             "location_label": loc_to_label.get(c.get("location", ""), c.get("location", "")),
+            **extra,
         }
     return out
 
@@ -107,20 +111,44 @@ class ControlDispatcher(BaseModule):
         self._dispatch(cmd_id, meta, original_text, corr_id)
 
     def _dispatch(self, cmd_id: str, meta: dict, original_text: str, corr_id) -> None:
-        """当前 echo_only：未接真实设备前，把"已收到"信号发回 dashboard。
+        """按 cmd_id 前缀路由到不同 adapter。
 
-        真实硬件接入后，这里换 husion / Node-RED / 厂商 adapter 调用；
-        把 status 设为 ok/failed + adapter_latency_ms。
+        当前 adapter:
+          - Husion_*  → husion REST API (web_browser.husion_switch_scene)
+          - 其它       → echo_only (待接 Node-RED / 厂商 SDK)
+
+        每个 adapter 调用结果转 status = ok / failed / echo_only，连同 latency_ms
+        publish 到 av/control/dispatched 供 dashboard 显示。
         """
         device_label = meta.get("device_label", "?")
         action_label = meta.get("action_label", "?")
         location_label = meta.get("location_label", "?")
         target_human = f"[{location_label}] {device_label}{action_label}"
-        self.logger.info(f"➤ 下发: {cmd_id}  ({target_human})  原话: {original_text!r}")
+
+        # === Adapter 路由 ===
+        status = "echo_only"
+        adapter_latency_ms = None
+        adapter_err = None
+        if cmd_id.startswith("Husion_"):
+            t0 = time.monotonic()
+            try:
+                status = self._adapt_husion(cmd_id, meta)
+            except Exception as e:
+                status = "failed"
+                adapter_err = f"{type(e).__name__}: {e}"
+                self.logger.warning(f"husion adapter 异常 {cmd_id}: {adapter_err}")
+            adapter_latency_ms = int((time.monotonic() - t0) * 1000)
+
+        marker = {"ok": "✓", "failed": "✗", "echo_only": "➤"}.get(status, "?")
+        self.logger.info(
+            f"{marker} 下发: {cmd_id}  ({target_human})  status={status}"
+            + (f" {adapter_latency_ms}ms" if adapter_latency_ms is not None else "")
+            + f"  原话: {original_text!r}"
+        )
 
         # kv_table renderer 的 control kind classify：ev.target / ev.action 都有 → 渲染为
         # 「{original_text}」→ {target} · {action}
-        self.publish("av/control/dispatched", {
+        payload = {
             "ts": time.time(),
             "cmd": cmd_id,
             "target": target_human,
@@ -128,9 +156,31 @@ class ControlDispatcher(BaseModule):
             "device": device_label,
             "location": location_label,
             "original_text": original_text,
-            "status": "echo_only",   # 接真实设备后改 ok/failed
+            "status": status,
             "correlation_id": corr_id,
-        })
+        }
+        if adapter_latency_ms is not None:
+            payload["adapter_latency_ms"] = adapter_latency_ms
+        if adapter_err is not None:
+            payload["error"] = adapter_err
+        self.publish("av/control/dispatched", payload)
+
+    def _adapt_husion(self, cmd_id: str, meta: dict) -> str:
+        """husion REST adapter — 调 GET /api/wall/rx_scene 切场景。
+
+        Returns: "ok" 成功 / "failed" 业务错（code != 0）；其它异常由 caller 捕获。
+        """
+        from modules.web_browser.main import husion_switch_scene
+        scene_name = meta.get("scene_name")
+        rx_id = meta.get("rx_id", "5008")
+        if not scene_name:
+            raise ValueError(f"catalog 中 {cmd_id} 缺 scene_name 字段")
+        resp = husion_switch_scene(rx_id, scene_name, timeout=8.0)
+        if resp.get("code") == 0:
+            scenename = (resp.get("data") or [{}])[0].get("scenename", "")
+            self.logger.info(f"  husion 切换成功: rx_id={rx_id} scene={scenename}")
+            return "ok"
+        raise RuntimeError(f"husion code={resp.get('code')} msg={resp.get('message')}")
 
     def run(self) -> None:
         self.start()

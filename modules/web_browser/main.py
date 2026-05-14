@@ -52,6 +52,51 @@ HUSION_LOGIN_PAYLOAD = {
 }
 
 
+# ============================================================
+# Module-level husion REST helpers — 供其它模块直接 import 调用
+# 不依赖 BaseModule / self 状态，纯函数风格
+# ============================================================
+
+def husion_login(timeout: float = 5.0) -> str:
+    """登录 husion + 返回 JWT token。"""
+    req = urllib.request.Request(
+        f"{HUSION_BASE}/api/login",
+        data=json.dumps(HUSION_LOGIN_PAYLOAD).encode(),
+        headers={"Content-Type": "application/json;charset=UTF-8"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        data = json.loads(r.read().decode())
+    return data["data"]["token"]
+
+
+def husion_get(path: str, token: str, timeout: float = 5.0) -> dict:
+    """带 JWT 的 GET 调用 husion REST API。"""
+    req = urllib.request.Request(
+        f"{HUSION_BASE}{path}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode())
+
+
+def husion_switch_scene(rx_id, scene_name: str, token: str = None, timeout: float = 5.0) -> dict:
+    """切换 husion RX 显示器到指定预编排场景。
+
+    实测路径 (5/14 13:09 user 浏览器 DevTools 抓 XHR):
+      GET /api/wall/rx_scene?wall_id={rx_id}&scene={scene_name URL-encoded}
+
+    Returns: husion 完整响应 {statusCode, code, message, data: [{...}]}
+    Raises: HTTPError / URLError / JSONDecodeError 等
+    """
+    import urllib.parse
+    if token is None:
+        token = husion_login(timeout=timeout)
+    scene_enc = urllib.parse.quote(str(scene_name))
+    path = f"/api/wall/rx_scene?wall_id={rx_id}&scene={scene_enc}"
+    return husion_get(path, token, timeout=timeout)
+
+
 class WebBrowserModule(BaseModule):
     """Playwright 浏览器自动化模块（dry-run 默认）。"""
 

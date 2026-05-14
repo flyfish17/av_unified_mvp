@@ -27,6 +27,7 @@
     { "id": "EngineeringDepartment", "label": "工程部",    "category": "service" },
     { "id": "FinanceOffice",         "label": "财务室",    "category": "service" },
     { "id": "KunScenery",            "label": "鲲景",      "category": "feature" },
+    { "id": "Husion",                "label": "husion 视频墙", "category": "videowall" },
     { "id": "_global",               "label": "全局",      "category": "feature" }
   ],
   "device_types": {
@@ -42,7 +43,8 @@
     "Meeting":              { "label": "会议",     "icon": "▶", "actions_label": { "Begin": "开始", "End":   "结束" } },
     "Voice":                { "label": "语音触发", "icon": "🎙", "actions_label": {} },
     "Scenery":              { "label": "景观",     "icon": "✿", "actions_label": { "On":   "开",   "Off":   "关" } },
-    "Word":                 { "label": "发光字",   "icon": "✺", "actions_label": { "On":   "开",   "Off":   "关" } }
+    "Word":                 { "label": "发光字",   "icon": "✺", "actions_label": { "On":   "开",   "Off":   "关" } },
+    "VideoWall":            { "label": "视频墙",   "icon": "▦", "actions_label": { "SinglePanel": "单屏", "FourSplit": "四分屏", "NineSplit": "九宫格", "Emergency": "应急模式", "Roam": "漫游" } }
   },
   "commands": [
     { "id": "BarCounter_Curtain_Open",     "location": "BarCounter", "device": "Curtain", "action": "Open",  "label": "吧台窗帘开",  "also_in": ["2FDiningTable"] },
@@ -135,6 +137,12 @@
     { "id": "Corridor_TrackLight_Off",        "location": "Corridor", "device": "TrackLight",        "action": "Off", "label": "走廊轨道灯关" },
 
     { "id": "LuminousWord_On",  "location": "_global", "device": "Word", "action": "On",  "label": "发光字开" },
-    { "id": "LuminousWord_Off", "location": "_global", "device": "Word", "action": "Off", "label": "发光字关" }
+    { "id": "LuminousWord_Off", "location": "_global", "device": "Word", "action": "Off", "label": "发光字关" },
+
+    { "id": "Husion_VideoWall_SinglePanel", "location": "Husion", "device": "VideoWall", "action": "SinglePanel", "label": "视频墙切单屏",   "scene_name": "单屏",   "rx_id": "5008" },
+    { "id": "Husion_VideoWall_FourSplit",   "location": "Husion", "device": "VideoWall", "action": "FourSplit",   "label": "视频墙切四分屏", "scene_name": "四分屏", "rx_id": "5008" },
+    { "id": "Husion_VideoWall_NineSplit",   "location": "Husion", "device": "VideoWall", "action": "NineSplit",   "label": "视频墙切九宫格", "scene_name": "九宫格", "rx_id": "5008" },
+    { "id": "Husion_VideoWall_Emergency",   "location": "Husion", "device": "VideoWall", "action": "Emergency",   "label": "视频墙应急模式", "scene_name": "应急模式", "rx_id": "5008" },
+    { "id": "Husion_VideoWall_Roam",        "location": "Husion", "device": "VideoWall", "action": "Roam",        "label": "视频墙漫游",     "scene_name": "漫游",   "rx_id": "5008" }
   ]
 }
