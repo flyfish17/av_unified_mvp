@@ -1591,9 +1591,11 @@
         const name = d.name || d.equ_name || "(无名)";
         const ip   = d.ip || "";
         const type = d.dev_type || d.type || "";
-        // online 多种格式：1/0、true/false、"online"
+        // online 字段实际格式（5/14 验证）："1G-M" / "100M-F" 链路速率代表 online；
+        // 空串 / "offline" / 0 / false 表示离线。容错多种历史格式。
         const onRaw = d.online != null ? d.online : d.state;
-        const online = onRaw === 1 || onRaw === "1" || onRaw === true || onRaw === "online";
+        const online = onRaw === 1 || onRaw === true || onRaw === "1" || onRaw === "online" ||
+                       (typeof onRaw === "string" && onRaw !== "" && onRaw !== "offline" && onRaw !== "0");
         const onWall = wallTx.has(id) ? " <span class=\"husion-dev-type\" style=\"color:var(--accent)\">[墙上]</span>" : "";
         return `<div class="husion-dev-row">` +
           `<span class="husion-dev-dot ${online ? "on" : "off"}" title="${online ? "online" : "offline"}"></span>` +
