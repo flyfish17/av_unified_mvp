@@ -62,6 +62,13 @@ DEFAULTS = {
     "diff_timeout_s": 30,
     "diff_prompt": "上一帧场景: {prev}\n本次场景: {curr}\n用一句话指出关键变化（人数/位置/动作/物品出现或消失）；若两段几乎相同输出 NO_CHANGE。",
     "dashboard_sse_url": None,  # 例: "http://192.168.5.5:5050"；非空时 POST 一份到 dashboard /mock/scene_analysis 让前端 SSE 也能拿到
+    # keep-warm 防 ollama 默认 5min TTL unload，否则稀疏 detect 每次都冷启 70s。
+    # keep_alive: ollama 字段 — 实际推理时附带，"10m" 表示推理后保活 10 分钟。
+    # keep_warm_interval_s: opt-in 后台 ping，0 = 关；>0 表示每 N 秒发空请求触底，
+    #   保活成本是 5.8GB VRAM 持续占用（Jetson Orin Nano 7.4G unified mem 极紧时
+    #   可能挤压 audio_processor，需配合 mem_min_mb 守门），生产化默认开 60-180s。
+    "keep_alive": "10m",
+    "keep_warm_interval_s": 0,
 }
 
 
@@ -101,7 +108,11 @@ class SceneAnalyzerModule(BaseModule):
             "vlm_published": 0,
             "diff_published": 0,
             "diff_failed": 0,
+            "keep_warm_pinged": 0,
+            "keep_warm_failed": 0,
         }
+        self._keep_warm_stop = threading.Event()
+        self._keep_warm_thread: threading.Thread | None = None
 
         signal.signal(signal.SIGINT, lambda s, f: self.stop())
         signal.signal(signal.SIGTERM, lambda s, f: self.stop())
@@ -112,8 +123,46 @@ class SceneAnalyzerModule(BaseModule):
         self.subscribe(sa["detect_topic"])
         self.logger.info(
             f"订阅 {sa['detect_topic']} | VLM={sa['vlm_model']} | "
-            f"节流={sa['throttle_seconds']}s | mem_min={sa['mem_min_mb']}MB"
+            f"节流={sa['throttle_seconds']}s | mem_min={sa['mem_min_mb']}MB | "
+            f"keep_alive={sa['keep_alive']} | keep_warm_ping={sa['keep_warm_interval_s']}s"
         )
+        if sa["keep_warm_interval_s"] > 0:
+            self._keep_warm_thread = threading.Thread(
+                target=self._keep_warm_loop, name="keep-warm", daemon=True
+            )
+            self._keep_warm_thread.start()
+
+    def _keep_warm_loop(self) -> None:
+        """opt-in 后台线程：定时发空请求（带 keep_alive）触底，让 ollama 不 unload 模型。
+
+        触发节奏：每 keep_warm_interval_s 一次（典型 120-240s，小于 keep_alive 时长）。
+        发送的请求是最小化的 — prompt 空 + num_predict 1，几乎零推理成本，但走 ollama
+        load 路径让模型保持在 VRAM。
+
+        副作用：模型常驻 VRAM ~5.8GB，Jetson Orin Nano 7.4G 上 audio_processor +
+        系统 + buff 总占用接近上限。需配合 mem_guard 防 OOM 累加。
+        """
+        interval = self._sa["keep_warm_interval_s"]
+        url = self._sa["ollama_url"]
+        body = {
+            "model": self._sa["vlm_model"],
+            "prompt": "",  # 空 prompt，仅触发模型加载/保活
+            "stream": False,
+            "options": {"num_predict": 1},
+            "keep_alive": self._sa["keep_alive"],
+        }
+        self.logger.info(f"keep-warm 线程启动：每 {interval}s ping 一次")
+        while not self._keep_warm_stop.wait(interval):
+            try:
+                r = requests.post(url, json=body, timeout=15)
+                if r.status_code == 200:
+                    self._stats["keep_warm_pinged"] += 1
+                else:
+                    self._stats["keep_warm_failed"] += 1
+                    self.logger.warning(f"keep-warm HTTP {r.status_code}")
+            except Exception as e:
+                self._stats["keep_warm_failed"] += 1
+                self.logger.warning(f"keep-warm 异常：{e}")
 
     def _handle_message(self, topic: str, payload: dict) -> None:
         if topic != self._sa["detect_topic"]:
@@ -244,6 +293,7 @@ class SceneAnalyzerModule(BaseModule):
             "images": [img_b64],
             "stream": False,
             "options": {"num_predict": self._sa["num_predict"]},
+            "keep_alive": self._sa["keep_alive"],  # 推理后保活，覆盖 ollama 默认 5m TTL
         }
         try:
             r = requests.post(
@@ -272,6 +322,7 @@ class SceneAnalyzerModule(BaseModule):
             "prompt": prompt,
             "stream": False,
             "options": {"num_predict": self._sa["diff_num_predict"]},
+            "keep_alive": self._sa["keep_alive"],
         }
         try:
             r = requests.post(
@@ -321,6 +372,7 @@ class SceneAnalyzerModule(BaseModule):
         except KeyboardInterrupt:
             self.logger.info("收到键盘中断信号")
         finally:
+            self._keep_warm_stop.set()
             self._pool.shutdown(wait=False, cancel_futures=True)
             self.stop()
 
