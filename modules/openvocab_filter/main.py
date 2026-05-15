@@ -60,7 +60,7 @@ DEFAULTS = {
         "person fighting",
     ],
     # >=0.40 — person+动词 prompt 在 <0.40 误报严重（5/14 实测 hugging 0.81 但实际无人抱）
-    "conf_threshold": 0.40,
+    "conf_threshold": 0.55,
     "mjpeg_base_url": "http://192.168.5.6:5051",
     "snapshot_timeout_s": 5,
     "snapshot_mode": "raw",

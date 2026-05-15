@@ -48,7 +48,7 @@ DEFAULTS = {
     "key_topic": "av/video/key_event",
     # 触发条件
     "pos_jump_pixels": 120,       # bbox 中心位移阈值，>此值算"剧烈位移"
-    "idle_seconds": 60,           # 静止窗口，超过这时间无 key 也强发一次
+    "idle_seconds": 180,          # 静止窗口，超过这时间无 key 也强发一次（5/14 夜 sustain 选定：60→180 把 key 速率 3.6→1.2/min，匹配 Jetson VLM capacity；详见 OVERNIGHT_REPORT_VLM_SUSTAIN_20260514.md）
     # 工程
     "min_interval_s": 3.0,        # 同 camera 两次 key_event 最小间隔（防抖）
     "new_class_set": [],          # 用户自定义"新类即关键"白名单（如 ["fire","smoke"]）。空 = 所有 class 走通用规则
