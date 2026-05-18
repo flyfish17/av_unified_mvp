@@ -86,6 +86,54 @@ spike 跑期间另起独立 venv 进程，对照 audio/video processor：
 
 ---
 
+## P1.1 punctuator 立项端到端验证 ✅
+
+**实施**：新增 `modules/punctuator/main.py`（继承 BaseModule，MQTT 订阅 → ct-punc → 发新 topic）。
+
+**部署**：3588 上独立 spike venv 启动（不进 supervisor / 不动 audio_processor 红线）：
+
+```bash
+cd /home/firefly/av_unified_mvp
+nohup /home/firefly/spike_venv_20260518/bin/python -m modules.punctuator.main > /tmp/punctuator.log 2>&1 &
+```
+
+**端到端测试**：mosquitto_pub 注入 3 条模拟 final 到 `av/audio/command`：
+
+| seq | 原文 | 带标点输出 | 延迟 |
+|---|---|---|---|
+| 1 | 今天会议要点一是冻结主线分支二是十八号之前完成两个模块 | 今天会议要点，一是冻结主线分支，二是十八号之前完成两个模块。 | 56.9ms (首条含模型预热) |
+| 2 | 我们决定走新中间路径不大改 | 我们决定走新中间路径不大改。 | 13.6ms |
+| 3 | 这个测试今天搞完吗 | 这个测试今天搞完吗？ | 8.9ms |
+
+**新 topic schema**：`av/audio/command_punctuated`
+
+```json
+{
+  "header": {"msg_id", "timestamp", "source": "punctuator", "version": "1.2"},
+  "topic_type": "event",
+  "payload": {
+    "event_type": "transcription_punctuated",
+    "text": "<带标点版>",
+    "text_original": "<原文>",
+    "seq_id": <int>,
+    "is_final": true,
+    "raw_mode": "sense_voice_offline",
+    "ts": <epoch>,
+    "punct_latency_ms": <float>
+  }
+}
+```
+
+`seq_id` 保留，前端可与原 `av/audio/command` 关联同一气泡（替换文本而不是新增）。
+
+**红线遵守**：
+- ✅ 不动 audio_processor 源码（旁路新模块订阅原 topic）
+- ✅ 不动 creator_ai_demo/venv（spike_venv 独立 venv）
+- ✅ 不动 3588 main.py（punctuator 暂不进 supervisor，手动起 nohup）
+- ✅ 不动 sensevoice RKNN 长跑链路（audio_processor 全程未感知 punctuator 存在）
+
+---
+
 ## 复现命令
 
 ```bash
