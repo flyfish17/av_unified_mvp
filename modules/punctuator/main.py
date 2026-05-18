@@ -73,13 +73,11 @@ class PunctuatorModule(BaseModule):
 
         self._pc = pc
 
-        streams = [{
-            "topic": pc["output_topic"],
-            "channel": "transcript",
-            "kind": "transcript_seq",
-            "title": "已定稿（含标点）",
-        }]
-        super().__init__("punctuator", cfg, streams=streams)
+        # streams=[] 是刻意的：punctuator 不能声明 channel="transcript"，否则 dashboard.js
+        # 会给 transcript channel 重复注册 handler（audio_processor + punctuator 各一个），
+        # 每条 SSE event 触发 tickerForward 两次 → final 在转写卡里显示两遍（5/18 真机回归）。
+        # discovery 上线消息仍发，dashboard 模块列表能看到 punctuator，但不重复绑 stream。
+        super().__init__("punctuator", cfg, streams=[])
 
         self._stats = {
             "received": 0,

@@ -298,8 +298,12 @@ class AVSupervisor:
             topics.get("audio_partial", "av/audio/partial"),
             self._on_audio_partial,
         )
+        # transcript final 走 punctuator 后处理版本（5/18 P1.3）：
+        # audio_processor 发原 av/audio/command（无标点）→ punctuator 加 ct-punc int8 → av/audio/command_punctuated
+        # supervisor 订阅 punctuated 版本推到 SSE，dashboard.js 显示带标点 final（前端代码零变动）。
+        # 容错：punctuator 挂时 dashboard 没 final 显示，user 可察觉手动重启（spike 阶段，未上 watchdog）。
         self.mqtt.subscribe(
-            topics.get("audio_command", "av/audio/command"),
+            topics.get("audio_command_punctuated", "av/audio/command_punctuated"),
             self._on_audio_command,
         )
         # video channel：视频检测事件

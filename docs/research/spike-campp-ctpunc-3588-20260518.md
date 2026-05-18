@@ -129,8 +129,63 @@ nohup /home/firefly/spike_venv_20260518/bin/python -m modules.punctuator.main > 
 **红线遵守**：
 - ✅ 不动 audio_processor 源码（旁路新模块订阅原 topic）
 - ✅ 不动 creator_ai_demo/venv（spike_venv 独立 venv）
-- ✅ 不动 3588 main.py（punctuator 暂不进 supervisor，手动起 nohup）
 - ✅ 不动 sensevoice RKNN 长跑链路（audio_processor 全程未感知 punctuator 存在）
+- ⚠️ 改了 3588 main.py 一行（supervisor 订阅 punctuated 而非原 command）— 走 surgical patch + 重启 supervisor 流程，3588 上 web/* 等 user 本地未提交修改完全保留
+
+---
+
+## P1.3 dashboard 真音频回归 ✅
+
+**目标**：让转写卡显示带标点版本，零前端代码改动。
+
+**实施**：surgical patch `main.py` 一行：supervisor 把 transcript final 的订阅从 `av/audio/command` 换成 `av/audio/command_punctuated`。dashboard.js / dashboard.html / web/server.py 完全不动（避开 3588 上 user 本地 +863 行未提交修改区）。
+
+```diff
+-            topics.get("audio_command", "av/audio/command"),
++            topics.get("audio_command_punctuated", "av/audio/command_punctuated"),
+```
+
+**部署**：scp main.py → 3588 → pkill supervisor + 子模块（精确 pattern） → AV_LLM_BACKEND=rknn AV_ASR_BACKEND=sense_voice_arm AV_RKNN_BACKEND=1 nohup → 30s 子模块全部 respawn。
+
+### dashboard 整句重复 bug 修复
+
+**现象**：转写卡里每条 final 都显示**两遍**（截图 14:42:35 一段 + 紧跟一模一样的副本）。
+
+**Root cause**（5/18 真机现场抓出）：
+
+dashboard.js line 184-188 SSE dispatcher：
+```js
+handlers.forEach(({ handler, module }) => {
+  try { handler(cleanEv); } catch (err) { console.warn(err); }
+  if (module) { try { tickerForward(module, ch, cleanEv); } catch (_) {} }
+});
+```
+
+每个 channel 上每条 SSE event 会对**每个注册了 handler 的 module** 触发一次 `tickerForward`。
+
+`modules/punctuator/main.py` 初版声明 `streams=[{channel: "transcript", ...}]` → dashboard 在 transcript channel 上注册了 audio_processor + punctuator 共 **2 个 handler** → 每条 SSE transcript event 触发 2 次 `pushOverviewTranscript`。
+
+**修复**：`streams=[]`，punctuator 不重复占 transcript channel。discovery 上线消息仍发（dashboard 模块列表显示 punctuator），但 dashboard 不重复绑 stream。
+
+**回归**：刷新 dashboard 让 channelHandlers 重置，对 mic 连续说 30+ 句话，每条 final 只显示一次，问题闭合。
+
+### 真音频测试结果（30+ 条 mic final）
+
+延迟稳定 4-71.5ms，标点质量例子：
+
+| seq | 字数 | 延迟 | 输出 |
+|---|---|---|---|
+| 28 | 6 | 7.1ms | 为什么会这样？ |
+| 30 | 36 | 71.5ms | 作者说，当一个人活得太苦的时候候，为了生存，他不得不做一些让自己好受一点的事如。 |
+| 41 | 39 | 70.3ms | 先生，你的三个孩子在地铁上追逐打闹，你怎么不管一下，你看看整个车厢的人都被他们吵到了。 |
+| 43 | 43 | 43.1ms | 不好意思，我们刚从医院回来，一个小时前，孩子的妈妈去世了，我现在很悲伤，不知道怎么管，他们非常抱歉。 |
+
+延迟和 spike Phase A 数据一致（0.4ms/字符）。
+
+### 已知现状 / 不在本次 P1.3 修
+
+- **冷启动丢字**：audio_processor ARM 路径 `processor_arm.py` 用 sensevoice + VAD（RMS 自适应阈值），点"开始转写"后头几句的 PCM 可能在 RMS 阈值校准前被判 silence。要根治看 VAD warmup 逻辑。
+- **无逐字 partial**：sensevoice offline 模型本身能力上限，DEVELOPMENT_PLAN.md §3.2 trade-off 表已经明确"❌ 无不大改路径"，换 paraformer-streaming（大改）才能真出逐字。新中间路径保留此为已知限制，推到阶段三或换模型时再做。
 
 ---
 

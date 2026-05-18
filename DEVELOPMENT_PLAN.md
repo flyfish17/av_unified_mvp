@@ -208,10 +208,11 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 | P0.6 | 接续 plan 文件更新反映新两阶段 | ✅ 本次 |
 | P0.7 | 必备能力实施方案 trade-off 拍板 → **新中间路径** | ✅ 5/18 |
 | P0.8 | GitHub 调研报告（`docs/research/asr-punctuation-diarization-20260518.md`）| ✅ 5/18 |
-| **P0.9** | **CAM++ ONNX + ct-punc 3588 spike**（gating，过线才立项）| 🔵 下一步 |
-| P1.1 | `modules/punctuator/` — 订阅 final, 调 ct-punc, 发 final_punctuated | ⏳ P0.9 后 |
-| P1.2 | `modules/speaker_tagger/` — silero-vad 切片 + CAM++ embedding + 聚类 | ⏳ P0.9 后 |
-| P1.3 | Dashboard 改造：转写卡显示带标点 + 说话人 tag 的 transcript | ⏳ P1.1/P1.2 后 |
+| P0.9 | CAM++ + ct-punc 3588 spike — Phase A ✅ ct-punc 过线 / Phase B ⏸ 等双人录音 | 🟡 部分 |
+| P1.1 | `modules/punctuator/` — ct-punc int8 ONNX 标点后处理（端到端 + 真音频 30+ 条已验） | ✅ 5/18 |
+| **P1.3** | **Supervisor 订阅 punctuated topic + dashboard 重复 bug fix（streams=[]）** | ✅ 5/18 |
+| P1.2 | `modules/speaker_tagger/` — silero-vad 切片 + CAM++ embedding + 聚类 | ⏳ 等 Phase B 数据 |
+| P1.3b | 转写卡说话人 tag 显示（dashboard 改造）| ⏳ P1.2 后 |
 | P1.4 | 纪要 UI 提示 + 触发体验优化 | ⏳ |
 | P1.5 | 销售部署 README（`git checkout tag` 后 1 命令启动指南）| ⏳ |
 | P1.6 | Jetson CUDA 语音验证报告（独立窗口完成）| ⏳ |
@@ -219,6 +220,10 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 | P2.2 | 控制指令"离线"误判修复（dashboard.js 多 client_id 状态合并）| 接受 or 修 |
 
 **不做 / 仅技术储备**：双工对讲（持续 GitHub 关注） · 知识库 + 问答（另立项目）
+
+**5/18 真音频回归已知现状（不在 P1.1/P1.3 范围）**：
+- 冷启动丢字：点"开始转写"后头几句因 VAD RMS 阈值校准期被判 silence（`processor_arm.py` warmup 逻辑），后续连贯
+- 无逐字 partial：sensevoice offline 模型能力上限，已在 §3.2 trade-off 表标记"必大改"才能升级
 
 ---
 

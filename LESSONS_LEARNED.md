@@ -106,3 +106,5 @@ AV / 控制类设备与客户办公网混合部署是高频痛点。客户报"�
 - **诊断先抓证据**：日志 / 抓包 / lsof / mqtt sniff，不要先猜
 - **三行相似 > 一个早产抽象** — 不为子模块完美阻塞整体框架
 - **协议先行**：MQTT topic schema 是合同，跨模块协作只看 schema，**不要 import 另一个模块的内部实现**
+- **`pkill -f 'python -m modules\.'` 通配会殃及非 supervisor 管理的旁路 module**（5/18 punctuator 跑在独立 spike_venv 也被通配命中误杀）。重启 supervisor 要用精确 pattern：`pkill -f 'creator_ai_demo/venv.*python -m modules\.'` 把独立 venv 的 sidecar 排除。
+- **新模块声明 `streams=[{channel: "X"}]` 时务必用未占用的 channel 名**（5/18 punctuator 误用 `channel="transcript"`，dashboard.js sse dispatcher 给 transcript channel 注册了两个 handler，触发 `tickerForward` 两次，转写卡 final 整句重复显示）。不需要前端渲染就直接 `streams=[]`，discovery 上线消息照发但不重复绑 stream。
