@@ -11,7 +11,7 @@ audio:
     hotwords: ''
     use_itn: true
     silence_duration_ms: 600
-    silence_threshold: 0.008
+    silence_threshold: 0.012
     url: ws://127.0.0.1:10095
 llm:
   ollama:
