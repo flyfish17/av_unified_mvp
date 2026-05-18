@@ -1,0 +1,12 @@
+watcher 启动时间: 2026-05-15T09:57:24+00:00
+PID: 9271
+预期持续: 14h（不限定，靠 pkill 停）
+间隔: 300s (5min)
+采样维度:
+  - ps: 10 modules + supervisor + node-red + mosquitto (PID/etime/%cpu/RSS)
+  - mqtt discovery: 在线 client_id 列表
+  - mqtt topic 15s 消息率: av/audio/+ av/video/+ av/llm/+ av/control/+
+  - 系统: load / mem_avail% / thermal_zone0-6 温度
+  - log 累计: RKNN inference error / respawn / crash / "exception"
+  - 端口: :1880 :1883 :5050 :5051 listening
+  - MJPEG 4 路响应: USB罗技C920 / test / 财务室 / 办公室 (raw mode, code+time+size)
