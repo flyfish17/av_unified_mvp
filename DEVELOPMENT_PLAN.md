@@ -1,6 +1,6 @@
 **战略定位**：公司 AI 技术底座。
 > 模块解耦 + 订阅制架构，让每次开发成果累积而非推倒重来。
-> 客户只需要转写？装一个模块。需要视觉识别？插入另一个。需要全套？全部开。
+> 客户只需要转写，装一个模块。需要视觉识别，插入另一个。需要全套，全部开。
 > **开发强度降下来，落地速度提上去。**
 >
 > 三个层次（架构视角 = 产品形态，开发与客户视角统一表达）：
@@ -80,22 +80,33 @@
 
 User 5/18 定调：「**当下代码作用发挥到最大并固化，找合适方式精进，不大拆大改**」
 
-**前置 gating**：GitHub 同类项目调研报告（见 §8 工程纪律）— 阶段二未启动前必须先做
+**前置 gating**：✅ 已完成 — GitHub 调研报告 `docs/research/asr-punctuation-diarization-20260518.md`
 
-**必备能力 / 不大改路径 trade-off**（关键决策）：
+**P0.7 拍板结论（5/18 user 选）**：**新中间路径**（既非原路径 1 mock 版，也非路径 2 大改版）
 
-| 能力 | 当前 | 不大改路径 | 工时 | 必大改才能真正实现 |
-|---|---|---|---|---|
-| **逐字 partial** | ❌ | ❌ 无路径（sensevoice 模型不出 partial）| — | 换模型 paraformer/funasr，**大改** |
-| **标点** | ❌ | ✅ LLM 后处理（独立 punctuator 模块或 audio_processor 内 post-process）| 0.5d | — |
-| **整句修正** | ❌ | ⚠️ 短期窗口 LLM 重述（≠ 真 VAD 重判）| 1d，效果存疑 | 接 partial → final 重判路径，**大改** |
-| **纪要** | ✅ 已有 | ✅ UI 提示 + 触发体验优化 | 0.1d | — |
-| **说话人初步**（可编辑）| ❌ | ⚠️ silero-vad 切换 mock "说话人 1/2/3"（无真分离）| 0.5d | 接 pyannote / cam++，**中改** |
+| 维度 | 路径 1 原 mock | **✅ 新中间路径（拍板）** | 路径 2 大改 |
+|---|---|---|---|
+| 工时 | ~1d | **1.5-2d**（含 spike）| 5-8d |
+| 标点 | LLM 后处理（云依赖） | **ct-punc int8 ONNX**（CPU 14ms / 句，离线） | 模型原生 ITN |
+| 说话人 | silero-vad 顺序编号（一眼假） | **silero-vad + CAM++ ONNX embedding 段级聚类**（DER ~20%，真聚类）| pyannote 真 online（DER 13%）|
+| 真 partial | ❌ | ❌（保留 sensevoice 不动）| ✅ paraformer-streaming 600ms |
+| 撞 video CPU 红线 | 0 | 0（新增组件全 CPU ms 级 ONNX）| 高（叠 pyannote 几乎必爆）|
+| 升级路径 | 必拆 | **平滑**（同在 sherpa-onnx 生态）| 已到顶 |
+| ASR 模型变动 | 无 | **不动 sensevoice RKNN** | 必换 paraformer |
 
-**"不大改可达"汇总**（合 ~1d）：标点 + 纪要 UI + 说话人 mock
-**"必大改才有"清单**：逐字 partial · 真整句修正 · 真说话人分离
+**新中间路径技术栈**：sherpa-onnx 1.13.2 (Apache-2.0) 一站式封装；新增 2 个独立 MQTT module（`punctuator/` + `speaker_tagger/`），audio_processor 零重构。
 
-**待 user /clear 后拍板**：阶段二接受"不大改降级版"还是松绑红线？
+**P0.9 spike gating（立项前置）**：CAM++ ONNX 在 3588 大核 CPU 实测延迟无文档数据，**必须先 spike**。spike 任务：在 3588 跑 ct-punc int8（预期 < 30ms）+ CAM++ + sklearn 聚类对 60s 双人对话压测，看 CPU% / 段延迟 / DER 主观感受。过线才正式起 module。结果 → `docs/research/spike-campp-ctpunc-3588-20260518.md`。
+
+**必备能力达成度（新路径下）**：
+
+| 能力 | 当前 | 新路径达成度 | 真大改才能升级 |
+|---|---|---|---|
+| **逐字 partial** | ❌ | ❌（推迟到阶段三换 paraformer-streaming，平滑过渡）| 换 ASR 模型 |
+| **标点** | ❌ | ✅ ct-punc 本地 ONNX（F1 工业级）| — |
+| **整句修正** | ❌ | ⚠️ 暂不实现（依赖 partial → final 重判路径）| 接 paraformer streaming |
+| **纪要** | ✅ 已有 | ✅ UI 提示 + 带标点显示 | — |
+| **说话人初步**（可编辑）| ❌ | ✅ 段级真聚类（不是 mock）| 上 pyannote 升 13% DER |
 
 ### 3.3 后期规划（只技术储备，不实施）
 
@@ -195,13 +206,15 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 | P0.4 | Git tag `v1.0-stage1-mac-validated` + push origin | ✅ 本次 |
 | P0.5 | Jetson 独立窗口 system prompt → `docs/handoffs/jetson-side-window-prompt.md` | ✅ 本次 |
 | P0.6 | 接续 plan 文件更新反映新两阶段 | ✅ 本次 |
-| **P0.7** | **必备能力实施方案 trade-off 拍板**（接受"不大改降级"或松绑）| ⏳ user /clear 后 |
-| **P0.8** | **GitHub 调研报告**（实时 ASR + 标点 + 说话人分离）阶段二 gating | ⏳ /clear 后 |
-| P1.1 | 标点 LLM 后处理（独立 punctuator 或 audio_processor 内 post-process）| ⏳ P0.7 后 |
-| P1.2 | 纪要 UI 提示 + 触发体验优化 | ⏳ |
-| P1.3 | 说话人 silero-vad mock（顺序发言会议用） | ⏳ |
-| P1.4 | 销售部署 README（`git checkout tag` 后 1 命令启动指南）| ⏳ |
-| P1.5 | Jetson CUDA 语音验证报告（独立窗口完成）| ⏳ |
+| P0.7 | 必备能力实施方案 trade-off 拍板 → **新中间路径** | ✅ 5/18 |
+| P0.8 | GitHub 调研报告（`docs/research/asr-punctuation-diarization-20260518.md`）| ✅ 5/18 |
+| **P0.9** | **CAM++ ONNX + ct-punc 3588 spike**（gating，过线才立项）| 🔵 下一步 |
+| P1.1 | `modules/punctuator/` — 订阅 final, 调 ct-punc, 发 final_punctuated | ⏳ P0.9 后 |
+| P1.2 | `modules/speaker_tagger/` — silero-vad 切片 + CAM++ embedding + 聚类 | ⏳ P0.9 后 |
+| P1.3 | Dashboard 改造：转写卡显示带标点 + 说话人 tag 的 transcript | ⏳ P1.1/P1.2 后 |
+| P1.4 | 纪要 UI 提示 + 触发体验优化 | ⏳ |
+| P1.5 | 销售部署 README（`git checkout tag` 后 1 命令启动指南）| ⏳ |
+| P1.6 | Jetson CUDA 语音验证报告（独立窗口完成）| ⏳ |
 | P2.1 | video_processor CPU 减压（config 调 inference_fps / jpeg_quality / 单路 ⏸）| 看是否影响语音 |
 | P2.2 | 控制指令"离线"误判修复（dashboard.js 多 client_id 状态合并）| 接受 or 修 |
 
