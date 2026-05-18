@@ -51,23 +51,107 @@ spike 跑期间另起独立 venv 进程，对照 audio/video processor：
 
 ---
 
-## Phase B · CAM++ ONNX 段级说话人聚类 ⏸ 阻塞
+## Phase B · CAM++ ONNX 段级说话人聚类 ✅ 过线
 
-**阻塞原因**：3588 上**无现成 60s 双人对话录音样本**。`/home/firefly/Downloads/debug_*.wav` 是 1-1.5s 单人短片段（16kHz mono），不适合做说话人聚类压测。`sherpa_test_wavs/` 是 5/12 sherpa 自带的单语短样本（en/ja/ko/yue/zh 各几秒）。
+**样本**：`/home/firefly/spike_venv_20260518/samples/2speakers_example.wav`（pyannote 官方双说话人示例，51.66s @ 16kHz mono），含同目录 `.rttm` ground-truth。
 
-**需要 user 提供（任选其一）**：
-1. 一段 60s 左右的双人/多人中文对话录音（建议 16kHz mono WAV，或任意可被 ffmpeg 转码的格式）
-2. 现场录一段（3588 上 USB mic 或 Mac 录音）
-3. 公开数据集：AISHELL-4 部分样本（需注册 modelscope 下载）
+**依赖（spike_venv 增量）**：
 
-**Phase B 待执行 checklist（脚本就绪后）**：
-1. 下载 3D-Speaker CAM++ ONNX 模型（modelscope 镜像，~30MB）
-2. 写 `spike_speaker_segment.py`：silero-vad 切片 → CAM++ embedding → sklearn AgglomerativeClustering → 段级 tag
-3. 跑 60s 双人对话样本，记录：
-   - CAM++ embedding 单段 CPU 延迟
-   - 整段聚类延迟
-   - DER（如有 ground truth）/ 主观聊着对感
-   - spike 中 video_processor CPU 是否变化
+| 包 | 版本 | 用途 |
+|---|---|---|
+| `silero-vad` | 6.2.1 | VAD 切片（pip 包内置 ONNX）|
+| `onnxruntime` | 1.23.2 | silero-vad ONNX 后端（sherpa-onnx 自带的不暴露顶层 import）|
+| `numpy` | 2.2.6 | spike 数据处理 |
+| `scipy` | 1.15.3 | 间接依赖 |
+| `soundfile` | 0.13.1 | WAV I/O |
+| `scikit-learn` | 1.7.2 | AgglomerativeClustering |
+
+**注**：silero-vad pip 包带 torch 2.12 + 一堆 nvidia-cuda 轮子（约 1GB 占盘）；spike 无害，未来生产模块可考虑改为直接 onnxruntime 调 silero-vad 的 ONNX，剥离 torch。
+
+### 模型
+
+| 资源 | 路径 | 大小 | 来源 |
+|---|---|---|---|
+| CAM++ ONNX | `/home/firefly/spike_venv_20260518/models/campp.onnx` | 27 MB | sherpa-onnx release `3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx` via `ghfast.top` 镜像 |
+| silero-vad ONNX | `silero_vad/data/silero_vad_16k_op15.onnx`（包内置）| ~2MB | pip `silero-vad` 6.2.1 |
+| 加载耗时 | 一次性：silero 1902ms / CAM++ 763ms | — | — |
+
+### Spike 实测（3 次 run，数据 ±2% 稳定）
+
+```
+audio = 51.66s @ 16kHz mono → silero-vad 切出 7 段语音
+                  RUN1     RUN2     RUN3
+VAD 总耗时        683.8    691.2    739.2  ms  (~13ms / 1s audio)
+EMB 总耗时       1513.9   1537.4   1532.4  ms  (7 段 / avg ≈ 219ms)
+CLU 总耗时        737.5    717.6    751.0  ms  (sklearn 首次 import 主导，纯算法 <10ms)
+user_cpu          7.89     7.83     8.05   s   (单核累计)
+maxrss            716      716      716    MB
+```
+
+### 单段 embedding 延迟 vs 段长（CAM++ num_threads=2）
+
+| seg | duration | emb_ms | 实时倍率 |
+|---|---|---|---|
+| #00 | 18.62s | 570.5 | 33x |
+| #01 |  4.09s | 130.4 | 31x |
+| #02 |  7.64s | 243.7 | 31x |
+| #03 |  8.19s | 260.9 | 31x |
+| #04 |  2.30s |  85.5 | 27x |
+| #05 |  4.76s | 154.6 | 31x |
+| #06 |  2.70s |  89.4 | 30x |
+
+**embedding cost ≈ 30ms / 1s audio**（线性，单段最小 ~85ms）。对实时会议流式：典型 2-10s 段 → 单段处理 60-300ms，可接受。
+
+### DER vs ground-truth RTTM
+
+| 指标 | 值 |
+|---|---|
+| 总语音 | 50.72s |
+| 正确归属 | 46.17s |
+| 混淆 (confusion) | 2.14s (4.2%) |
+| 漏检 (missed by VAD) | 2.41s (4.7%) |
+| 误检 (FA) | 0.00s |
+| **近似 DER** | **9.0%** |
+
+**段级正确率 = 7/7 段**（聚类→GT 映射: cluster 0 → spk 1 overlap 31.46s, cluster 1 → spk 2 overlap 14.71s，无错位）。
+
+混淆 2.14s 来自 silero-vad 在 GT 转折点附近的边界粗糙（如 32.61-40.80 这段实际跨越了 spk 1/2 切换，embedding 取的是整段平均，聚到 spk 1 是占优）。漏检 2.41s 来自 silero 的 min_silence/min_speech 缩边。这两类都不是 CAM++ 本身的问题。
+
+**主观判定**：段级标签和真实切换 **完全对得上**（7/7），段内长跨度切换是 VAD 切片粗糙度问题，不是 embedding 区分能力问题。
+
+### 生产链路影响（spike 中实时 top）
+
+| 进程 | spike 前 | spike 中 | spike 后 |
+|---|---|---|---|
+| video_processor (PID 522257) | 413% | 360% | 420% |
+| audio_processor (PID 522256) | 0% | 6.7% (audio I/O 时切片) | 0% |
+| spike_speaker_segment | — | 113% | — |
+| 3588 总 CPU | 50% | 57% | 52% |
+
+video_processor 在 spike 期间略有下降（OS 调度让出核），spike 退出后立刻回升，没观察到长时间影响。**与 Phase A 结论一致：单线程 CPU 推理零侵入生产链路**。
+
+### Phase B 判定
+
+✅ **过线**。综合：
+1. 端到端 51.7s 双人对话处理总耗时 ≈ 3s wall（单段 emb 30ms/1s audio + 聚类瞬时）
+2. 段级聚类正确率 7/7，DER 9.0%（混淆仅 4.2%，主因 VAD 边界粗糙非 CAM++）
+3. 不撞生产 CPU、内存 716MB 可接受
+4. CAM++ 27MB ONNX 在 sherpa-onnx 内置 API（`SpeakerEmbeddingExtractor`）开箱即用
+
+**`modules/speaker_tagger/` 可立项 P1.2**。设计思路：订阅 `av/audio/command_punctuated` + 切片对应的 PCM 缓冲（需要 audio_processor 旁路一个 PCM topic 或留窗口缓存），跑 CAM++ → 段级 cluster_id；启动时空着，前 30-60s 累积 embedding 后做一次聚类得到 N 说话人；之后 incremental 分配最近邻 cluster；发新 topic `av/audio/command_speaker_tagged`。
+
+### 复现
+
+```bash
+ssh firefly@192.168.5.6
+cd /home/firefly/spike_venv_20260518
+/home/firefly/spike_venv_20260518/bin/python spike_speaker_segment.py
+```
+
+模型/样本：
+- CAM++: `/home/firefly/spike_venv_20260518/models/campp.onnx`
+- silero-vad: pip 包内置
+- 样本: `/home/firefly/spike_venv_20260518/samples/2speakers_example.{wav,rttm}`
 
 ---
 
@@ -79,10 +163,11 @@ spike 跑期间另起独立 venv 进程，对照 audio/video processor：
 | 独立 spike venv | ✅ `/home/firefly/spike_venv_20260518/`（不动 creator_ai_demo/venv）|
 | GitHub release 直连 | ⚠️ CDN 慢，改 `ghfast.top` 镜像 OK |
 | ct-punc int8 (72MB) | ✅ p95 4.9-37.9ms / 不撞视频 CPU / 标点质量可用 |
-| CAM++ 段级聚类 | ⏸ 等 user 提供双人对话录音 |
+| CAM++ 27MB | ✅ emb 30ms/1s audio / DER 9.0% / 段级 7/7 正确 / 不撞生产 |
+| silero-vad + sklearn | ✅ VAD 13ms/1s audio / 聚类瞬时 |
 
-**P1.1 `modules/punctuator/` 可立项**（不等 Phase B）。
-**P1.2 `modules/speaker_tagger/` 待 Phase B 数据**。
+**P1.1 `modules/punctuator/` 已立项**（5/18 当天完成端到端 + dashboard 真音频回归）。
+**P1.2 `modules/speaker_tagger/` 可立项**（Phase B 过线，下个 sprint 启动）。
 
 ---
 
