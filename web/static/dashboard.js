@@ -336,7 +336,19 @@
       );
       assignWallSlots();
       renderWall();
+      refreshSceneWatchPicker();
     }
+  }
+
+  // G3b: 视觉深思卡片 dropdown 同步 enabled 源列表（每次 video_processor discovery heartbeat 30s 触发）
+  function refreshSceneWatchPicker() {
+    const sel = document.getElementById("scene-watch-picker");
+    if (!sel) return;
+    const current = sel.value;
+    const enabled = (videoEndpointsCache || []).filter(e => e.enabled);
+    sel.innerHTML = `<option value="">全部</option>` +
+      enabled.map(e => `<option value="${escHtml(e.name)}">${escHtml(e.name)}</option>`).join("");
+    if (current && enabled.some(e => e.name === current)) sel.value = current;
   }
 
   // 单个 slot 签名：只反映该 slot 自己关心的状态。
@@ -1654,6 +1666,22 @@
   }
 
   // ── P0 快捷控制（creator 中控 ASCII 转发） ────────────────────────
+  // G3b: 视觉深思 dropdown onchange → 下发 watch_camera 给 scene_analyzer（mqtt config topic）
+  function setupSceneWatchPicker() {
+    const sel = document.getElementById("scene-watch-picker");
+    if (!sel) return;
+    sel.onchange = () => {
+      fetch("/mqtt/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic: "av/video/scene_analyzer/config",
+          payload: { watch_camera: sel.value || null },
+        }),
+      }).catch(e => console.warn("scene watch_camera publish 失败", e));
+    };
+  }
+
   async function setupQuickControl() {
     const locSel    = document.getElementById("quick-ctrl-location");
     const buttonsEl = document.getElementById("quick-ctrl-buttons");
@@ -1761,6 +1789,7 @@
   setupLanScan();
   setupQuickControl();
   setupHusionPanel();
+  setupSceneWatchPicker();
   setupSystemExit();
   setupIntentToggle();
   setupTranscriptActions();
