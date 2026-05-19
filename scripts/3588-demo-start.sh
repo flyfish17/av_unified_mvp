@@ -6,7 +6,10 @@
 #
 # 设计原则：
 #   - 不破坏既有进程：发现旧 supervisor 仍在跑 → 不重启，只报告状态（user 想强制重启加 --force）
-#   - 显式 env：AV_LLM_BACKEND=rknn / AV_ASR_BACKEND=sense_voice_arm / AV_RKNN_BACKEND=1
+#   - 显式 env：AV_LLM_BACKEND=rknn / AV_ASR_BACKEND=sense_voice_arm / AV_RKNN_BACKEND=0 (5/19 切 funasr CPU)
+#     ASR 5/19 默认切 funasr CPU sensevoice — RKNN port 在低音量/短段会幻听单字"我"/韩语片段，
+#     5/18 真音频回归实锤丢长句，funasr CPU 切回后 70 字长句完整。代价：audio_processor CPU
+#     2%→107%（5x），3588 总负载吃紧但可承受。想切回 RKNN（experimental）：AV_RKNN_BACKEND=1 bash $0
 #   - 30s 探活：循环 ping :5050 + 数 modules. 子进程，全在线才报"就绪"
 #   - 失败兜底：单步失败打印修复建议，不静默挂起
 #
@@ -148,7 +151,8 @@ if [ -n "$EXISTING_PID" ]; then
 fi
 
 if [ -z "$EXISTING_PID" ] && [ "$STATUS_ONLY" != "1" ]; then
-    say "启动 supervisor（AV_LLM_BACKEND=rknn / AV_ASR_BACKEND=sense_voice_arm / AV_RKNN_BACKEND=1）"
+    AV_RKNN_BACKEND="${AV_RKNN_BACKEND:-0}"
+    say "启动 supervisor（AV_LLM_BACKEND=rknn / AV_ASR_BACKEND=sense_voice_arm / AV_RKNN_BACKEND=$AV_RKNN_BACKEND）"
     cd "$PROJECT_DIR" || { fail "cd $PROJECT_DIR 失败"; exit 1; }
     # 轮换旧日志：保留 5 份历史
     if [ -f "$LOG_FILE" ]; then
@@ -157,7 +161,7 @@ if [ -z "$EXISTING_PID" ] && [ "$STATUS_ONLY" != "1" ]; then
     fi
     AV_LLM_BACKEND=rknn \
     AV_ASR_BACKEND=sense_voice_arm \
-    AV_RKNN_BACKEND=1 \
+    AV_RKNN_BACKEND="$AV_RKNN_BACKEND" \
     nohup "$VENV_PY" main.py > "$LOG_FILE" 2>&1 &
     sleep 2
     NEW_PID="$(pgrep -f "${VENV_PY}.*main\.py$" | head -1)"
