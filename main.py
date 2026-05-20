@@ -326,6 +326,12 @@ class AVSupervisor:
         self.mqtt.subscribe("av/system/lan_scan/+", self._on_lan_scan)
         # 5/14 Sub-7：open-vocab 检测命中 → openvocab SSE channel（dashboard timeline 面板）
         self.mqtt.subscribe("av/video/openvocab", self._on_openvocab)
+        # 5/20 D 仿 partial UX：audio_processor VAD speaking 心跳 → listening SSE channel
+        # dashboard 收到 state=start 启动 "正在听 X.Xs" 计时器，state=end 清除占位
+        self.mqtt.subscribe(
+            topics.get("audio_listening", "av/audio/listening"),
+            self._on_audio_listening,
+        )
 
     def _on_audio_partial(self, topic: str, payload: dict):
         """BaseModule 双层载荷 → 提取内层推到 transcript SSE"""
@@ -377,6 +383,16 @@ class AVSupervisor:
         加一个 header key；前端 pushOverviewOpenvocab 直接读顶层即可。
         """
         self._web_push("openvocab", payload)
+
+    def _on_audio_listening(self, topic: str, payload: dict):
+        """5/20 D 仿 partial UX：VAD speaking/silence 心跳 → listening SSE channel。
+
+        Inner payload: {event_type: "listening", state: "start"|"end", ts: epoch}
+        dashboard.js 收 state=start 启 "正在听 X.Xs" 计时器，state=end 清占位。
+        不是真 partial（sensevoice 模型 offline 限制），是体感兜底避免"卡死"错觉。
+        """
+        inner = payload.get("payload", payload)
+        self._web_push("listening", inner)
 
     def _on_discovery_mqtt(self, topic: str, payload: dict):
         """MQTT av/system/discovery/# → discovery SSE channel，驱动前端动态面板"""

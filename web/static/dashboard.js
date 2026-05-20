@@ -187,9 +187,49 @@
     try { handleDiscovery(ev); } catch (err) { console.warn(err); }
   });
 
+  // 5/20 D 仿 partial UX：listening 心跳 SSE channel 主动订阅
+  // audio_processor VAD speaking 触发 state=start → 启动 "...正在听 X.Xs" 计时器
+  // silence 触发 state=end → 清除占位（一般之后会跟一条 final 上屏）
+  // 不通过 module discovery 注册（避免被 tickerForward 二次调用造成混乱）
+  subscribeChannel("listening", (ev) => {
+    try { handleListening(ev); } catch (err) { console.warn(err); }
+  });
+
   function setHeaderStatus(text, cls) {
     const el = document.getElementById("header-status");
     if (el) { el.textContent = text; el.className = "pill " + cls; }
+  }
+
+  // 5/20 D 仿 partial UX：handleListening 实现 ───────────────────────
+  // VAD speaking 触发 state=start → 转写卡末尾插 "...正在听 X.Xs"
+  // 计时器每 200ms 更新文本，silence 触发 state=end 清掉。
+  // 这不是真 partial（sensevoice 模型不出），是体感占位避免"卡死"错觉
+  let _listeningTimer = null;
+  let _listeningStartMs = 0;
+  function handleListening(ev) {
+    if (!ev || !ev.state) return;
+    const card = document.querySelector('[data-overview="transcript"] .strip-card-body');
+    if (!card) return;
+    if (ev.state === "start") {
+      _listeningStartMs = Date.now();
+      if (_listeningTimer) clearInterval(_listeningTimer);
+      _listeningTimer = setInterval(() => {
+        let liveEl = card.querySelector('.tx-listening-indicator');
+        if (!liveEl) {
+          liveEl = document.createElement('div');
+          liveEl.className = 'tx-listening-indicator';
+          liveEl.style.cssText = 'padding:4px 8px;color:#7ad;opacity:0.8;font-style:italic;animation:pulse 1.5s infinite;';
+          card.appendChild(liveEl);
+        }
+        const sec = ((Date.now() - _listeningStartMs) / 1000).toFixed(1);
+        liveEl.textContent = `…正在听 ${sec}s`;
+        card.scrollTop = card.scrollHeight;
+      }, 200);
+    } else if (ev.state === "end") {
+      if (_listeningTimer) { clearInterval(_listeningTimer); _listeningTimer = null; }
+      const liveEl = card.querySelector('.tx-listening-indicator');
+      if (liveEl) liveEl.remove();
+    }
   }
 
   function handleDiscovery(ev) {
@@ -904,19 +944,35 @@
   let nodeRedPages = [];  // [{id, name, type}]
   let nodeRedNavAdded = false;  // 子项只加一次（init + setActive 都会触发本函数）
   // dashboard 2.0 (@flowfuse/node-red-dashboard) 是否真正挂载到 /dashboard/。
+<<<<<<< HEAD
   // 5/20 客户演示发现黑框 "Cannot GET /dashboard/" 根因：3588 上 flows.json 含 ui-page 节点，
   // 但 plugin 没装到 userDir node_modules（/home/firefly/av_unified_mvp/node-red/）—— 启动日志
   // 长期 "Waiting for missing types: ui-base ui-page ..."。此 flag 探一次 /dashboard/，
   // 不可达就把 ui-page 从 selector 选项过滤掉、兜底 src 改用 /ui/（dashboard 1.x 正常服务）。
+=======
+  // 在 3588 上 flows.json 里有 ui-page 节点但 plugin 没装到 userDir node_modules，
+  // 启动日志会一直 "Waiting for missing types"，/dashboard/ 返回 404 → 黑框 "Cannot GET /dashboard/"。
+  // 这个 flag 在 loadOverviewNodeRed 时探一次，false 就把 ui-page 从可选页过滤掉，
+  // 也阻止 pageUrlPath() 输出 /dashboard/。
+>>>>>>> 6d2c5fc (feat(D experiment): 仿 partial UX 兜底 — listening 心跳 + dashboard 计时占位)
   let nodeRedDashboard2Reachable = null;  // null=未探, true/false=结果
   async function probeDashboard2() {
     if (nodeRedDashboard2Reachable !== null) return nodeRedDashboard2Reachable;
     try {
+<<<<<<< HEAD
       const r = await fetch(`http://${window.location.hostname}:1880/dashboard/`,
         { method: "GET", signal: AbortSignal.timeout(2000), cache: "no-store" });
       nodeRedDashboard2Reachable = r.ok;
     } catch (_) {
       nodeRedDashboard2Reachable = false;
+=======
+      // 用 GET 而非 HEAD：Node-RED express 对未注册路由有时 HEAD 返回 200 但 GET 404
+      const r = await fetch(`http://${window.location.hostname}:1880/dashboard/`,
+        { method: "GET", signal: AbortSignal.timeout(2000), cache: "no-store" });
+      nodeRedDashboard2Reachable = r.ok;  // 200=true, 404=false
+    } catch (_) {
+      nodeRedDashboard2Reachable = false;  // 网络错或超时也按未挂载处理
+>>>>>>> 6d2c5fc (feat(D experiment): 仿 partial UX 兜底 — listening 心跳 + dashboard 计时占位)
     }
     return nodeRedDashboard2Reachable;
   }
