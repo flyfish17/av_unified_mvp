@@ -1189,6 +1189,11 @@
                 <span class="module-title">视觉深思 · 场景分析
                   <span class="module-sub">av/video/scene_analysis · Jetson VLM</span>
                 </span>
+                <!-- G3b: 视频源选择器，dashboard.js populate from videoEndpointsCache enabled -->
+                <select id="scene-watch-picker" title="选择深思盯哪一路（来自 video_processor enabled 源）"
+                        style="margin-left:auto;margin-right:8px;font-size:11px;background:transparent;color:var(--fg);border:1px solid var(--dim);border-radius:3px;padding:2px 4px;">
+                  <option value="">全部</option>
+                </select>
                 <span class="module-badge" id="overview-scene-badge">等待</span>
               </div>
               <div class="module-body">

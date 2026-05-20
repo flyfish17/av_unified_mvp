@@ -124,6 +124,12 @@ class SceneAnalyzerModule(BaseModule):
             self.logger.info("scene_analyzer 配置 enabled=false，仅占位不工作")
             return
         self.subscribe(sa["detect_topic"])
+        # G1: mjpeg_base_url 动态解析 — yaml 是 fallback；订 video_processor discovery 收到 ip 即覆盖。
+        self._mjpeg_base_url = sa["mjpeg_base_url"]
+        self.subscribe("av/system/discovery/video_processor")
+        # G3a: dashboard 可下发 watch_camera 限定只看某一路 keyframe；None=全部（默认）。
+        self._watch_camera: str | None = None
+        self.subscribe("av/video/scene_analyzer/config")
         self.logger.info(
             f"订阅 {sa['detect_topic']} | VLM={sa['vlm_model']} | "
             f"节流={sa['throttle_seconds']}s | mem_min={sa['mem_min_mb']}MB | "
@@ -168,6 +174,16 @@ class SceneAnalyzerModule(BaseModule):
                 self.logger.warning(f"keep-warm 异常：{e}")
 
     def _handle_message(self, topic: str, payload: dict) -> None:
+        # G1: video_processor discovery → 更新 mjpeg_base_url
+        if topic.startswith("av/system/discovery/"):
+            self._on_video_discovery(payload)
+            return
+        # G3a: dashboard 下发 watch_camera 切换
+        if topic == "av/video/scene_analyzer/config":
+            inner = payload.get("payload", payload)  # 兼容 BaseModule 双层与 web/server.py 裸 payload
+            self._watch_camera = inner.get("watch_camera") or None
+            self.logger.info(f"watch_camera 更新 → {self._watch_camera or '全部'}")
+            return
         if topic != self._sa["detect_topic"]:
             return
         if not self._sa["enabled"]:
@@ -178,6 +194,9 @@ class SceneAnalyzerModule(BaseModule):
         det_time = payload.get("time") or time.time()
         detections = payload.get("detections") or []
         if not camera:
+            return
+        # G3a: 限定只看 watch_camera（在节流/计数之前 short-circuit，避免污染 stats）
+        if self._watch_camera and camera != self._watch_camera:
             return
         classes = sorted({d.get("class") for d in detections if d.get("class")})
         # 节流
@@ -271,9 +290,22 @@ class SceneAnalyzerModule(BaseModule):
             with self._inflight_lock:
                 self._inflight = False
 
+    def _on_video_discovery(self, payload: dict) -> None:
+        """G1: video_processor discovery 更新 mjpeg_base_url。
+        用 payload.ip（BaseModule._get_local_ip 出口 IP）而非 endpoints[0].url（127.0.0.1 本机视角，scene_analyzer 不可达）。
+        端口 5051 是 video_processor 固定 MJPEG 端口，hardcoded 即可。
+        """
+        ip = payload.get("ip")
+        if ip and ip != "127.0.0.1":
+            new_base = f"http://{ip}:5051"
+            if new_base != self._mjpeg_base_url:
+                self.logger.info(f"mjpeg_base_url 更新 {self._mjpeg_base_url} → {new_base}")
+                self._mjpeg_base_url = new_base
+
     def _fetch_snapshot(self, camera: str) -> bytes | None:
+        # G1: 用动态 _mjpeg_base_url（discovery 解析），不读 yaml 静态字段
         url = (
-            f"{self._sa['mjpeg_base_url']}/snapshot/"
+            f"{self._mjpeg_base_url}/snapshot/"
             f"{quote(camera)}?mode={self._sa['snapshot_mode']}"
         )
         try:

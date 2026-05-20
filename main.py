@@ -326,6 +326,8 @@ class AVSupervisor:
         self.mqtt.subscribe("av/system/lan_scan/+", self._on_lan_scan)
         # 5/14 Sub-7：open-vocab 检测命中 → openvocab SSE channel（dashboard timeline 面板）
         self.mqtt.subscribe("av/video/openvocab", self._on_openvocab)
+        # 5/19 G2：scene_analyzer VLM 输出 → scene_analysis SSE channel（前端 pushOverviewScene 已 ready）
+        self.mqtt.subscribe("av/video/scene_analysis", self._on_scene_analysis)
         # 5/20 D 仿 partial UX：audio_processor VAD speaking 心跳 → listening SSE channel
         # dashboard 收到 state=start 启动 "正在听 X.Xs" 计时器，state=end 清除占位
         self.mqtt.subscribe(
@@ -383,6 +385,12 @@ class AVSupervisor:
         加一个 header key；前端 pushOverviewOpenvocab 直接读顶层即可。
         """
         self._web_push("openvocab", payload)
+
+    def _on_scene_analysis(self, topic: str, payload: dict):
+        """scene_analyzer VLM 输出 → scene_analysis SSE channel（前端 dashboard.js:724 pushOverviewScene 已 ready）。
+        payload 顶层有 camera/scene/vlm_latency_ms/detection_classes，pass-through 不校验。
+        """
+        self._web_push("scene_analysis", payload)
 
     def _on_audio_listening(self, topic: str, payload: dict):
         """5/20 D 仿 partial UX：VAD speaking/silence 心跳 → listening SSE channel。
