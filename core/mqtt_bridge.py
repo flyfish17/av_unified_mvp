@@ -120,7 +120,14 @@ class MQTTBridge:
         if not self._connected:
             return
         data = json.dumps(payload, ensure_ascii=False) if isinstance(payload, dict) else payload
-        self._client.publish(topic, data, qos=qos)
+        info = self._client.publish(topic, data, qos=qos)
+        # qos=0 fire-and-forget 在 Flask 多线程并发时 paho sender 线程偶有 race 让 msg
+        # 不到达 socket（5/20 实测：3 POST 仅 1 通）。wait_for_publish 让调用方 thread 等到
+        # paho 完成 socket write 再返回——qos=0 时只 block 微秒级，但消除间歇 silent drop。
+        try:
+            info.wait_for_publish(timeout=2)
+        except (RuntimeError, ValueError):
+            pass
 
     def subscribe(self, topic: str, callback):
         with self._lock:
