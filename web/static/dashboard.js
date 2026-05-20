@@ -201,15 +201,18 @@
   }
 
   // 5/20 D 仿 partial UX：handleListening 实现 ───────────────────────
-  // VAD speaking 触发 state=start → 转写卡末尾插 "...正在听 X.Xs"
+  // VAD speaking 触发 state=start → 转写卡底部浮显 "...正在听 X.Xs"
   // 计时器每 200ms 更新文本，silence 触发 state=end 清掉。
-  // 这不是真 partial（sensevoice 模型不出），是体感占位避免"卡死"错觉
+  // 5/20 fix（上下跳）：absolute 浮在 card 底部，不占 flow 空间，final 内容稳定不抖。
+  //   半透明 backdrop 让 indicator 可读（叠在 final 上）。
   let _listeningTimer = null;
   let _listeningStartMs = 0;
   function handleListening(ev) {
     if (!ev || !ev.state) return;
     const card = document.querySelector('[data-overview="transcript"] .strip-card-body');
     if (!card) return;
+    // listening indicator 用 absolute 定位，card 必须是 positioned 容器
+    if (card.style.position !== 'relative') card.style.position = 'relative';
     if (ev.state === "start") {
       _listeningStartMs = Date.now();
       if (_listeningTimer) clearInterval(_listeningTimer);
@@ -218,12 +221,15 @@
         if (!liveEl) {
           liveEl = document.createElement('div');
           liveEl.className = 'tx-listening-indicator';
-          liveEl.style.cssText = 'padding:4px 8px;color:#7ad;opacity:0.8;font-style:italic;animation:pulse 1.5s infinite;';
+          // absolute 浮在 card 底部：不占 flow，不导致 final 上下跳
+          // backdrop 半透明蓝灰让文字叠在历史 final 上仍可读
+          liveEl.style.cssText = 'position:absolute;bottom:4px;left:8px;right:8px;padding:3px 8px;color:#7ad;opacity:0.9;font-style:italic;font-size:0.92em;background:rgba(8,24,40,0.78);border-radius:4px;text-align:center;pointer-events:none;animation:pulse 1.5s infinite;';
           card.appendChild(liveEl);
         }
         const sec = ((Date.now() - _listeningStartMs) / 1000).toFixed(1);
         liveEl.textContent = `…正在听 ${sec}s`;
-        card.scrollTop = card.scrollHeight;
+        // 5/20 fix：移除 card.scrollTop（absolute 元素不影响 scrollHeight，
+        // 强行 scroll 会让 final 上屏瞬间被推走）
       }, 200);
     } else if (ev.state === "end") {
       if (_listeningTimer) { clearInterval(_listeningTimer); _listeningTimer = null; }
