@@ -903,6 +903,23 @@
   // 总览的 Node-RED hero 和 Node-RED 模块视图共用此逻辑
   let nodeRedPages = [];  // [{id, name, type}]
   let nodeRedNavAdded = false;  // 子项只加一次（init + setActive 都会触发本函数）
+  // dashboard 2.0 (@flowfuse/node-red-dashboard) 是否真正挂载到 /dashboard/。
+  // 5/20 客户演示发现黑框 "Cannot GET /dashboard/" 根因：3588 上 flows.json 含 ui-page 节点，
+  // 但 plugin 没装到 userDir node_modules（/home/firefly/av_unified_mvp/node-red/）—— 启动日志
+  // 长期 "Waiting for missing types: ui-base ui-page ..."。此 flag 探一次 /dashboard/，
+  // 不可达就把 ui-page 从 selector 选项过滤掉、兜底 src 改用 /ui/（dashboard 1.x 正常服务）。
+  let nodeRedDashboard2Reachable = null;  // null=未探, true/false=结果
+  async function probeDashboard2() {
+    if (nodeRedDashboard2Reachable !== null) return nodeRedDashboard2Reachable;
+    try {
+      const r = await fetch(`http://${window.location.hostname}:1880/dashboard/`,
+        { method: "GET", signal: AbortSignal.timeout(2000), cache: "no-store" });
+      nodeRedDashboard2Reachable = r.ok;
+    } catch (_) {
+      nodeRedDashboard2Reachable = false;
+    }
+    return nodeRedDashboard2Reachable;
+  }
   async function loadNodeRed() {
     const url = `http://${window.location.hostname}:1880/`;
     const frame = document.getElementById("nodered-frame");
@@ -924,8 +941,12 @@
       const r = await fetch(`http://${window.location.hostname}:1880/flows`, { signal: AbortSignal.timeout(3000) });
       if (!r.ok) return;
       const flows = await r.json();
-      // 1. 提取页面
-      const rawPages = flows.filter(n => n.type === "ui-page" || n.type === "ui_tab");
+      // 探 dashboard 2.0 实际是否挂载（plugin 没装时 /dashboard/ 是 404 "Cannot GET /dashboard/"）
+      const d2ok = await probeDashboard2();
+      // 1. 提取页面（dashboard 2.0 未挂载时丢弃 ui-page，避免 selector 默认选中后 iframe 404 黑框）
+      const rawPages = flows.filter(n =>
+        (n.type === "ui-page" && d2ok) || n.type === "ui_tab"
+      );
       // 2. 数每页有多少 widget（用 group→page 链）
       const groupToPage = {};
       flows.filter(n => n.type === "ui-group" || n.type === "ui_group").forEach(g => {
@@ -991,10 +1012,12 @@
       fallback.style.display = "none";
       frame.style.display = "block";
       // 不抢先设 src 了；让 buildOverviewNodeRedSelector 决定加载哪页
-      // 如果 5 秒内 selector 还没设 src，默认加载 /dashboard/ root（dashboard 2.0 入口）
-      setTimeout(() => {
+      // 如果 5 秒内 selector 还没设 src，按 dashboard 2.0 是否可达兜底（不可达就用 1.x /ui/）
+      setTimeout(async () => {
         if (frame.src === "about:blank" || !frame.src) {
-          frame.src = `http://${window.location.hostname}:1880/dashboard/`;
+          const d2 = await probeDashboard2();
+          const path = d2 ? "/dashboard/" : "/ui/";
+          frame.src = `http://${window.location.hostname}:1880${path}`;
         }
       }, 5000);
       // 探活成功 — 停掉 re-probe 定时器
