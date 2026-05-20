@@ -42,8 +42,9 @@ DEFAULTS = {
     "enabled": True,
     "input_topic": "av/audio/command",
     "output_topic": "av/audio/command_punctuated",
-    # ct-punc int8 ONNX 模型路径。3588 spike 默认；config 或 AV_PUNCT_MODEL env 可 override
-    "model": "/home/firefly/spike_venv_20260518/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/model.int8.onnx",
+    # ct-punc int8 ONNX 模型路径。5/20 迁出 spike_venv 到独立 ~/models/（清理 spike_venv 后正式生效）。
+    # config 或 AV_PUNCT_MODEL env 可 override（如部署在非 firefly 用户机器要换 path）。
+    "model": "/home/firefly/models/ct-punc-zh-en-vocab272727-int8/model.int8.onnx",
     "num_threads": 1,
     "provider": "cpu",
     # 短文本跳过阈值（少于此字符的不调模型，避免无意义的标点）
