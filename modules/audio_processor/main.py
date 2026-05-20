@@ -158,12 +158,7 @@ class AudioModule(BaseModule):
 
     def start(self) -> None:
         super().start()
-        # D 仿 partial UX：注入 listening_callback 让 processor 在 VAD speaking/silence
-        # 状态转换时 publish av/audio/listening 心跳，dashboard 显示"正在听 X.Xs"
-        self.processor.start(
-            callback=self._on_transcript,
-            listening_callback=self._on_listening,
-        )
+        self.processor.start(callback=self._on_transcript)
         # 启嵌入式 HTTP（5052）— 前端"导出原音"按钮直连此端口
         # 与 video_processor 5051 同样思路；start() 时启避免 __init__ 阶段还没装好 processor
         _AudioExportHandler.processor_ref = self.processor
@@ -210,22 +205,6 @@ class AudioModule(BaseModule):
             self.publish(self._topics.get("audio_command", "av/audio/command"), payload)
         else:
             self.publish(self._topics.get("audio_partial", "av/audio/partial"), payload)
-
-    # ── D 仿 partial UX：VAD 状态心跳 → MQTT ─────────────────────────
-    def _on_listening(self, state: str, ts: float) -> None:
-        """processor 在 VAD speaking/silence 状态转换时调用。
-        state ∈ {"start", "end"}；ts 是事件 epoch 时间戳。
-        发到 av/audio/listening 让 supervisor + dashboard 显示"正在听 X.Xs"占位。
-        """
-        payload = {
-            "topic_type": "event",
-            "payload": {
-                "event_type": "listening",
-                "state": state,
-                "ts": ts,
-            },
-        }
-        self.publish(self._topics.get("audio_listening", "av/audio/listening"), payload)
 
 
 def main():

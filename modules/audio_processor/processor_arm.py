@@ -102,11 +102,6 @@ class AudioProcessorARM:
         # 运行状态
         self._stop_event = threading.Event()
         self._callback: Optional[Callable[[TranscriptEvent], None]] = None
-        # D 仿 partial UX 兜底：VAD speaking/silence 状态转换回调，
-        # 让上层 (audio_processor/main.py) 推 av/audio/listening MQTT 心跳，
-        # dashboard 收到后显示"正在听 X.Xs"避免整段 final 等待期"卡死"体感。
-        # 默认 None 不发；start(listening_callback=...) 启用。
-        self._listening_callback: Optional[Callable[[str, float], None]] = None
         self._seq = 0
         self._stream: Optional[sd.InputStream] = None
         self._audio_q: "queue.Queue[tuple[np.ndarray, float]]" = queue.Queue(maxsize=256)
@@ -128,13 +123,8 @@ class AudioProcessorARM:
 
     # ── Public API ────────────────────────────────────────────────────
 
-    def start(
-        self,
-        callback: Optional[Callable[[TranscriptEvent], None]] = None,
-        listening_callback: Optional[Callable[[str, float], None]] = None,
-    ) -> None:
+    def start(self, callback: Optional[Callable[[TranscriptEvent], None]] = None) -> None:
         self._callback = callback
-        self._listening_callback = listening_callback
         self._stop_event.clear()
         # 关键：必须先加载模型（阻塞 3-4s）再开 mic stream。
         # 若并行启动，alsa USB buffer 在模型加载期间填满 → sounddevice callback 假死
@@ -264,7 +254,6 @@ class AudioProcessorARM:
         # 模型在 start() 已加载好，这里直接进 VAD/inference 循环
         buf = []
         speaking = False
-        was_speaking = False  # 用于 detect speaking/silence 状态转换，触发 listening 心跳
         silence_count = 0
         speech_count = 0
         prev_samples = None  # 句头 50ms 提前包含，防吞首字（demo 同款）
@@ -292,23 +281,6 @@ class AudioProcessorARM:
                     speaking = False
                     silence_count = 0
                     speech_count = 0
-
-            # D 仿 partial UX：VAD 状态转换触发 listening 心跳（speaking start / end）
-            # dashboard 收到 start 后启动 "...正在听 X.Xs" 视觉占位 + 计时器
-            if speaking and not was_speaking:
-                if self._listening_callback is not None:
-                    try:
-                        self._listening_callback("start", time.time())
-                    except Exception as e:
-                        logger.debug(f"listening_callback(start) 异常: {e}")
-                was_speaking = True
-            elif not speaking and was_speaking:
-                if self._listening_callback is not None:
-                    try:
-                        self._listening_callback("end", time.time())
-                    except Exception as e:
-                        logger.debug(f"listening_callback(end) 异常: {e}")
-                was_speaking = False
 
             if not speaking:
                 prev_samples = samples
