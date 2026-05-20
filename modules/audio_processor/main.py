@@ -149,7 +149,12 @@ class AudioModule(BaseModule):
             elif action == "enable" and not self.running:
                 self.logger.info("收到 enable，恢复麦克风采集 + 转写")
                 try:
-                    self.processor.start(callback=self._on_transcript)
+                    # 必须重传 listening_callback —— processor.stop() 清不掉它但 .start()
+                    # 不传参会 default 回 None，之后 VAD 不再发 av/audio/listening 心跳
+                    self.processor.start(
+                        callback=self._on_transcript,
+                        listening_callback=self._on_listening,
+                    )
                 except Exception as e:
                     self.logger.warning(f"processor.start 异常: {e}")
                     return
