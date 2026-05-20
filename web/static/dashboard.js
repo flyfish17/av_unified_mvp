@@ -187,9 +187,49 @@
     try { handleDiscovery(ev); } catch (err) { console.warn(err); }
   });
 
+  // 5/20 D 仿 partial UX：listening 心跳 SSE channel 主动订阅
+  // audio_processor VAD speaking 触发 state=start → 启动 "...正在听 X.Xs" 计时器
+  // silence 触发 state=end → 清除占位（一般之后会跟一条 final 上屏）
+  // 不通过 module discovery 注册（避免被 tickerForward 二次调用造成混乱）
+  subscribeChannel("listening", (ev) => {
+    try { handleListening(ev); } catch (err) { console.warn(err); }
+  });
+
   function setHeaderStatus(text, cls) {
     const el = document.getElementById("header-status");
     if (el) { el.textContent = text; el.className = "pill " + cls; }
+  }
+
+  // 5/20 D 仿 partial UX：handleListening 实现 ───────────────────────
+  // VAD speaking 触发 state=start → 转写卡末尾插 "...正在听 X.Xs"
+  // 计时器每 200ms 更新文本，silence 触发 state=end 清掉。
+  // 这不是真 partial（sensevoice 模型不出），是体感占位避免"卡死"错觉
+  let _listeningTimer = null;
+  let _listeningStartMs = 0;
+  function handleListening(ev) {
+    if (!ev || !ev.state) return;
+    const card = document.querySelector('[data-overview="transcript"] .strip-card-body');
+    if (!card) return;
+    if (ev.state === "start") {
+      _listeningStartMs = Date.now();
+      if (_listeningTimer) clearInterval(_listeningTimer);
+      _listeningTimer = setInterval(() => {
+        let liveEl = card.querySelector('.tx-listening-indicator');
+        if (!liveEl) {
+          liveEl = document.createElement('div');
+          liveEl.className = 'tx-listening-indicator';
+          liveEl.style.cssText = 'padding:4px 8px;color:#7ad;opacity:0.8;font-style:italic;animation:pulse 1.5s infinite;';
+          card.appendChild(liveEl);
+        }
+        const sec = ((Date.now() - _listeningStartMs) / 1000).toFixed(1);
+        liveEl.textContent = `…正在听 ${sec}s`;
+        card.scrollTop = card.scrollHeight;
+      }, 200);
+    } else if (ev.state === "end") {
+      if (_listeningTimer) { clearInterval(_listeningTimer); _listeningTimer = null; }
+      const liveEl = card.querySelector('.tx-listening-indicator');
+      if (liveEl) liveEl.remove();
+    }
   }
 
   function handleDiscovery(ev) {
@@ -903,6 +943,24 @@
   // 总览的 Node-RED hero 和 Node-RED 模块视图共用此逻辑
   let nodeRedPages = [];  // [{id, name, type}]
   let nodeRedNavAdded = false;  // 子项只加一次（init + setActive 都会触发本函数）
+  // dashboard 2.0 (@flowfuse/node-red-dashboard) 是否真正挂载到 /dashboard/。
+  // 在 3588 上 flows.json 里有 ui-page 节点但 plugin 没装到 userDir node_modules，
+  // 启动日志会一直 "Waiting for missing types"，/dashboard/ 返回 404 → 黑框 "Cannot GET /dashboard/"。
+  // 这个 flag 在 loadOverviewNodeRed 时探一次，false 就把 ui-page 从可选页过滤掉，
+  // 也阻止 pageUrlPath() 输出 /dashboard/。
+  let nodeRedDashboard2Reachable = null;  // null=未探, true/false=结果
+  async function probeDashboard2() {
+    if (nodeRedDashboard2Reachable !== null) return nodeRedDashboard2Reachable;
+    try {
+      // 用 GET 而非 HEAD：Node-RED express 对未注册路由有时 HEAD 返回 200 但 GET 404
+      const r = await fetch(`http://${window.location.hostname}:1880/dashboard/`,
+        { method: "GET", signal: AbortSignal.timeout(2000), cache: "no-store" });
+      nodeRedDashboard2Reachable = r.ok;  // 200=true, 404=false
+    } catch (_) {
+      nodeRedDashboard2Reachable = false;  // 网络错或超时也按未挂载处理
+    }
+    return nodeRedDashboard2Reachable;
+  }
   async function loadNodeRed() {
     const url = `http://${window.location.hostname}:1880/`;
     const frame = document.getElementById("nodered-frame");
@@ -924,8 +982,12 @@
       const r = await fetch(`http://${window.location.hostname}:1880/flows`, { signal: AbortSignal.timeout(3000) });
       if (!r.ok) return;
       const flows = await r.json();
-      // 1. 提取页面
-      const rawPages = flows.filter(n => n.type === "ui-page" || n.type === "ui_tab");
+      // 探 dashboard 2.0 实际是否挂载（plugin 没装时 /dashboard/ 是 404 "Cannot GET /dashboard/"）
+      const d2ok = await probeDashboard2();
+      // 1. 提取页面（dashboard 2.0 未挂载时丢弃 ui-page，避免 selector 默认选中后 iframe 404 黑框）
+      const rawPages = flows.filter(n =>
+        (n.type === "ui-page" && d2ok) || n.type === "ui_tab"
+      );
       // 2. 数每页有多少 widget（用 group→page 链）
       const groupToPage = {};
       flows.filter(n => n.type === "ui-group" || n.type === "ui_group").forEach(g => {
@@ -991,10 +1053,12 @@
       fallback.style.display = "none";
       frame.style.display = "block";
       // 不抢先设 src 了；让 buildOverviewNodeRedSelector 决定加载哪页
-      // 如果 5 秒内 selector 还没设 src，默认加载 /dashboard/ root（dashboard 2.0 入口）
-      setTimeout(() => {
+      // 如果 5 秒内 selector 还没设 src，按 dashboard 2.0 是否可达兜底（不可达就用 1.x /ui/）
+      setTimeout(async () => {
         if (frame.src === "about:blank" || !frame.src) {
-          frame.src = `http://${window.location.hostname}:1880/dashboard/`;
+          const d2 = await probeDashboard2();
+          const path = d2 ? "/dashboard/" : "/ui/";
+          frame.src = `http://${window.location.hostname}:1880${path}`;
         }
       }, 5000);
       // 探活成功 — 停掉 re-probe 定时器
