@@ -260,6 +260,16 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 
 更早进度见 `ARCHIVE_2026Q2.md`。
 
+### 2026-05-20 — 演示线立分支 + airblue 5/9 锚定（Mac 演示与 3588 解耦）
+- 摸清三方版本对照：本地 sprint ↑101 commit vs `origin/main`，分布 = **67 Mac 演示 + 26 3588 支线 + 8 跨界**；airblue 跑 commit `3b5bdbe`（5/9 K1-K5，60h 长测稳），main.py 字节数 15582 精确吻合
+- 立 `mac-stable-foundation` 分支锚定 `3b5bdbe` + tag `mac-foundation-baseline-20260509` → Mac 演示主线，纯净无 3588，含 8 个模块（audio / husion_distributed / llm_engine / mqtt_router / network_info / network_scanner / system_info / video_processor）
+- 演示剧本敲定：回归"技术底座"原意（视频识别 + 音频 ASR + LLM 推理 + MQTT 串通 + dashboard 基础展示），**舍弃 5/14 后销售包装**（客户视图开关、husion 5 场景、openvocab、scene_analyzer、punctuator、listening 三态）
+- 认知收益：承认 sprint 101 commit 主要是 3588 适配绕路（β/γ/δ 路径均不过线）+ 销售包装，核心 UX（partial 逐词蹦）未实质过线 → 退回 5/9 验证态是干净选择
+- 清掉切回 5/9 后 `modules/` 里 5 个游魂 `__pycache__` 残留（control_dispatcher / keyframe_filter / openvocab_filter / scene_analyzer / web_browser），无源码、不影响运行
+- airblue 家网段 IP 更正：memory `192.168.3.128` → 实测 `192.168.3.138`；airblue 上 `/Users/airblue/av_unified_mvp/` 是非 git 独立拷贝（5/12 左右建的）
+- 落 `docs/handoffs/20260520-night-handoff-to-mac-studio.md`（明天 Mac Studio 接 3588 用，含 git 状态、验证清单、待办决策）
+- 暂存：未推 origin 的 commit/分支/tag —— `mac-stable-foundation` + tag、sprint HEAD `eb93a26`（listening 链路 + badge 三态 + scroll 不拽回）。本日不 push，明早确认后批量推
+
 ### 2026-05-18 — 新阶段启动：两阶段框架定调 + 文档重构
 - 战略定位写入第一行："AI 技术底座 + A/B/C 三层次（架构 = 形态对应）"
 - §1.6 三步框架升级为 §3 两阶段框架
