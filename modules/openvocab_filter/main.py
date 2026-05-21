@@ -49,8 +49,10 @@ logging.basicConfig(
 
 DEFAULTS = {
     "enabled": True,
-    # yolov8s-world.pt 默认在 3588:/tmp/（5/14 Sub-2 早上 scp 完成，26MB）
-    "model_path": "/tmp/yolov8s-world.pt",
+    # 5/21: 改持久路径 ~/models/yolov8s-world.pt（之前 /tmp tmpfs 每次重启即失）。
+    # 仓库不带 weights（25MB），首次部署: 从 https://github.com/ultralytics/assets/releases/
+    # 拉 yolov8s-world.pt 放到 ~/models/ 即可。Path.expanduser() 在加载时展开 ~。
+    "model_path": "~/models/yolov8s-world.pt",
     # 化工/安全场景默认 5 类 prompt（演示用）
     "prompts": [
         "fire",
@@ -122,12 +124,13 @@ class OpenVocabFilterModule(BaseModule):
             return
 
         # lazy load 模型 — 首次 inference 才真正加载；启动期只校验路径
-        model_path = Path(ov["model_path"])
+        model_path = Path(ov["model_path"]).expanduser()
         if not model_path.exists():
             self.logger.warning(
                 f"openvocab_filter model_path 不存在: {model_path} — "
                 f"模块仍订阅 key_event 但每次 inference 会 fail; "
-                f"修复方法: scp yolov8s-world.pt 到 {model_path}"
+                f"修复方法: 从 https://github.com/ultralytics/assets/releases/ "
+                f"拉 yolov8s-world.pt 放到 {model_path}"
             )
             # 不 disable，保留订阅 — fail 路径会 stats 统计
 
@@ -152,7 +155,7 @@ class OpenVocabFilterModule(BaseModule):
         if self._model_load_failed:
             return False
         ov = self._ov
-        model_path = Path(ov["model_path"])
+        model_path = Path(ov["model_path"]).expanduser()
         if not model_path.exists():
             self._model_load_failed = True
             self.logger.warning(f"模型路径不存在，放弃加载: {model_path}")
