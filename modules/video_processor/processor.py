@@ -352,7 +352,7 @@ class VideoProcessor:
 
             if conf < self.confidence:
                 continue
-            if self.target_classes and cls_id not in self.target_classes:
+            if self.target_classes and results.names[cls_id] not in self.target_classes:
                 continue
 
             bbox = boxes.xyxy[i].tolist()
