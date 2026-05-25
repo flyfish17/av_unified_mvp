@@ -1,0 +1,78 @@
+[
+    {
+        "id": "demo_a_tab",
+        "type": "tab",
+        "label": "Demo A · 巡检关键词→对讲广播",
+        "disabled": false,
+        "info": "销售演示流 A — 听到'巡检/检查/排查'关键词 → 发对讲广播指令。\n\n订: av/audio/command_punctuated\n发: av/control (target=intercom, action=broadcast)\n\n销售脚本: docs/sales/node-red-customer-demo-script-20260520.md"
+    },
+    {
+        "id": "demo_a_in",
+        "type": "mqtt in",
+        "z": "demo_a_tab",
+        "name": "ASR 转写带标点",
+        "topic": "av/audio/command_punctuated",
+        "qos": "0",
+        "datatype": "json",
+        "broker": "demo_broker",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 180,
+        "y": 120,
+        "wires": [["demo_a_filter"]]
+    },
+    {
+        "id": "demo_a_filter",
+        "type": "function",
+        "z": "demo_a_tab",
+        "name": "命中关键词→广播",
+        "func": "// 5/25 demo: 听到'巡检/检查/排查'就推对讲广播\nconst KEYWORDS = ['巡检', '检查', '排查'];\nconst text = (msg.payload && msg.payload.text) || '';\nconst hit = KEYWORDS.find(k => text.includes(k));\nif (!hit) return null;\nreturn {\n    topic: 'av/control',\n    payload: {\n        target: 'intercom',\n        action: 'broadcast',\n        params: {\n            text: `收到${hit}指令，请相关岗位上报位置`,\n            triggered_by: text\n        },\n        source: 'node-red-demo-a',\n        ts: Date.now()\n    }\n};",
+        "outputs": 1,
+        "noerr": 0,
+        "x": 420,
+        "y": 120,
+        "wires": [["demo_a_out", "demo_a_debug"]]
+    },
+    {
+        "id": "demo_a_out",
+        "type": "mqtt out",
+        "z": "demo_a_tab",
+        "name": "对讲广播 av/control",
+        "topic": "",
+        "qos": "0",
+        "retain": "false",
+        "broker": "demo_broker",
+        "x": 690,
+        "y": 90,
+        "wires": []
+    },
+    {
+        "id": "demo_a_debug",
+        "type": "debug",
+        "z": "demo_a_tab",
+        "name": "命中事件",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "x": 670,
+        "y": 160,
+        "wires": []
+    },
+    {
+        "id": "demo_broker",
+        "type": "mqtt-broker",
+        "name": "Local Mosquitto",
+        "broker": "127.0.0.1",
+        "port": "1883",
+        "clientid": "node-red-demo-a",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true
+    }
+]

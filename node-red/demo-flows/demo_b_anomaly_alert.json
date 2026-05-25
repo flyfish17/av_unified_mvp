@@ -1,0 +1,90 @@
+[
+    {
+        "id": "demo_b_tab",
+        "type": "tab",
+        "label": "Demo B · 视觉异常→声光报警",
+        "disabled": false,
+        "info": "销售演示流 B — openvocab_filter 命中 fire/smoke/falling 等危险类目时，触发声光报警 + 落库 + 通知。\n\n订: av/video/openvocab (hits 非空时)\n发: av/control (alarm) + av/control (notify)\n\n依赖: openvocab_filter 5/21 修复后可正常出 hits。"
+    },
+    {
+        "id": "demo_b_in",
+        "type": "mqtt in",
+        "z": "demo_b_tab",
+        "name": "openvocab 命中",
+        "topic": "av/video/openvocab",
+        "qos": "0",
+        "datatype": "json",
+        "broker": "demo_broker_b",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 180,
+        "y": 120,
+        "wires": [["demo_b_dispatch"]]
+    },
+    {
+        "id": "demo_b_dispatch",
+        "type": "function",
+        "z": "demo_b_tab",
+        "name": "命中分流→报警/通知/落库",
+        "func": "// 5/25 demo: openvocab 命中即触发声光报警 + 推送通知\nconst hits = (msg.payload && msg.payload.hits) || [];\nif (hits.length === 0) return null;  // 防御 — 上游已过滤\n\nconst topHit = hits.sort((a,b) => b.conf - a.conf)[0];\nconst camera = msg.payload.camera || '未知';\nconst summary = `[${camera}] 命中 ${topHit.class} (conf=${topHit.conf.toFixed(2)})`;\n\nconst alarm = {\n    topic: 'av/control',\n    payload: {\n        target: 'siren_strobe',\n        action: 'on',\n        params: { duration_s: 10, severity: topHit.conf > 0.7 ? 'high' : 'medium' },\n        source: 'node-red-demo-b',\n        evidence: summary\n    }\n};\nconst notify = {\n    topic: 'av/control',\n    payload: {\n        target: 'notify_channel',\n        action: 'push',\n        params: { text: `⚠ 异常: ${summary}`, channel: 'oncall' },\n        source: 'node-red-demo-b'\n    }\n};\nconst log = {\n    topic: 'av/audit/log',\n    payload: { type: 'openvocab_hit', summary, raw: msg.payload, ts: Date.now() }\n};\nreturn [[alarm], [notify], [log]];",
+        "outputs": 3,
+        "noerr": 0,
+        "x": 430,
+        "y": 120,
+        "wires": [["demo_b_alarm_out"], ["demo_b_notify_out"], ["demo_b_log_out"]]
+    },
+    {
+        "id": "demo_b_alarm_out",
+        "type": "mqtt out",
+        "z": "demo_b_tab",
+        "name": "声光报警",
+        "topic": "",
+        "qos": "0",
+        "retain": "false",
+        "broker": "demo_broker_b",
+        "x": 720,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "demo_b_notify_out",
+        "type": "mqtt out",
+        "z": "demo_b_tab",
+        "name": "推送通知",
+        "topic": "",
+        "qos": "0",
+        "retain": "false",
+        "broker": "demo_broker_b",
+        "x": 720,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "demo_b_log_out",
+        "type": "mqtt out",
+        "z": "demo_b_tab",
+        "name": "审计落库",
+        "topic": "",
+        "qos": "0",
+        "retain": "false",
+        "broker": "demo_broker_b",
+        "x": 720,
+        "y": 160,
+        "wires": []
+    },
+    {
+        "id": "demo_broker_b",
+        "type": "mqtt-broker",
+        "name": "Local Mosquitto",
+        "broker": "127.0.0.1",
+        "port": "1883",
+        "clientid": "node-red-demo-b",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true
+    }
+]
