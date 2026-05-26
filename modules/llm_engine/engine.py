@@ -288,9 +288,21 @@ class LLMEngine:
             _cat_path = Path(__file__).parent.parent.parent / "config" / "device_catalog.json"
             _cat = json.loads(_cat_path.read_text(encoding="utf-8")) if _cat_path.exists() else {}
             self._cmd_to_also_in = {c["id"]: set(c.get("also_in") or []) for c in _cat.get("commands", []) if c.get("id")}
+            # 5/26 后置 rewrite 用：cmd_id → {location, device, action} 元数据 + (loc, dev, act) → cmd_id 反查
+            self._cmd_info = {
+                c["id"]: {"location": c.get("location"), "device": c.get("device"), "action": c.get("action")}
+                for c in _cat.get("commands", []) if c.get("id")
+            }
+            self._loc_dev_act_index = {
+                (c["location"], c["device"], c["action"]): c["id"]
+                for c in _cat.get("commands", [])
+                if all(k in c for k in ("id", "location", "device", "action"))
+            }
         except Exception as _e:
-            logger.warning(f"also_in 索引构建失败: {_e}")
+            logger.warning(f"also_in / cmd_info 索引构建失败: {_e}")
             self._cmd_to_also_in = {}
+            self._cmd_info = {}
+            self._loc_dev_act_index = {}
         logger.info(f"control 关键词集（catalog derive）：{len(self._keywords)} 个")
         logger.info(f"cmd 白名单（catalog derive）：{len(self._cmd_whitelist)} 个")
         logger.info(f"location 集（地点反幻觉过滤）：{len(self._location_lookup)} 个，default={default_location or '<未设>'}")
@@ -553,13 +565,34 @@ class LLMEngine:
                 if loc_id != "_global" and loc_id != self._default_location_id \
                         and not also_in_match \
                         and loc_label and loc_label not in text:
-                    logger.warning(
-                        f"location hallucinate 拒绝：cmd={cmd_str!r} 但原文 {text!r} "
-                        f"不含地点'{loc_label}'，也非 default_location，也非 also_in"
-                    )
-                    self._last_cmd_attempt = cmd_str
-                    self._last_miss_reason = "filter_rejected_location"
-                    return None
+                    # 5/26 后置 rewrite：LLM 偷换地点 + 用户原文无明示地点
+                    # → 尝试找 default_location 同 (device, action) 的等价 cmd 并 rewrite。
+                    # 缘由：NPU 1.5B prompt rule 7 没法保证 LLM 用 default_location，
+                    # 5/26 实测 "开空调" default=2FDiningTable 但 LLM 还输出 RDDepartment_AirConditioner_On。
+                    # 由 system 强制纠回，等于把"选地点"权力从 LLM 收回。
+                    rewrite_cmd = None
+                    info = self._cmd_info.get(cmd_str) if self._default_location_id else None
+                    if info and info.get("device") and info.get("action"):
+                        candidate = self._loc_dev_act_index.get(
+                            (self._default_location_id, info["device"], info["action"])
+                        )
+                        if candidate and (not self._cmd_whitelist or candidate in self._cmd_whitelist):
+                            rewrite_cmd = candidate
+                    if rewrite_cmd:
+                        logger.info(
+                            f"location rewrite: {cmd_str!r} → {rewrite_cmd!r} "
+                            f"(default={self._default_location_id}, 原文 {text!r} 无明示地点)"
+                        )
+                        cmd_str = rewrite_cmd
+                    else:
+                        logger.warning(
+                            f"location hallucinate 拒绝：cmd={cmd_str!r} 但原文 {text!r} "
+                            f"不含地点'{loc_label}'，也非 default_location，也非 also_in，"
+                            f"default_location 也无同 (device, action) 等价 cmd"
+                        )
+                        self._last_cmd_attempt = cmd_str
+                        self._last_miss_reason = "filter_rejected_location"
+                        return None
         self._last_miss_reason = None
         return {"cmd": cmd_str}
 
