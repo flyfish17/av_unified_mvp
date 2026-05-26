@@ -56,8 +56,16 @@ class LLMModule(BaseModule):
         # 是否订阅主路径（av/audio/command + av/llm/command）。默认 true 保留 5/13 行为；
         # Jetson 深思层应设 false，避免 escalate_receiver 与主路径并跑（每条 cmd 跑两遍 LLM 浪费）。
         if cfg.get("llm", {}).get("audio_command_subscribe", True):
-            # 订阅音频定稿（主路径：audio_processor → av/audio/command → 意图识别）
-            self.subscribe(cfg.get("mqtt", {}).get("topics", {}).get("audio_command", "av/audio/command"))
+            # 5/26 funasr backend 切换：audio_processor 在 funasr_2pass 下绕过 punctuator
+            # 直接发 av/audio/command_punctuated。llm_engine 必须按 backend 切订阅 topic，
+            # 否则 (a) funasr_2pass 时订 raw command 收不到 → 意图判断卡死；
+            # (b) sense_voice_arm 时同订两个会让每句过两遍 LLM（raw 一次 + punctuated 一次）。
+            import os as _os
+            _backend = _os.environ.get("AV_ASR_BACKEND", "funasr_2pass").strip()
+            if _backend == "funasr_2pass":
+                self.subscribe("av/audio/command_punctuated")
+            else:
+                self.subscribe(cfg.get("mqtt", {}).get("topics", {}).get("audio_command", "av/audio/command"))
             # 向后兼容：允许直接向 av/llm/command 注入文本（测试 / 手动调用）
             self.subscribe("av/llm/command")
         # 运行时开关命令：dashboard toggle → POST /mqtt/publish av/llm/cmd {action: enable|disable}
