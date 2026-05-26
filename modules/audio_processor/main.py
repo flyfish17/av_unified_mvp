@@ -149,7 +149,12 @@ class AudioModule(BaseModule):
             elif action == "enable" and not self.running:
                 self.logger.info("收到 enable，恢复麦克风采集 + 转写")
                 try:
-                    self.processor.start(callback=self._on_transcript)
+                    # 必须重传 listening_callback —— processor.stop() 清不掉它但 .start()
+                    # 不传参会 default 回 None，之后 VAD 不再发 av/audio/listening 心跳
+                    self.processor.start(
+                        callback=self._on_transcript,
+                        listening_callback=self._on_listening,
+                    )
                 except Exception as e:
                     self.logger.warning(f"processor.start 异常: {e}")
                     return
@@ -207,7 +212,25 @@ class AudioModule(BaseModule):
         }
         if ev.is_final:
             self.logger.info(f"[final] {ev.text}")
-            self.publish(self._topics.get("audio_command", "av/audio/command"), payload)
+            if _ASR_BACKEND == "funasr_2pass":
+                # funasr 2pass offline 段已带 ITN 标点，绕过 punctuator 防双标点。
+                # 发兼容 punctuator schema 的 payload 到 av/audio/command_punctuated。
+                punctuated_payload = {
+                    "topic_type": "event",
+                    "payload": {
+                        "event_type": "transcription_punctuated",
+                        "text": ev.text,
+                        "text_original": ev.text,
+                        "seq_id": ev.seq_id,
+                        "is_final": True,
+                        "raw_mode": ev.raw_mode,
+                        "ts": ev.ts,
+                        "punct_latency_ms": 0.0,
+                    },
+                }
+                self.publish("av/audio/command_punctuated", punctuated_payload)
+            else:
+                self.publish(self._topics.get("audio_command", "av/audio/command"), payload)
         else:
             self.publish(self._topics.get("audio_partial", "av/audio/partial"), payload)
 

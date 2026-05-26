@@ -200,42 +200,24 @@
     if (el) { el.textContent = text; el.className = "pill " + cls; }
   }
 
-  // 5/20 D 仿 partial UX：handleListening 实现 ───────────────────────
-  // VAD speaking 触发 state=start → 转写卡底部浮显 "...正在听 X.Xs"
-  // 计时器每 200ms 更新文本，silence 触发 state=end 清掉。
-  // 5/20 fix（上下跳）：absolute 浮在 card 底部，不占 flow 空间，final 内容稳定不抖。
-  //   半透明 backdrop 让 indicator 可读（叠在 final 上）。
-  let _listeningTimer = null;
-  let _listeningStartMs = 0;
+  // 5/21 转写卡 badge 三态联动：
+  //   audio_processor.running=false  → "已停止" .error（disable 或进程 stuck 兜底）
+  //   running=true + listening start → "正在听" .ok
+  //   running=true + listening end   → "等待" 默认
+  // 5/20 audio_processor 5.5GB stuck 事件暴露：disable 路径不发 listening end，
+  // 必须用 running 状态兜底；listening start 在 stopped 态被忽略避免抢回。
+  let _txRunning = true;  // 默认 audio_processor 在跑（与后端 default 一致）
+  function setTranscriptBadge(text, cls) {
+    const badge = document.getElementById("overview-transcript-badge");
+    if (!badge) return;
+    badge.textContent = text;
+    badge.className = "module-badge" + (cls ? " " + cls : "");
+  }
   function handleListening(ev) {
     if (!ev || !ev.state) return;
-    const card = document.querySelector('[data-overview="transcript"] .strip-card-body');
-    if (!card) return;
-    // listening indicator 用 absolute 定位，card 必须是 positioned 容器
-    if (card.style.position !== 'relative') card.style.position = 'relative';
-    if (ev.state === "start") {
-      _listeningStartMs = Date.now();
-      if (_listeningTimer) clearInterval(_listeningTimer);
-      _listeningTimer = setInterval(() => {
-        let liveEl = card.querySelector('.tx-listening-indicator');
-        if (!liveEl) {
-          liveEl = document.createElement('div');
-          liveEl.className = 'tx-listening-indicator';
-          // absolute 浮在 card 底部：不占 flow，不导致 final 上下跳
-          // backdrop 半透明蓝灰让文字叠在历史 final 上仍可读
-          liveEl.style.cssText = 'position:absolute;bottom:4px;left:8px;right:8px;padding:3px 8px;color:#7ad;opacity:0.9;font-style:italic;font-size:0.92em;background:rgba(8,24,40,0.78);border-radius:4px;text-align:center;pointer-events:none;animation:pulse 1.5s infinite;';
-          card.appendChild(liveEl);
-        }
-        const sec = ((Date.now() - _listeningStartMs) / 1000).toFixed(1);
-        liveEl.textContent = `…正在听 ${sec}s`;
-        // 5/20 fix：移除 card.scrollTop（absolute 元素不影响 scrollHeight，
-        // 强行 scroll 会让 final 上屏瞬间被推走）
-      }, 200);
-    } else if (ev.state === "end") {
-      if (_listeningTimer) { clearInterval(_listeningTimer); _listeningTimer = null; }
-      const liveEl = card.querySelector('.tx-listening-indicator');
-      if (liveEl) liveEl.remove();
-    }
+    if (!_txRunning) return;  // stopped 态忽略 listening 事件
+    if (ev.state === "start") setTranscriptBadge("正在听", "ok");
+    else if (ev.state === "end") setTranscriptBadge("等待", "");
   }
 
   function handleDiscovery(ev) {
@@ -254,10 +236,16 @@
     }
   }
   function setTxStopButtonState(running) {
+    _txRunning = running;
     const btn = document.querySelector("[data-tx-stop]");
-    if (!btn) return;
-    btn.textContent = running ? "⏸ 停止" : "▶ 启动";
-    btn.classList.toggle("stop", running);  // 红色仅在"停止"态（点击会停）
+    if (btn) {
+      btn.textContent = running ? "⏸ 停止" : "▶ 启动";
+      btn.classList.toggle("stop", running);  // 红色仅在"停止"态（点击会停）
+    }
+    // running=false 时 badge 强制回 "已停止"（disable 不发 listening end 的兜底）
+    // running=true 时回到默认 "等待"，等下一个 listening start 翻成 "正在听"
+    if (!running) setTranscriptBadge("已停止", "error");
+    else setTranscriptBadge("等待", "");
   }
   function setIntentToggleState(on) {
     // 意图判断开关在意图卡 module-header（A8 从 body 底挪到 header；按钮少不值得占一行）
@@ -877,6 +865,9 @@
   function pushOverviewTranscript(ev) {
     const card = document.querySelector('[data-overview="transcript"] .strip-card-body');
     if (!card) return;
+    // 5/21 user 抱怨"上翻历史会被拽回底部" — 在所有 DOM 修改前 capture user 是否仍在底部，
+    // 只有在底部附近才 auto-follow，user 上翻时尊重 scroll 位置不动。
+    const atBottom = card.scrollHeight - card.scrollTop - card.clientHeight < 50;
     clearEmpty(card);
     pulseEl(card.closest(".strip-card"));
 
@@ -927,7 +918,7 @@
       span.textContent = ev.text;
       liveEl.appendChild(span);
     }
-    card.scrollTop = card.scrollHeight;
+    if (atBottom) card.scrollTop = card.scrollHeight;
   }
   function pushOverviewIntent(body) {
     const card = document.querySelector('[data-overview="intent"] .strip-card-body');

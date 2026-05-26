@@ -101,7 +101,7 @@ class AudioProcessor:
 
     # ── 启动/停止 ─────────────────────────────────────────────────────
 
-    def start(self, callback: Optional[Callable[[TranscriptEvent], None]] = None):
+    def start(self, callback: Optional[Callable[[TranscriptEvent], None]] = None, listening_callback=None):
         self._callback = callback
         # 重置 stop_event + 上次会话残留 state，防 disable→enable 时新 ws/watchdog/send 线程
         # 一启动就因 _stop_event 仍 set 而即时退出（5/11 销售来访 15:05 enable 后 6.5min 静默假活的根因）。
