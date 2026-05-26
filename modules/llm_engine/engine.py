@@ -281,6 +281,16 @@ class LLMEngine:
         self._location_lookup = _build_location_lookup_from_catalog()
         self._fastpath_index = _build_fastpath_index_from_catalog()
         self._default_location_id = default_location
+        # 5/26: also_in 索引 — catalog 设计同一物理设备可挂多 location；
+        # 用于 location filter 接受 default_location ∈ cmd.also_in 的命令
+        # （例 BarCounter_Curtain_Open.also_in=[2FDiningTable]，default=2FDiningTable 时 "打开窗帘" 应通过）
+        try:
+            _cat_path = Path(__file__).parent.parent.parent / "config" / "device_catalog.json"
+            _cat = json.loads(_cat_path.read_text(encoding="utf-8")) if _cat_path.exists() else {}
+            self._cmd_to_also_in = {c["id"]: set(c.get("also_in") or []) for c in _cat.get("commands", []) if c.get("id")}
+        except Exception as _e:
+            logger.warning(f"also_in 索引构建失败: {_e}")
+            self._cmd_to_also_in = {}
         logger.info(f"control 关键词集（catalog derive）：{len(self._keywords)} 个")
         logger.info(f"cmd 白名单（catalog derive）：{len(self._cmd_whitelist)} 个")
         logger.info(f"location 集（地点反幻觉过滤）：{len(self._location_lookup)} 个，default={default_location or '<未设>'}")
@@ -534,11 +544,18 @@ class LLMEngine:
                 loc_id = max(matches, key=len)
                 loc_label = self._location_lookup.get(loc_id, "")
                 # _global 是合法的全局指令前缀，不需要在 text 出现
+                # 5/26: also_in 放行 — cmd.also_in 含本机 default_location 视为合法
+                # （吧台窗帘 also_in=[2FDiningTable]，本机默认二楼餐桌时 "打开窗帘" 应通过）
+                also_in_match = bool(
+                    self._default_location_id
+                    and self._default_location_id in self._cmd_to_also_in.get(cmd_str, set())
+                )
                 if loc_id != "_global" and loc_id != self._default_location_id \
+                        and not also_in_match \
                         and loc_label and loc_label not in text:
                     logger.warning(
                         f"location hallucinate 拒绝：cmd={cmd_str!r} 但原文 {text!r} "
-                        f"不含地点'{loc_label}'，也非 default_location"
+                        f"不含地点'{loc_label}'，也非 default_location，也非 also_in"
                     )
                     self._last_cmd_attempt = cmd_str
                     self._last_miss_reason = "filter_rejected_location"
