@@ -260,6 +260,46 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 
 更早进度见 `ARCHIVE_2026Q2.md`。
 
+### 2026-05-26 — ASR funasr 2pass D2 + 全链路端到端 + 全程实测调优
+
+**本次推进（一天完成 ASR 重构 + 6 个 commit + 2 个 tag 上 GitHub）：**
+- 晨：funasr 2pass docker arm64 镜像 save→scp→load 上 3588（3.0GB tar / 1.7GB 模型），server listen 10095 后 partial 1.71s / final 6.84s 实测通过 `funasr-2pass-d2-stable-20260526`
+- 切 audio_processor backend = funasr_2pass ws 客户端：**ap RSS 6.3GB → 104MB（净省 6 GB），系统 mem_avail 1.6GB → 7.4GB**；supervisor 重启 9 模块 30s 不可用窗口
+- 双标点 fix：funasr 自带 ITN 标点 + punctuator 二次加 punc → audio_processor 在 funasr backend 下直发 `av/audio/command_punctuated` 绕过 punctuator（commit `6544aca`）
+- 副作用补：llm_engine 订阅 hardcoded `av/audio/command` 导致意图链路收不到 → 按 backend 智能切订阅 topic（commit `34e8443`）
+- location filter 升级：支持 catalog `also_in` 共享路由（吧台窗帘 also_in=2FDiningTable 等）— `58103de`
+- 后置 rewrite 实施：LLM 1.5B 偷换地点时强制纠回 default_location 等价 cmd — `3d459ff`
+- **🚨 default_location + rewrite false positive 暴露**：user 跟同事聊"话筒维修返修工厂"被 LLM 误判 device_control 下发 `2FDiningTable_AirConditioner_TempDown` 真改空调 → 立即清空 default_location 进入 strict mode
+- Jetson 视觉深思链路修通：scene_analyzer 从 `~/av_unified_mvp_jetson/` 起（不是 `~/av_unified_mvp/`，main_jetson.py 才管），qwen2.5vl-Q4_K_M VLM 首次 35s / 后续 11-15s 出场景描述，dashboard 视觉深思 panel 真数据出现
+- 跨主机 escalate 链路实测：3588 拒（filter_rejected_whitelist）→ Mac mini ollama qwen3.5:4b 二次处理 → 回发 av/control 含 `escalated_from=3588`，correlation_id 正确传递
+- node-red 3 个销售 demo flow cherry-pick from origin (`d3a254c`)
+- dashboard 右下角 demo FAB 删除（外出演示对 mic 真说话不用按钮）— `5c767db`
+- tag `funasr-d2-with-vlm-strict-20260526` 打在 `5c767db` 作为今日稳定究极点
+- 全程 push GitHub 走 Mac LadderMac SOCKS5 9091（HTTP 9090 git SSL 不稳，3588 直连 push 卡死）
+
+**已完成验收准则（spike plan 8 项）：**
+- partial 延迟 1.71s ✓ / final 6.84s ✓ / RSS 切后 104MB ✓ / server RSS 3.44GB ✓ / 文本质量 ITN 标点准 ✓ / 段开头乱码消失 ✓
+- 回滚演练未做（理论 < 60s，config 备份在 `~/av_unified_mvp/config/system_config.yaml.snapshot-20260526-stable`）
+
+**未完成 / 已识别 backlog：**
+- iCloud → `~/code/` 仓库迁移仍未做（icloud-git-hazard 5/21 实锤过 `.git/objects` 静默清空）
+- LLM 误触发防护（入口 action-word gate / LLM 输出格式重设计为 `{device, action, location?}` 让 system 组装）— 解锁 default_location 安全恢复的前提
+- ASR funasr `hotwords` 偏置为空，可加 `'餐桌 30 灯带 20 窗帘 20 吧台 30 工程部 30 会议室 20'` 改善 "财神→餐桌" 错字
+- origin/sprint behind 8 commits 待处理（5/26 规则：丢 `eb93a26` `f08b2e3` `175f3ed` 三个语音相关；cherry-pick `58bc05b` 已做；其他 `4ea2e92` `aaa1e88` `82e9843` `c17ec53` 内容已实质包含或纯文档）
+- Jetson VLM keep_alive 未常驻，每次冷加载 11-14s — ollama config 调
+- 长跑 sustain：funasr backend 切换后 sustain_watch 自动跟新 ap_pid 4063857，RSS 漂移待 24h+ 复盘
+- 演示包 + 销售材料 P0 之外的迭代
+
+**下次接手所需上下文：**
+- **stable tag**：`funasr-d2-with-vlm-strict-20260526` → `5c767db`（GitHub 有，git checkout 即回滚）
+- **当前 feat 分支**：`feat/funasr-ws-backend-stable-20260526` tip `5c767db`，origin/sprint 不动
+- **config 当前关键**：`system.default_location: ''`（strict mode 防 false positive）；切回不安全的 default_location=2FDiningTable 必须先做 action-word gate
+- **Jetson scene_analyzer 启动方式**：`PYTHONPATH=/home/jetson/av_unified_mvp_jetson nohup python -m modules.scene_analyzer.main > /tmp/scene_analyzer.log 2>&1 &`
+- **3588 supervisor 重启方式**：`AV_LLM_BACKEND=rknn AV_ASR_BACKEND=funasr_2pass setsid nohup python main.py >> /tmp/main_supervisor.log 2>&1 < /dev/null &`
+- **memory 入口**：`project_funasr_d2_stable_20260526.md` 含完整命令 + 陷阱
+
+---
+
 ### 2026-05-18 — 新阶段启动：两阶段框架定调 + 文档重构
 - 战略定位写入第一行："AI 技术底座 + A/B/C 三层次（架构 = 形态对应）"
 - §1.6 三步框架升级为 §3 两阶段框架
