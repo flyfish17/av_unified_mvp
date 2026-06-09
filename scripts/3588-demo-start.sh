@@ -69,6 +69,31 @@ ok "venv 解释器: $VENV_PY"
 [ -f "$HOME/rkllm-poc/artifacts/Qwen2.5-1.5B-Instruct_W8A8_RK3588.rkllm" ] \
     || warn "RKLLM 模型未找到 — LLM 会回退到 ollama CPU"
 
+# ── 0.5 默认录音设备：确保 ALSA default capture 指向 USB 麦克风 ─────────
+# funasr_2pass 路径的 processor.py 用 sounddevice 默认输入（无 device= 参数）。
+# 板子有板载 codec(card0,无麦) + USB 麦(C920)；无 ~/.asoundrc 时 ALSA default
+# 落到 card0 → 录到纯静音 → 转写全空（2026-06-09 实锤的重启回归坑）。
+# 这里动态探测 USB 麦卡号并写 asym default（只改录音，playback 保持板载 card0）。
+hdr "0.5 默认录音设备（ASR 麦克风）"
+MIC_CARD="$(arecord -l 2>/dev/null | grep -iE 'C920|USB Audio' | head -1 | sed -E 's/^card ([0-9]+):.*/\1/')"
+if [ -z "$MIC_CARD" ]; then
+    warn "未发现 USB 麦克风（C920）— ASR 会录到板载哑设备，转写将为空"
+elif [ ! -f "$HOME/.asoundrc" ] || ! grep -q "hw:${MIC_CARD},0" "$HOME/.asoundrc" 2>/dev/null; then
+    say "写入 ~/.asoundrc：默认录音 → USB 麦克风 card${MIC_CARD}"
+    cat > "$HOME/.asoundrc" <<ASOUND
+# av-demo 自动维护：默认录音指向 USB 麦克风(card${MIC_CARD})，playback 保持板载 card0
+# funasr 路径用 sd 默认输入，板载 card0 无麦→静音，故必须重定向录音 default
+pcm.!default {
+    type asym
+    playback.pcm { type plug; slave.pcm "hw:0,0" }
+    capture.pcm  { type plug; slave.pcm "hw:${MIC_CARD},0" }
+}
+ASOUND
+    ok "~/.asoundrc 已就绪（capture=hw:${MIC_CARD},0）"
+else
+    ok "~/.asoundrc 已存在且指向 USB 麦克风（card${MIC_CARD}）"
+fi
+
 # ── 1. 外部依赖（mosquitto / ollama / Node-RED） ────────────────────────
 hdr "1. 外部服务"
 
@@ -152,7 +177,7 @@ fi
 
 if [ -z "$EXISTING_PID" ] && [ "$STATUS_ONLY" != "1" ]; then
     AV_RKNN_BACKEND="${AV_RKNN_BACKEND:-0}"
-    say "启动 supervisor（AV_LLM_BACKEND=rknn / AV_ASR_BACKEND=sense_voice_arm / AV_RKNN_BACKEND=$AV_RKNN_BACKEND）"
+    say "启动 supervisor（AV_LLM_BACKEND=rknn / AV_ASR_BACKEND=funasr_2pass / AV_RKNN_BACKEND=$AV_RKNN_BACKEND）"
     cd "$PROJECT_DIR" || { fail "cd $PROJECT_DIR 失败"; exit 1; }
     # 轮换旧日志：保留 5 份历史
     if [ -f "$LOG_FILE" ]; then
@@ -160,7 +185,7 @@ if [ -z "$EXISTING_PID" ] && [ "$STATUS_ONLY" != "1" ]; then
         ls -1t "${LOG_FILE}".* 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
     fi
     AV_LLM_BACKEND=rknn \
-    AV_ASR_BACKEND=sense_voice_arm \
+    AV_ASR_BACKEND=funasr_2pass \
     AV_RKNN_BACKEND="$AV_RKNN_BACKEND" \
     nohup "$VENV_PY" main.py > "$LOG_FILE" 2>&1 &
     sleep 2
