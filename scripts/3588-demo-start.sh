@@ -149,6 +149,20 @@ else
     fi
 fi
 
+# ── 1.5 等待 FunASR 容器就绪（funasr_2pass 后端依赖）─────────────────────
+# 重启竞态：funasr 容器加载模型(paraformer+vad+punc+lm+itn)需 ~30-40s。若 supervisor
+# 先起,audio_processor 连不上 funasr→5 次重连失败后降级 local_offline(非 2pass + 与
+# dashboard 2pass partial/final 渲染不匹配)。故在拉 supervisor 前轮询 10095 ws-ready
+# (就绪时 HTTP 426)。2026-06-09 真实重启实锤的回归。
+hdr "1.5 等待 FunASR 容器就绪（最多 90s）"
+FUNASR_READY=0
+for i in $(seq 1 90); do
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:10095/ 2>/dev/null || echo 000)"
+    if [ "$code" = "426" ]; then FUNASR_READY=1; ok "FunASR 就绪（等待 ${i}s）"; break; fi
+    sleep 1
+done
+[ "$FUNASR_READY" = "1" ] || warn "FunASR 90s 未就绪 — audio_processor 会降级 local_offline,转写非 2pass"
+
 # ── 2. supervisor 状态 ────────────────────────────────────────────────
 hdr "2. main.py supervisor"
 
