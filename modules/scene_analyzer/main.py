@@ -156,7 +156,7 @@ class SceneAnalyzerModule(BaseModule):
         body = {
             "model": self._sa["vlm_model"],
             "prompt": "",  # 空 prompt，仅触发模型加载/保活
-            "stream": False,
+            "stream": False, "think": False,
             "options": {"num_predict": 1},
             "keep_alive": self._sa["keep_alive"],
         }
@@ -231,6 +231,19 @@ class SceneAnalyzerModule(BaseModule):
             if jpg is None:
                 self._stats["snapshot_failed"] += 1
                 return
+            # 下采样大图：qwen3.5 动态分辨率对 1080p 会暴增 vision token(prompt_eval ~38s)。
+            # 缩到 max 768px → prompt_eval 降到 ~2s。失败回退原图。(2026-06-10)
+            try:
+                from io import BytesIO
+                from PIL import Image
+                _im = Image.open(BytesIO(jpg))
+                if max(_im.size) > 768:
+                    _im.thumbnail((768, 768))
+                    _buf = BytesIO()
+                    _im.convert("RGB").save(_buf, "JPEG", quality=85)
+                    jpg = _buf.getvalue()
+            except Exception as _e:
+                self.logger.warning(f"下采样失败,用原图: {_e}")
             img_b64 = base64.b64encode(jpg).decode("ascii")
             t_vlm0 = time.monotonic()
             result = self._call_vlm(img_b64)
@@ -326,7 +339,7 @@ class SceneAnalyzerModule(BaseModule):
             "model": self._sa["vlm_model"],
             "prompt": self._sa["prompt"],
             "images": [img_b64],
-            "stream": False,
+            "stream": False, "think": False,
             "options": {"num_predict": self._sa["num_predict"]},
             "keep_alive": self._sa["keep_alive"],  # 推理后保活，覆盖 ollama 默认 5m TTL
         }
@@ -355,7 +368,7 @@ class SceneAnalyzerModule(BaseModule):
         body = {
             "model": self._sa["vlm_model"],
             "prompt": prompt,
-            "stream": False,
+            "stream": False, "think": False,
             "options": {"num_predict": self._sa["diff_num_predict"]},
             "keep_alive": self._sa["keep_alive"],
         }
