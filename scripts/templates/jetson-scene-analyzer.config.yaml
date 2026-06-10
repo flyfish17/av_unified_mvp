@@ -1,0 +1,18 @@
+# Jetson 视觉深思 scene_analyzer 最小 config 模板
+# 部署到 ~/av_scene/config/system_config.yaml
+#
+# scene_analyzer 订中控(3588) broker 的 av/video/key_event → 拉 3588 mjpeg snapshot(5051)
+# → 喂本机 ollama VLM → 发 av/video/scene_analysis 回 3588 broker 给 dashboard。
+mqtt:
+  broker: 192.168.5.6        # 中控 broker(3588)。注意：不是 127.0.0.1(本机 broker 收不到 3588 的 detect)
+  port: 1883
+  client_id: av_jetson_001
+scene_analyzer:
+  enabled: true
+  vlm_model: qwen3.5:0.8b    # 多模态 0.8B，Orin Nano GPU ~5s/张。需 ollama>=0.30。
+                             # qwen3.5 默认开 thinking，main.py 已在 VLM 调用加 think:false（否则空响应）。
+  vlm_timeout_s: 60
+  mem_min_mb: 120            # qwen3.5 仅 ~1GB，守门阈值可低
+  keep_warm_interval_s: 180  # 保活，避免稀疏触发反复冷启
+  # 其余走 modules/scene_analyzer/main.py 的 DEFAULTS（detect_topic=av/video/key_event,
+  # mjpeg_base_url 由 video_processor discovery 自动解析到 3588 等）
