@@ -7,8 +7,10 @@ ARM 端（RK3588）转写实现 — 仿 demo pro_av_dashboard_NPU.py 同款架�
 - VAD 简化：rms > silence_threshold 进 speaking，连续 silence_chunks 静音后定段送 ASR
 
 与 Mac processor.AudioProcessor 接口对齐：start(callback) / stop() / get_pcm_buffer() / sample_rate
-无 2pass-online partial — 前端只收到 is_final=True 事件（raw_mode="sense_voice_offline"）。
-前端 transcript_seq.js / dashboard.js 在 ARM 端表现为"段落级追加"而非"逐字蹦"。
+2026-07-03 起补"仿 2pass partial"：VAD 说话期间每 partial_interval_ms 对已积累音频
+重跑一次 SenseVoice（RTF ~0.06，15s 段也只 ~850ms），按公共前缀取增量发 is_final=False
+事件 —— 前端观感对齐 funasr 2pass：灰词持续蹦出，句尾 final 整句修正变实。
+增量重解码可能改写前文（灰区短暂重复/错字），final 整段替换自愈，与讯飞观感一致。
 
 Mic 设备选择：query_devices 找 C920 / Logitech 字串；找不到 fallback plughw:2,0（demo 同款）。
 """
@@ -70,6 +72,12 @@ class AudioProcessorARM:
         # 1-char 输出几乎都是噪声，丢弃。Mac/Jetson funasr CPU 路径也共用此过滤，
         # 即使他们幻听少 — 单字结果对下游意图识别也没用。
         self.min_text_chars = int(funasr_cfg.get("min_text_chars", 2))
+        # 仿 2pass partial：说话中每 N ms 对已积累段重解码发增量灰词；0=关
+        partial_interval_ms = int(funasr_cfg.get("partial_interval_ms", 1200))
+        self._partial_interval_chunks = (
+            max(1, partial_interval_ms // self.chunk_ms) if partial_interval_ms > 0 else 0
+        )
+        self._partial_text = ""  # 当前段已发 partial 的累计全文（增量 diff 基准）
 
         # 降噪流水线（与 Mac processor.py 一致）
         self._denoise_hp_sos = signal.butter(10, 100, btype='hp', fs=self.sample_rate, output='sos')
@@ -267,6 +275,7 @@ class AudioProcessorARM:
         was_speaking = False  # 用于 detect speaking/silence 状态转换，触发 listening 心跳
         silence_count = 0
         speech_count = 0
+        chunks_since_partial = 0  # 仿 2pass partial：距上次增量解码的帧数
         prev_samples = None  # 句头 50ms 提前包含，防吞首字（demo 同款）
 
         while not self._stop_event.is_set():
@@ -281,10 +290,12 @@ class AudioProcessorARM:
                 buf.append(samples)
                 speech_count += 1
                 silence_count = 0
+                chunks_since_partial += 1
                 speaking = True
             elif speaking:
                 buf.append(samples)
                 silence_count += 1
+                chunks_since_partial += 1
                 if silence_count >= self.silence_chunks or len(buf) >= self.max_speech_chunks:
                     if speech_count >= self.min_speech_chunks:
                         self._infer_segment(np.concatenate(buf))
@@ -292,6 +303,18 @@ class AudioProcessorARM:
                     speaking = False
                     silence_count = 0
                     speech_count = 0
+                    chunks_since_partial = 0
+
+            # 仿 2pass partial：说话中每 partial_interval 对已积累段重解码发增量灰词。
+            # 解码阻塞 worker ~0.3-0.9s 期间帧继续进 _audio_q（256 帧 ≈ 15s 深）不丢。
+            if (
+                speaking
+                and self._partial_interval_chunks
+                and speech_count >= self.min_speech_chunks
+                and chunks_since_partial >= self._partial_interval_chunks
+            ):
+                self._emit_partial(np.concatenate(buf))
+                chunks_since_partial = 0
 
             # D 仿 partial UX：VAD 状态转换触发 listening 心跳（speaking start / end）
             # dashboard 收到 start 后启动 "...正在听 X.Xs" 视觉占位 + 计时器
@@ -313,7 +336,53 @@ class AudioProcessorARM:
             if not speaking:
                 prev_samples = samples
 
+    def _emit_partial(self, audio_f32: np.ndarray) -> None:
+        """说话中对已积累段重解码，与上次 partial 全文取公共前缀后发增量（灰词）。
+        偶发前文改写会让灰区短暂重复，final 整段替换自愈；段被 final-drop 时
+        灰词残留到下一句 final 才清 —— 罕见且自愈，不为此加状态。"""
+        try:
+            t0 = time.time()
+            if self._rknn_backend is not None:
+                text = self._rknn_backend.recognize(audio_f32, self.sample_rate)
+            else:
+                res = self._model.generate(input=audio_f32, batch_size=1)
+                if not res or len(res) == 0:
+                    return
+                text = _TAG_RE.sub("", res[0].get("text", "")).strip()
+            if not text or len(text) < self.min_text_chars:
+                return
+            prev = self._partial_text
+            if text == prev:
+                return
+            i = 0
+            m = min(len(prev), len(text))
+            while i < m and prev[i] == text[i]:
+                i += 1
+            delta = text[i:]
+            if not delta:
+                return
+            self._partial_text = text
+            logger.info(
+                f"[partial] +{delta} (全文 {len(text)} 字, "
+                f"{(time.time()-t0)*1000:.0f}ms, {len(audio_f32)/self.sample_rate:.1f}s 音频)"
+            )
+            ev = TranscriptEvent(
+                text=delta,
+                is_final=False,
+                seq_id=self._seq,
+                ts=time.time(),
+                raw_mode="sense_voice_partial",
+            )
+            if self._callback:
+                try:
+                    self._callback(ev)
+                except Exception as e:
+                    logger.error(f"partial callback 异常: {e}")
+        except Exception as e:
+            logger.error(f"partial 识别异常 {type(e).__name__}: {e}")
+
     def _infer_segment(self, audio_f32: np.ndarray) -> None:
+        self._partial_text = ""  # 段关闭，重置 partial diff 基准
         try:
             t0 = time.time()
             if self._rknn_backend is not None:
