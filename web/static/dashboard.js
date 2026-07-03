@@ -894,12 +894,29 @@
     if (ev.is_final) {
       const chunk = ev.text || "";
       if (chunk) {
-        // final 定稿：包成 tx-final-flash span 追加（绿色短闪 0.5s fade 回主色）
-        // 不再 finalsEl.textContent = 全文（会刷掉前面 span 的动画），改 appendChild
-        const span = document.createElement("span");
-        span.className = "tx-final-flash";
-        span.textContent = chunk;
-        finalsEl.appendChild(span);
+        if (!liveEl.childNodes.length) {
+          // sense_voice 离线路径无 partial，final 直达空 live：逐字定时显示 +
+          // 逐字绿闪，对齐 funasr 2pass 逐字蹦观感（transcript_seq.js 同款）
+          const step = Math.min(45, Math.max(15, 900 / Math.max(chunk.length, 1)));
+          [...chunk].forEach((ch, i) => {
+            const span = document.createElement("span");
+            span.textContent = ch;
+            span.style.visibility = "hidden";
+            finalsEl.appendChild(span);
+            setTimeout(() => {
+              span.style.visibility = "";
+              span.className = "tx-final-flash";
+              if (atBottom) card.scrollTop = card.scrollHeight;
+            }, i * step);
+          });
+        } else {
+          // final 定稿：包成 tx-final-flash span 追加（绿色短闪 0.5s fade 回主色）
+          // 不再 finalsEl.textContent = 全文（会刷掉前面 span 的动画），改 appendChild
+          const span = document.createElement("span");
+          span.className = "tx-final-flash";
+          span.textContent = chunk;
+          finalsEl.appendChild(span);
+        }
       }
       _txState.finalsText += chunk;
       liveEl.textContent = "";
