@@ -289,10 +289,15 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 - 新事实：DNC 麦已换**真罗技 C920（046d:0892）**，pulse 40% 下 VAD 正常触发（旧杂牌 40% 触发不了、45% 才行）——增益按设备存于 pulse tdb，换麦后 45% 不再适用，现固化 40%。
 - **🔴 开机竞态实锤（reboot#1 抓到）**：冷启动后 pulse default source 落到板载 `ES8388_Mic`（无麦）→ audio_processor 录全零（RMS 0.0000），且增益固化步骤把 40% 设给了错误的 source——这是 3588「6/9 重启录静音回归」的 pulse 版本。修复：demo-start.sh 增益固化步不信任 default source，显式扫 `pactl list sources` 找 USB 麦 → `set-default-source` + 定增益（等 USB 枚举最多 15s）。
 
+**当日下午追加（user 实测反馈驱动，均已实测 + 入仓）：**
+- 逐字蹦补漏：主转写面板走 dashboard.js 渲染路径，首轮只改了 transcript_seq.js → "整句蹦"。补同款逐字路径（`3592722`）。前端 JS 改动必须提醒 user 硬刷新浏览器。
+- **仿 2pass partial**（`e36968e`）：user 要求对齐 3588 观感"灰词持续出、整句修正变实"。processor_arm 说话中每 `partial_interval_ms`(默认1200) 对已积累段重跑 SenseVoice（单次 ~370ms 实测），公共前缀 diff 发增量 av/audio/partial；final 整段替换自愈中途改写（实测「申公豹→申公道」正确修正）。设 0 关闭。3588 funasr 后端不走此文件。
+- C920 还回 3588，DNC 换回杂牌 webcam（32e6:9221）→ 增益按 7/1 对它的标定调回 45%（av-demo env 同步）。user "打开 docker" 与转写无关（DNC docker 空、funasr 镜像已删），已澄清。
+- **固化**：tag `dnc-sensevoice-partial-stable-20260703`（`e36968e`）；固化 reboot 终验全绿——冷启动零人工：backend/增益/default source/partial 全部与固化态一致，开机后真实语音即出 partial→final。
+
 **未完成 / 遗留：**
-- reboot 终验进行中（第一次 reboot 因 pkill 自匹配未真正下发，已重发）；user 侧验收：dashboard 转写逐字蹦 + node-red 面板显示。
 - 转写质量粗（字面错误）不在本期：SenseVoice-RKNN 无 hotword 位，等瑞峰 4 问后定投入（demo 近讲 20-30cm + fast-path 句式）。
-- 仓库 3 处改动未 commit（等 user 发话）。
+- DNC 上多插了一个 USB 音频设备（card5, 0x345f:0x2109）未启用；若是会议麦可考虑切采集源。
 
 **下次接手所需上下文：**
 - DNC=proembed@192.168.5.62（密码 xc），supervisor 由 av-demo.service 开机拉起，node-red 由 user unit 拉起（`systemctl --user status node-red`）。
