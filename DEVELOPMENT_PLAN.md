@@ -211,15 +211,33 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 | P0.9 | CAM++ + ct-punc 3588 spike — Phase A ✅ ct-punc 过线 / Phase B ⏸ 等双人录音 | 🟡 部分 |
 | P1.1 | `modules/punctuator/` — ct-punc int8 ONNX 标点后处理（端到端 + 真音频 30+ 条已验） | ✅ 5/18 |
 | **P1.3** | **Supervisor 订阅 punctuated topic + dashboard 重复 bug fix（streams=[]）** | ✅ 5/18 |
-| P1.2 | `modules/speaker_tagger/` — silero-vad 切片 + CAM++ embedding + 聚类 | ⏳ 等 Phase B 数据 |
+| **P1.2-pre** | **预研前置：先验 FunASR 自带分离 + sherpa-onnx 3588，再定 P1.2 是否自研**（见下"P1.2 预研前置"）| ⏳ 预研先行 |
+| P1.2 | `modules/speaker_tagger/` — silero-vad 切片 + CAM++ embedding + 聚类（**可能被 P1.2-pre 降级为"升级+集成"**）| ⏳ 等预研 + Phase B 数据 |
 | P1.3b | 转写卡说话人 tag 显示（dashboard 改造）| ⏳ P1.2 后 |
 | P1.4 | 纪要 UI 提示 + 触发体验优化 | ⏳ |
 | P1.5 | 销售部署 README（`git checkout tag` 后 1 命令启动指南）| ⏳ |
 | P1.6 | Jetson CUDA 语音验证报告（独立窗口完成）| ⏳ |
+| **P1.7** | **人名修复回流 3588 — SenseVoice hotword 接口预研先行**（见下"回流说明"）| ⏳ 预研先行 |
+| **P1.8** | **英文缩写后处理移植 3588**（`apply_postprocess_rules` 搬进 `AudioProcessorARM` emit）| ⏳ 小改 |
 | P2.1 | video_processor CPU 减压（config 调 inference_fps / jpeg_quality / 单路 ⏸）| 看是否影响语音 |
 | P2.2 | 控制指令"离线"误判修复（dashboard.js 多 client_id 状态合并）| 接受 or 修 |
 
 **不做 / 仅技术储备**：双工对讲（持续 GitHub 关注） · 知识库 + 问答（另立项目）
+
+**P1.2 预研前置（2026-06-18 GitHub 调研后加 —— 别先自研聚类，先验现成）**：
+- **动机**：2026-05 上游已变天。FunASR v1.3.3 / SenseVoice 已**内置说话人分离**（SenseVoice+VAD+CAM+++punc → 逐句 Speaker 0/1，无需外挂 pyannote）；sherpa-onnx 官方支持 **RK3588 / RK NPU / 昇腾 NPU** 的纯 ONNX 离线分离 + 现成 RK3588 SenseVoice 模型。P1.2 的"从零造 `speaker_tagger`（CAM++ 聚类）"很可能**缩水成"升级 + 集成"**。
+- **预研 A — FunASR 自带分离**：把仓内 funasr 升到 ≥1.3.3，验 SenseVoice+VAD+CAM++ 逐句 Speaker 标签能否直接出；确认是否进流式 WebSocket 服务（vs 仅离线 AutoModel）。能用 → P1.2 直接砍掉，改"开关 + dashboard tag 显示（P1.3b）"。
+- **预研 B — sherpa-onnx 在 3588**：用 sherpa-onnx 离线分离（pyannote 切分 + 3D-Speaker 声纹，全 ONNX）在 3588 实测 **rtf**；比自己把 pyannote 转 RKNN（task③ 判定为研究项目）省一个数量级。rtf 可接受 → 作 3588 离线分离底座。
+- **判据**：A 或 B 任一过线，P1.2 不自研；都不行，才回退原 CAM++ 聚类自研方案。
+- **gating**：技术储备性质，本期不实施；需 Phase B 双人录音（在 3588）做真机 rtf / 正确率实测。
+- 调研来源见 Mac 演示仓 `docs/research_speaker_diarization_2026-06.md` 及本日 GitHub 调研（FunASR/SenseVoice、k2-fsa/sherpa-onnx、NVIDIA Sortformer）。
+
+**P1.7/P1.8 回流说明（2026-06-18 从 Mac 演示仓 `av_understanding_mac` 的 ①② 回流）**：
+- 源实现（Mac 演示线，已验证 23/23 单测通过）：`config/glossary.yaml`、`config/asr_postprocess_rules.yaml`、`modules/audio_processor/processor.py` 的 `_load_glossary()` / `apply_postprocess_rules()` / `_emit()` 切入。spec 修订记录见 `~/Documents/PKM/04-技/能力提高线/AI底座/演示就绪-3588转写硬伤修复-开发计划.md` 顶部。
+- **关键落差**：3588 跑独立类 `AudioProcessorARM`（不继承 processor.py），且用 **SenseVoiceSmall（AutoModel CPU / RKNN NPU），非 FunASR websocket runtime**。
+  - **P1.7 人名修复在 3588 不能照搬** —— Mac 侧 hotwords 走 FunASR runtime websocket 接口，3588 不吃。**先做 SenseVoice hotword 接口预研**：(a) `AutoModel.generate(hotword=...)` 是否支持 + 效果实测；(b) RKNN backend（`rknn_backend.py` / `SenseVoiceRKNNBackend`）是否支持热词，不支持则人名修复在 NPU 路径可能不可行，需退到 AutoModel CPU 路径或后处理纠错。预研产出结论后再定实施。
+  - **P1.8 缩写后处理可直接移植** —— 纯文本规则函数与后端无关，把 `apply_postprocess_rules` + `config/asr_postprocess_rules.yaml` 搬进 `AudioProcessorARM` 构造 `TranscriptEvent`（processor_arm.py:339 一带）前对 final text 调一次即可，工作量小。
+- **gating**：本期"3588 不混 Mac 演示"，P1.7/P1.8 待 Mac 演示过线后开工；真机验证需 2026-06-16 多人/含英文缩写录音（在 3588）。
 
 **5/18 真音频回归已知现状（不在 P1.1/P1.3 范围）**：
 - 冷启动丢字：点"开始转写"后头几句因 VAD RMS 阈值校准期被判 silence（`processor_arm.py` warmup 逻辑），后续连贯
@@ -259,6 +277,27 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 ## 9. 进度日志（近 10 天）
 
 更早进度见 `ARCHIVE_2026Q2.md`。
+
+### 2026-07-03 — 湖森 DNC 麦克风转写收尾：转写窗 + node-red 面板 + 重启持久化
+
+**本次推进（边界：不影响 3588，折腾只限 DNC；仓库改动均向后兼容、3588 默认行为不变）：**
+- **转写窗断链根因修复**：sense_voice 离线路径 final 只发 `av/audio/command`，而 dashboard 转写 SSE 与 node-red 耳朵 topic 都吃 `av/audio/command_punctuated`，且 DNC/3588 模块清单均无 punctuator → 一直空窗。修法：`modules/audio_processor/main.py` 非 funasr 分支补发 punctuated 兼容 payload（与 funasr 分支同构）。**真实环境人声实锤验证通过**（DNC 抓包 4 条 source=audio_processor / raw_mode=sense_voice_rknn）。
+- **逐字蹦渲染**：`web/static/renderers/transcript_seq.js` — final 落到无 partial 的空气泡时（sense_voice 离线特征）逐字定时显示 + 复用 `.tx-flash` 闪光，对齐 funasr 2pass 观感；funasr 路径行为不变。
+- **`scripts/3588-demo-start.sh` 参数化**（默认值全保 3588 原行为）：`AV_ASR_BACKEND` 可覆盖（DNC=sense_voice_arm，内核缺 CGROUP_BPF 跑不了 funasr docker）、非 funasr 后端跳过 90s funasr 等待、`AV_PLAYBACK_CARD` 可配（DNC ES8388=2）、新增 `AV_MIC_PULSE_VOL` 开机固化 pulse 麦增益（pulse 独占声卡时 amixer 无效，7/1 DNC 实锤）。
+- **DNC node-red 面板照搬 3588**：仓库 `node-red/` userDir + Mac rsync node_modules（135M，含 @flowfuse dashboard 2.0 + 经典 dashboard）；母亮遗留 user unit `node-red.service` 的 `--userDir` 指到仓库目录（原件备份 `.bak-20260703`），MQTT/creator 中控 TCP 均连通。
+- **DNC systemd 自启**：`deploy/systemd/av-demo.service` sed firefly→proembed + DNC env（backend/增益/XDG_RUNTIME_DIR）落 `/etc/systemd/system/`，enable；mosquitto/docker/ollama 均已 enabled，proembed Linger=yes（pulse 开机可用）。
+- 新事实：DNC 麦已换**真罗技 C920（046d:0892）**，pulse 40% 下 VAD 正常触发（旧杂牌 40% 触发不了、45% 才行）——增益按设备存于 pulse tdb，换麦后 45% 不再适用，现固化 40%。
+- **🔴 开机竞态实锤（reboot#1 抓到）**：冷启动后 pulse default source 落到板载 `ES8388_Mic`（无麦）→ audio_processor 录全零（RMS 0.0000），且增益固化步骤把 40% 设给了错误的 source——这是 3588「6/9 重启录静音回归」的 pulse 版本。修复：demo-start.sh 增益固化步不信任 default source，显式扫 `pactl list sources` 找 USB 麦 → `set-default-source` + 定增益（等 USB 枚举最多 15s）。
+
+**未完成 / 遗留：**
+- reboot 终验进行中（第一次 reboot 因 pkill 自匹配未真正下发，已重发）；user 侧验收：dashboard 转写逐字蹦 + node-red 面板显示。
+- 转写质量粗（字面错误）不在本期：SenseVoice-RKNN 无 hotword 位，等瑞峰 4 问后定投入（demo 近讲 20-30cm + fast-path 句式）。
+- 仓库 3 处改动未 commit（等 user 发话）。
+
+**下次接手所需上下文：**
+- DNC=proembed@192.168.5.62（密码 xc），supervisor 由 av-demo.service 开机拉起，node-red 由 user unit 拉起（`systemctl --user status node-red`）。
+- ssh 远程 pkill/pgrep -f 的 pattern 必须用 `[x]` 字符类防自匹配（本日踩 3 次：node-red、mosquitto_sub、pkill 杀掉带同串的远端 shell）。
+- 湖森项目卡：`~/Documents/PKM/02-地/项目/湖森DNC视听理解落地/`（部署方案含 7/1 全 NPU gate 记录）。
 
 ### 2026-05-26 — ASR funasr 2pass D2 + 全链路端到端 + 全程实测调优
 

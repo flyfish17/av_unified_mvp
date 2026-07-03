@@ -30,6 +30,8 @@ DASHBOARD_PORT="${AV_DASHBOARD_PORT:-5050}"
 MJPEG_PORT="${AV_MJPEG_PORT:-5051}"
 EXPECTED_MODULES=9   # audio video llm system network scanner husion control_dispatch keyframe_filter
 WAIT_SECONDS="${AV_WAIT_SECONDS:-45}"
+ASR_BACKEND="${AV_ASR_BACKEND:-funasr_2pass}"   # 无 funasr docker 的板（DNC 内核缺 CGROUP_BPF）：AV_ASR_BACKEND=sense_voice_arm
+PLAYBACK_CARD="${AV_PLAYBACK_CARD:-0}"          # asoundrc playback 卡号（3588 板载=0，DNC ES8388=2）
 
 # ── 颜色 ──────────────────────────────────────────────────────────────
 PURPLE='\033[1;35m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; RED='\033[1;31m'; CYAN='\033[1;36m'; OFF='\033[0m'
@@ -81,17 +83,40 @@ if [ -z "$MIC_CARD" ]; then
 elif [ ! -f "$HOME/.asoundrc" ] || ! grep -q "hw:${MIC_CARD},0" "$HOME/.asoundrc" 2>/dev/null; then
     say "写入 ~/.asoundrc：默认录音 → USB 麦克风 card${MIC_CARD}"
     cat > "$HOME/.asoundrc" <<ASOUND
-# av-demo 自动维护：默认录音指向 USB 麦克风(card${MIC_CARD})，playback 保持板载 card0
-# funasr 路径用 sd 默认输入，板载 card0 无麦→静音，故必须重定向录音 default
+# av-demo 自动维护：默认录音指向 USB 麦克风(card${MIC_CARD})，playback 保持板载 card${PLAYBACK_CARD}
+# funasr 路径用 sd 默认输入，板载声卡无麦→静音，故必须重定向录音 default
 pcm.!default {
     type asym
-    playback.pcm { type plug; slave.pcm "hw:0,0" }
+    playback.pcm { type plug; slave.pcm "hw:${PLAYBACK_CARD},0" }
     capture.pcm  { type plug; slave.pcm "hw:${MIC_CARD},0" }
 }
 ASOUND
     ok "~/.asoundrc 已就绪（capture=hw:${MIC_CARD},0）"
 else
     ok "~/.asoundrc 已存在且指向 USB 麦克风（card${MIC_CARD}）"
+fi
+
+# 麦克风 pulse 增益固化（按板标定，可选）：如 AV_MIC_PULSE_VOL=40%。
+# PulseAudio 独占声卡时 amixer 硬件增益会被锁回，唯一有效增益是 pulse
+# source volume，且它是运行时状态（2026-07-01 DNC 实锤）→ 开机固化在这里。
+# 2026-07-03 reboot 实锤：开机竞态下 pulse default source 会落到板载
+# ES8388_Mic（无麦）→ audio_processor 录全零。故不信 default：显式找 USB 麦
+# source 设为 default 再定增益（asoundrc 卡号探测的 pulse 版，等 USB 枚举最多 15s）。
+if [ -n "${AV_MIC_PULSE_VOL:-}" ] && command -v pactl >/dev/null 2>&1; then
+    MIC_SRC=""
+    for i in $(seq 1 15); do
+        MIC_SRC="$(pactl list sources short 2>/dev/null | grep -iE 'alsa_input.*(usb|c920)' | grep -v monitor | head -1 | cut -f2)"
+        [ -n "$MIC_SRC" ] && break
+        sleep 1
+    done
+    if [ -n "$MIC_SRC" ]; then
+        pactl set-default-source "$MIC_SRC" 2>/dev/null
+        pactl set-source-volume "$MIC_SRC" "$AV_MIC_PULSE_VOL" 2>/dev/null \
+            && ok "pulse 麦就位：default + 增益 → $MIC_SRC @ $AV_MIC_PULSE_VOL" \
+            || warn "pulse 麦增益设置失败（pactl）"
+    else
+        warn "pulse 未见 USB 麦 source — 跳过（audio_processor 可能录到板载静音）"
+    fi
 fi
 
 # ── 1. 外部依赖（mosquitto / ollama / Node-RED） ────────────────────────
@@ -154,6 +179,7 @@ fi
 # 先起,audio_processor 连不上 funasr→5 次重连失败后降级 local_offline(非 2pass + 与
 # dashboard 2pass partial/final 渲染不匹配)。故在拉 supervisor 前轮询 10095 ws-ready
 # (就绪时 HTTP 426)。2026-06-09 真实重启实锤的回归。
+if [ "$ASR_BACKEND" = "funasr_2pass" ]; then
 hdr "1.5 等待 FunASR 容器就绪（最多 90s）"
 FUNASR_READY=0
 for i in $(seq 1 90); do
@@ -162,6 +188,9 @@ for i in $(seq 1 90); do
     sleep 1
 done
 [ "$FUNASR_READY" = "1" ] || warn "FunASR 90s 未就绪 — audio_processor 会降级 local_offline,转写非 2pass"
+else
+    ok "ASR backend=$ASR_BACKEND，跳过 FunASR 容器等待"
+fi
 
 # ── 2. supervisor 状态 ────────────────────────────────────────────────
 hdr "2. main.py supervisor"
@@ -191,7 +220,7 @@ fi
 
 if [ -z "$EXISTING_PID" ] && [ "$STATUS_ONLY" != "1" ]; then
     AV_RKNN_BACKEND="${AV_RKNN_BACKEND:-0}"
-    say "启动 supervisor（AV_LLM_BACKEND=rknn / AV_ASR_BACKEND=funasr_2pass / AV_RKNN_BACKEND=$AV_RKNN_BACKEND）"
+    say "启动 supervisor（AV_LLM_BACKEND=rknn / AV_ASR_BACKEND=$ASR_BACKEND / AV_RKNN_BACKEND=$AV_RKNN_BACKEND）"
     cd "$PROJECT_DIR" || { fail "cd $PROJECT_DIR 失败"; exit 1; }
     # 轮换旧日志：保留 5 份历史
     if [ -f "$LOG_FILE" ]; then
@@ -199,7 +228,7 @@ if [ -z "$EXISTING_PID" ] && [ "$STATUS_ONLY" != "1" ]; then
         ls -1t "${LOG_FILE}".* 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
     fi
     AV_LLM_BACKEND=rknn \
-    AV_ASR_BACKEND=funasr_2pass \
+    AV_ASR_BACKEND="$ASR_BACKEND" \
     AV_RKNN_BACKEND="$AV_RKNN_BACKEND" \
     nohup "$VENV_PY" main.py > "$LOG_FILE" 2>&1 &
     sleep 2

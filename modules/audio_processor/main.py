@@ -231,6 +231,24 @@ class AudioModule(BaseModule):
                 self.publish("av/audio/command_punctuated", punctuated_payload)
             else:
                 self.publish(self._topics.get("audio_command", "av/audio/command"), payload)
+                # sense_voice 离线路径：3588/DNC 模块清单都不跑 punctuator，
+                # av/audio/command_punctuated 没人产出 → dashboard 转写窗与 node-red
+                # 耳朵 topic 全空（2026-07-02 DNC 实锤）。补发同 schema payload（与上面
+                # funasr 分支同构）。Mac 上 punctuator 若在跑会同 seq 双发，
+                # 前端按 seq_id 覆盖渲染，后到的带标点版胜出，无碍。
+                self.publish("av/audio/command_punctuated", {
+                    "topic_type": "event",
+                    "payload": {
+                        "event_type": "transcription_punctuated",
+                        "text": ev.text,
+                        "text_original": ev.text,
+                        "seq_id": ev.seq_id,
+                        "is_final": True,
+                        "raw_mode": ev.raw_mode,
+                        "ts": ev.ts,
+                        "punct_latency_ms": 0.0,
+                    },
+                })
         else:
             self.publish(self._topics.get("audio_partial", "av/audio/partial"), payload)
 

@@ -36,8 +36,25 @@ window.Renderers.transcript_seq = function makeTranscriptSeqRenderer(feed) {
     const newText = ev.text || "";
 
     if (ev.is_final) {
-      // final 整段定稿（FunASR 2pass-offline canonical 文本），清掉所有 flash span
-      textEl.textContent = newText;
+      if (textEl.childNodes.length) {
+        // final 整段定稿（FunASR 2pass-offline canonical 文本），清掉所有 flash span
+        textEl.textContent = newText;
+      } else {
+        // sense_voice 离线路径无 partial，final 直达空气泡：逐字定时显示 +
+        // 复用 tx-flash 闪光，对齐 funasr 2pass 的逐字蹦观感（DNC 验收标准）
+        const step = Math.min(45, Math.max(15, 900 / Math.max(newText.length, 1)));
+        [...newText].forEach((ch, i) => {
+          const span = document.createElement("span");
+          span.textContent = ch;
+          span.style.visibility = "hidden";
+          textEl.appendChild(span);
+          setTimeout(() => {
+            span.style.visibility = "";
+            span.className = "tx-flash";
+            feed.scrollTop = feed.scrollHeight;
+          }, i * step);
+        });
+      }
     } else if (newText) {
       // partial 增量 append：每条事件 = 一段新词，包成 flash span 触发逐字蹦闪光
       const span = document.createElement("span");
