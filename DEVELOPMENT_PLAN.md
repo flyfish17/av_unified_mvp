@@ -278,6 +278,24 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 
 更早进度见 `ARCHIVE_2026Q2.md`。
 
+### 2026-07-03（晚）— DNC 复刻 3588 funasr 引擎（脱 docker 化）+ 批量复刻 SOP
+
+**背景**：user 验收发现 sense_voice 路线准确率/标点与 3588 差距大（引擎级差异），拍板放弃中间路线，把 3588 当前版本复刻到 DNC，目标批量复刻。
+
+**本次推进（当晚走通，冷启动终验全绿）：**
+- **docker 解锁判定定案**：DNC 内核 `CONFIG_BPF_SYSCALL is not set`（/proc/config.gz 实锤），runc 在 cgroup v2 设 device 规则必须 eBPF → 原生/cgroupfs/privileged 三姿势全部实测死。M1 全灭 → 按拍板走 **M3 脱 docker 化**（不动 U-Boot/内核）。
+- **脱 docker 化落地**：阿里云拉 `funasr-runtime-sdk-online-cpu-0.1.12`（pull/create/export 不经过 runc，可用）→ `docker export` rootfs 到 `/opt/funasr-rootfs`（2.8G）→ 新单元 `deploy/systemd/funasr-server.service`（RootDirectory + MountAPIVFS + BindPaths 模型目录；**禁 Device* 指令**，会触发同一 BPF 报错；绕过 run_server_2pass.sh 直跑二进制——脚本会后台化 server 后退出，systemd 下会误判）。模型 1.7G modelscope 首跑自下。
+- **引擎验收实锤**：rootfs 自带 client 喂 wav → 2pass-online 增量 partial 流 + 2pass-offline final 全标点分句时间戳（「…可以尝试重新生成，也可以稍微调节一下相应的住址。…不可以损害刷人的形象哦。」）。与 3588 逐字节同引擎。
+- **切换**：av-demo 删 sense_voice 覆盖（回脚本默认 funasr_2pass）；nightly-restart 单元 DNC 适配三处 = 路径 sed / User=root / `AV_FUNASR_RESTART_CMD=systemctl restart funasr-server`（脚本已参数化，3588 默认 docker restart 不变）；**时区坑**：3588 板钟 UTC（20:23=北京 04:23）、DNC 板钟 CST → timer 改 04:23。
+- **冷启动终验**：零人工 — funasr-server 自启 426 → av-demo 等 64s 就绪再拉 supervisor（防 5 次重连降级竞态）→ ws ESTAB → dashboard/node-red 200 → pulse 麦就位 45% → timer 在列。资源基线：funasr RSS 3.0G，整机 used 5G / avail 8G。
+- **批量交付物**：`docs/deploy/dnc-replicate-install.md`（全离线资产包 ~14G 清单 + 金源导出命令 + A→Z 安装 + 板级参数表 + 验收清单 + 坑速查）。
+- 手工 chroot 调试坑：需 `mount --bind /dev`（random_device 报错），服务本身 MountAPIVFS 不受影响。
+
+**未完成 / 遗留：**
+- 离线资产包物理归集（金源=本 DNC，命令在 SOP §1，user 定介质后执行）
+- 麦克风 user 自理中；转写质量剩余差距主要看麦（引擎已同构）
+- sense_voice 三处适配代码保留（backend-gated），route B 作降级链路随时可切
+
 ### 2026-07-03 — 湖森 DNC 麦克风转写收尾：转写窗 + node-red 面板 + 重启持久化
 
 **本次推进（边界：不影响 3588，折腾只限 DNC；仓库改动均向后兼容、3588 默认行为不变）：**

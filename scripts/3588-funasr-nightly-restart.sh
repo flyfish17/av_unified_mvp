@@ -22,9 +22,11 @@ say() { echo "[$(date '+%F %T')] $*"; }
 
 say "== funasr 每日重启开始 =="
 
-# 1. 重启 funasr 容器
-docker restart funasr || { say "FATAL: docker restart funasr 失败"; exit 1; }
-say "funasr 容器已重启，等待就绪…"
+# 1. 重启 funasr（3588=docker 容器；DNC 等无 CGROUP_BPF 内核机型=脱 docker 化
+#    systemd 服务，由 nightly-restart.service 的 Environment 覆盖此命令）
+RESTART_CMD="${AV_FUNASR_RESTART_CMD:-docker restart funasr}"
+$RESTART_CMD || { say "FATAL: $RESTART_CMD 失败"; exit 1; }
+say "funasr 已重启（$RESTART_CMD），等待就绪…"
 
 # 2. 等 ws 端口就绪（就绪时 HTTP 426，同 3588-demo-start.sh §1.5），上限 120s 留余量
 FUNASR_READY=0
