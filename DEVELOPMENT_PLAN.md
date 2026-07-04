@@ -296,6 +296,13 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 - 麦克风 user 自理中；转写质量剩余差距主要看麦（引擎已同构）
 - sense_voice 三处适配代码保留（backend-gated），route B 作降级链路随时可切
 
+**GitHub 分支布局（2026-07-04 定，广州行接取用）：**
+- `demo-mac` = Mac 端演示版（统一仓最新，Mac 直接跑）
+- `stable-3588` = 3588 版（`44e37bb`，firefly 实机运行态，忠实快照）
+- `husion-dnc` = 湖森当前版（`843a37f` = tag `dnc-funasr-2pass-stable-20260703`，DNC 固化态）
+- `feat/funasr-ws-backend-stable-20260526` 继续作工作分支；`main` 未动（红线）
+- Mac 演示**独立仓** `flyfish17/av_understanding_mac`：origin 同步（ahead 0/behind 0），但**本地有 10 处未提交改动**（含 processor.py）不在 GitHub 上——去广州前需 user 决定是否提交
+
 ### 2026-07-03 — 湖森 DNC 麦克风转写收尾：转写窗 + node-red 面板 + 重启持久化
 
 **本次推进（边界：不影响 3588，折腾只限 DNC；仓库改动均向后兼容、3588 默认行为不变）：**
