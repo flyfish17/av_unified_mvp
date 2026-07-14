@@ -278,6 +278,18 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 
 更早进度见 `ARCHIVE_2026Q2.md`。
 
+### 2026-07-14 — 湖森 DNC 品牌换装：CREATOR → Husion湖森（仅 husion-dnc 分支）
+
+**本次推进（已上板验收）：**
+- 品牌位全是纯文本，仓库原无图片 logo。改动 3 文件：`web/templates/dashboard.html`（title / splash / 顶栏换 `web/static/husion-logo.png` 白色横版 logo + "Husion湖森 AI 视听理解平台"；快捷控制卡副标题去 creator 字样）+ `node-red/flows.json`（SVG 大标题、dashboard 1.0 组标题）。编辑器内部命名 / 功能注释里的 creator（中控转发协议描述）不动。
+- **分支隔离**：只提交 `husion-dnc`（`8cee385`，tag `dnc-husion-brand-20260714`，已推 GitHub）；demo-mac / stable-3588 / main / Mac 独立仓全部未动。husion-dnc 自此与 demo-mac 分叉（原同指 843a37f）。
+- **上板**：板上无 .git（离线复刻态），scp 3 文件（原文件留 `.bak-pre-husion-brand`）+ 重启 av-demo + node-red。验收：:5050 title=Husion湖森 / logo 200 / :1880 200 / funasr 426 / 10 模块子进程。
+- **坑（两次踩同一雷）**：ssh 远程命令里既有 `pkill/pgrep -f "[n]ode-red"` 又有 `systemctl start node-red` 字面量 → 正则匹配到自己 shell 的 cmdline → 会话自杀 exit 255。解法：`ssh 'bash -s' <<'EOF'` 走 stdin，远端 cmdline 只剩 `bash -s`。期间 node-red 曾被 av-demo 兜底 nohup 接管，已收敛回 user unit（active，单实例）。
+
+**未完成 / 遗留：**
+- logo 源图仅 164×18，splash 放大到 26px 有轻微发糊；拿到高清版直接替换 `web/static/husion-logo.png` 同名文件即可（板上 scp 覆盖 + 重启 av-demo）
+- node-red ui-page 路径仍为 `/creator-dash`（仅 URL 可见，无代码引用，未改）
+
 ### 2026-07-03（晚）— DNC 复刻 3588 funasr 引擎（脱 docker 化）+ 批量复刻 SOP
 
 **背景**：user 验收发现 sense_voice 路线准确率/标点与 3588 差距大（引擎级差异），拍板放弃中间路线，把 3588 当前版本复刻到 DNC，目标批量复刻。
