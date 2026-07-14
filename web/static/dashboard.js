@@ -1165,7 +1165,7 @@
     { id: "overview-online-stream", title: "在线视频源" },
     { id: "overview-add-source",    title: "添加视频源" },
     { id: "overview-lan-scan",      title: "LAN 扫描" },
-    { id: "overview-quick-control", title: "快捷控制（中控）" },
+    { id: "overview-quick-control", title: "设备控制（中控）" },
   ];
   const hiddenCardPos = {};  // 隐藏期间记位置，重显时还原
   function initOverviewGrid() {
