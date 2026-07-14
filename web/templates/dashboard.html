@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Ai 视听信息理解【CREATOR】</title>
+  <title>Ai 视听信息理解【Husion湖森】</title>
   <style>
     :root {
       --bg:        #0a0e14;
@@ -61,6 +61,9 @@
     .brand .logo {
       font-size: 14px; font-weight: 700; color: var(--text);
       letter-spacing: 0.05em;
+    }
+    .brand .logo-img {
+      height: 16px; align-self: center;
     }
     .brand .tag {
       font-size: 10px; color: var(--accent-2);
@@ -877,8 +880,8 @@
       color: var(--text);
       letter-spacing: 0.08em;
     }
-    body.customer-view .brand .tag {
-      font-size: 11px; padding: 2px 8px;
+    body.customer-view .brand .logo-img {
+      height: 20px;
     }
     body.customer-view .brand .cv-subtitle {
       display: inline-flex !important;
@@ -916,11 +919,9 @@
       color: var(--text); letter-spacing: 0.12em;
       text-shadow: 0 0 20px rgba(88,166,255,0.4);
     }
-    #splash .splash-logo .badge {
-      font-size: 14px; vertical-align: middle;
-      padding: 3px 10px; margin-left: 10px;
-      border: 1px solid var(--accent-2); color: var(--accent-2);
-      border-radius: 4px; letter-spacing: 0.2em;
+    #splash .splash-logo img {
+      height: 26px; vertical-align: middle;
+      margin: -4px 16px 0 0;
     }
     #splash .splash-sub {
       font-size: 14px; color: var(--text-2);
@@ -939,7 +940,7 @@
 <body>
   <!-- 启动 splash：首次加载短暂全屏 LOGO；?nosplash 跳过 -->
   <div id="splash">
-    <div class="splash-logo">CREATOR AI 视听理解平台<span class="badge">CREATOR</span></div>
+    <div class="splash-logo"><img src="/static/husion-logo.png" alt="HUSION">Husion湖森 AI 视听理解平台</div>
     <div class="splash-sub">端侧视频 + 语音 + 意图统一中控 · 国产化解决方案</div>
     <div class="splash-bar"></div>
   </div>
@@ -960,8 +961,8 @@
 
   <header>
     <div class="brand">
-      <span class="logo">CREATOR AI 视听理解平台</span>
-      <span class="tag">CREATOR</span>
+      <img class="logo-img" src="/static/husion-logo.png" alt="HUSION">
+      <span class="logo">Husion湖森 AI 视听理解平台</span>
       <span class="sub" id="brand-sub" style="display:none">v1.x</span>
       <!-- 客户视图：副标语 chip（默认隐藏，body.customer-view 时显示） -->
       <span class="cv-subtitle">
@@ -1195,7 +1196,7 @@
               <div class="module-header">
                 <span class="drag-handle" title="拖动重排">⋮⋮</span>
                 <span class="module-title">快捷控制
-                  <span class="module-sub">av/control · creator 中控 192.168.5.20:8932</span>
+                  <span class="module-sub">av/control · 中控 ASCII 转发</span>
                 </span>
                 <span class="module-badge" id="quick-ctrl-badge">就绪</span>
                 <div class="module-actions">
