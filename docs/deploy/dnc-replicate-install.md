@@ -161,7 +161,12 @@ sudo systemctl enable av-demo.service funasr-nightly-restart.timer
 ## 8. 版本锚点与回退
 
 - 引擎：`funasr-runtime-sdk-online-cpu-0.1.12`（rootfs 即此镜像导出，勿混版本）
-- 仓库 tag：走通当日 HEAD（见 DEVELOPMENT_PLAN 进度日志 2026-07-03 条）
+- **仓库 tag（复刻基准）：`dnc-husion-brand-stable-20260714`** = 湖森品牌验收态
+  （2026-07-14 user 验收通过：Husion湖森 logo + 设备控制卡；husion-dnc 分支 `6fea726`）。
+  新板复刻：`git checkout dnc-husion-brand-stable-20260714` 即此验收态，
+  §1 仓库代码资产 `git archive` 也用此 tag。
+  **分支红线**：demo-mac / stable-3588 / main 三形态彼此独立，品牌换装全程未动它们；
+  复刻湖森版只认本 tag，不要从其它分支取。
 - 回退 route B（SenseVoice-NPU，无 funasr 时的降级链路）：
   `av-demo.service` 加回 `Environment=AV_ASR_BACKEND=sense_voice_arm` +
   `Environment=AV_RKNN_BACKEND=1` → daemon-reload → 重启 av-demo。
