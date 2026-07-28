@@ -1978,11 +1978,13 @@
     closeSummaryModal();  // 防止重叠
     const modal = document.createElement("div");
     modal.className = "summary-modal";
-    // 长转写走后端分段（>8000 字），CPU 上是分钟级；给等待态一个诚实预期 + 已用时
+    // 长转写走后端分段（>8000 字）。3588 CPU 实测吞吐 ≈ 600 字/分钟（prefill 8 tok/s），
+    // 按此给"最长约 X 分钟"上限；Mac 等强机会远快于估计，措辞留余地
     const isLong = (charCount || 0) > 8000;
+    const estMin = Math.max(1, Math.ceil((charCount || 0) / 600));
     const hint = isLong
-      ? `长会议转写 ${charCount} 字，分段生成中，可能需要几分钟`
-      : "qwen3.5:4b · 约 5-15 秒";
+      ? `长会议 ${charCount} 字分段生成中，本机 CPU 推理最长约 ${estMin} 分钟`
+      : `qwen3.5:4b · 视设备算力数秒到数分钟`;
     modal.innerHTML = `<div class="summary-card${loading ? " loading" : ""}">
       ${loading ? `✦ 正在生成纪要…<br><span style='font-size:11px'>（${hint} · 已用时 <span data-sm-elapsed>0</span>s）</span>` : ""}
     </div>`;

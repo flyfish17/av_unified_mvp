@@ -423,9 +423,11 @@ def _generate_fields(prompt: str, model: str, timeout: int, num_predict: int = 8
         return _parse_summary_fields(_ollama_generate(prompt, model, timeout, num_predict))
 
 
-def _dynamic_timeout(text_len: int) -> int:
-    """按输入长度给 timeout：3588 CPU prefill 慢，4000 字段落给到 ~5min 余量。"""
-    return 120 + text_len // 20
+def _dynamic_timeout(text_len: int, num_predict: int = 800) -> int:
+    """按 3588 实测速率给 timeout（2026-07-28 video 冻结后 bench：
+    prefill ~8 tok/s、decode ~2.5 tok/s，4000 字段实测 350s）。
+    token≈字数×0.65；prefill 按 7 tok/s、decode 按 2.3 tok/s 留余量，+60s 装载/调度。"""
+    return int(60 + text_len * 0.65 / 7 + num_predict / 2.3)
 
 
 def _split_transcript(transcript: str, chunk_size: int = _SUMMARY_CHUNK_SIZE) -> list:
@@ -468,7 +470,7 @@ def _call_ollama_summary(transcript: str, model: str = "qwen3.5:4b") -> dict:
     for i, chunk in enumerate(chunks, 1):
         prompt = _CHUNK_PROMPT.format(idx=i, total=total, transcript=chunk)
         try:
-            raw = _ollama_generate(prompt, model, _dynamic_timeout(len(chunk)), num_predict=400)
+            raw = _ollama_generate(prompt, model, _dynamic_timeout(len(chunk), 400), num_predict=400)
             pts = _parse_points(raw)
         except Exception as e:
             # 明确报哪一段挂了，不静默吞（单段失败=纪要不完整，宁可整体失败让人看到）
