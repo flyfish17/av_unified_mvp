@@ -66,6 +66,20 @@ MANAGED_MODULES = [
     "modules.openvocab_filter.main",
 ]
 
+# CR-DIG7201：应用形态 profile（config 顶层 app_profile / 环境变量 AV_APP_PROFILE）。
+# meeting_asr = 纯会议转写产品（快捷会议 7 系列），视频链路整条不起，
+# 3588 的 4 核 CPU 全部留给 FunASR 转写 + ollama 纪要。
+_MEETING_ASR_EXCLUDE = {
+    "modules.video_processor.main",
+    "modules.keyframe_filter.main",
+    "modules.openvocab_filter.main",
+    "modules.scene_analyzer.main",  # 当前不在 MANAGED_MODULES，防御性排除
+}
+APP_PROFILES = {
+    "full": MANAGED_MODULES,
+    "meeting_asr": [m for m in MANAGED_MODULES if m not in _MEETING_ASR_EXCLUDE],
+}
+
 MAX_RETRY_DELAY = 60   # 最大退避秒数
 WARN_AFTER_FAILS = 5   # 连续失败几次后升级为 ERROR 告警
 
@@ -81,6 +95,15 @@ class AVSupervisor:
         self._project_root = self._config_path.parent.parent
 
         self._apply_profile()
+
+        # 应用形态 profile：决定拉起哪些模块（性能 profile 只调参数，两者独立）
+        app_profile = os.environ.get("AV_APP_PROFILE") or self.cfg.get("app_profile") or "full"
+        if app_profile not in APP_PROFILES:
+            raise ValueError(
+                f"未知 app_profile: {app_profile!r}，可选 {sorted(APP_PROFILES)}"
+            )
+        self._app_profile = app_profile
+        self._managed_modules = APP_PROFILES[app_profile]
 
         self.mqtt = MQTTBridge(self.cfg.get("mqtt", {}))
         self._web_push = lambda *_: None
@@ -179,8 +202,12 @@ class AVSupervisor:
         return proc
 
     def _spawn_all(self):
+        skipped = [m for m in MANAGED_MODULES if m not in self._managed_modules]
+        logger.info(f"app_profile={self._app_profile}，拉起 {len(self._managed_modules)} 个模块")
+        if skipped:
+            logger.info(f"  按 profile 跳过: {', '.join(skipped)}")
         now = time.time()
-        for module in MANAGED_MODULES:
+        for module in self._managed_modules:
             proc = self._spawn(module)
             self._procs[module] = {
                 "proc": proc,

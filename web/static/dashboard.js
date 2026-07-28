@@ -1951,7 +1951,7 @@
       alert("当前转写内容太少，至少需要 30 字才能生成纪要");
       return;
     }
-    const modal = openSummaryModal({ loading: true });
+    const modal = openSummaryModal({ loading: true, charCount: text.length });
     btn.disabled = true;
     try {
       const r = await fetch("/audio/summary", {
@@ -1972,19 +1972,35 @@
     }
   }
 
-  function openSummaryModal({ loading }) {
+  let summaryTimerId = null;
+
+  function openSummaryModal({ loading, charCount }) {
     closeSummaryModal();  // 防止重叠
     const modal = document.createElement("div");
     modal.className = "summary-modal";
+    // 长转写走后端分段（>8000 字），CPU 上是分钟级；给等待态一个诚实预期 + 已用时
+    const isLong = (charCount || 0) > 8000;
+    const hint = isLong
+      ? `长会议转写 ${charCount} 字，分段生成中，可能需要几分钟`
+      : "qwen3.5:4b · 约 5-15 秒";
     modal.innerHTML = `<div class="summary-card${loading ? " loading" : ""}">
-      ${loading ? "✦ 正在生成纪要…<br><span style='font-size:11px'>（qwen3.5:4b · 约 5-15 秒）</span>" : ""}
+      ${loading ? `✦ 正在生成纪要…<br><span style='font-size:11px'>（${hint} · 已用时 <span data-sm-elapsed>0</span>s）</span>` : ""}
     </div>`;
     modal.onclick = (e) => { if (e.target === modal) closeSummaryModal(); };
     document.body.appendChild(modal);
+    if (loading) {
+      const t0 = Date.now();
+      summaryTimerId = setInterval(() => {
+        const el = modal.querySelector("[data-sm-elapsed]");
+        if (!el) { clearInterval(summaryTimerId); summaryTimerId = null; return; }
+        el.textContent = Math.round((Date.now() - t0) / 1000);
+      }, 1000);
+    }
     return modal;
   }
 
   function closeSummaryModal() {
+    if (summaryTimerId) { clearInterval(summaryTimerId); summaryTimerId = null; }
     document.querySelectorAll(".summary-modal").forEach(m => m.remove());
   }
 
@@ -1996,10 +2012,13 @@
     const ptsHtml = (data.points || []).map(p => `<li>${escHtmlSafe(p)}</li>`).join("");
     const kwsHtml = (data.keywords || []).map(k => `<span class="kw">${escHtmlSafe(k)}</span>`).join("");
     const dur = data.duration_sec ? `${Math.round(data.duration_sec / 60)} 分钟 · ` : "";
+    const gen = data.elapsed_sec
+      ? `生成 ${Math.round(data.elapsed_sec)}s${data.chunks > 1 ? `（${data.chunks} 段）` : ""} · `
+      : "";
     const fileMeta = data.file ? `已留档 summaries/${escHtmlSafe(data.file)}` : "";
     card.innerHTML = `
       <h2>${escHtmlSafe(data.title)}</h2>
-      <div class="summary-meta">${dur}${data.id} · ${fileMeta}</div>
+      <div class="summary-meta">${dur}${gen}${data.id} · ${fileMeta}</div>
       <p class="sm-summary">${escHtmlSafe(data.summary)}</p>
       <h3>关键点</h3>
       <ul class="sm-points">${ptsHtml}</ul>

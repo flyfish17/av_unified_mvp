@@ -290,44 +290,105 @@ _PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 _SUMMARIES_DIR = _PROJECT_ROOT / "summaries"
 
 # qwen3.5:4b 默认 thinking mode；末尾 /no_think 关掉（68bc510 已确认）
+# 2026-07-28 CR-DIG7201 P0-a：输出从 JSON 改为行格式。实测 qwen3.5:4b 输出多元素
+# JSON 数组系统性犯错（首条后即闭合数组 `"points":["a"],"b",...`，4 次里 3 次），
+# 行格式 + 代码解析彻底绕开这一类失败。
 _SUMMARY_PROMPT = """你是会议纪要助手。下面是一段语音转写文本，请生成一份结构化纪要。
 
-输出严格要求：
-- title：6-15 字，反映核心主题
-- summary：50-100 字一段话，提炼核心观点
-- points：3-5 条，每条 10-30 字，覆盖讨论要点
-- keywords：3-6 个名词性短语，便于后期检索
-
-只输出 JSON 一行，不要解释，不要 markdown 代码块：
-{{"title":"...","summary":"...","points":["...","..."],"keywords":["...","..."]}}
+严格按以下四个字段输出，不要 JSON、不要 markdown 代码块、不要其他内容：
+标题：6-15 字，反映核心主题
+摘要：50-100 字一段话，提炼核心观点
+要点：
+- 每条一行以"- "开头，3-5 条，每条 10-30 字，覆盖讨论要点
+关键词：3-6 个名词性短语，用、分隔，便于后期检索
 
 转写文本：
 {transcript}
 
 /no_think"""
 
+# ── 长转写分段（CR-DIG7201 P0-a）────────────────────────────────────────
+# 3588 CPU 跑 qwen3.5:4b 处理 2 万字实测 900s+ 超时（硬件天花板）。
+# >阈值时切段：每段小 ctx 提要点 → 汇总段要点出最终纪要。
+_SUMMARY_CHUNK_THRESHOLD = 8000   # 字；超过走分段路径
+_SUMMARY_CHUNK_SIZE = 4000        # 每段目标字数
+_SUMMARY_NUM_CTX = 7168           # 单段 / 短文本统一 ctx（4000 字 ≈ 2500-3000 token）
 
-def _extract_json(text: str) -> dict:
-    """容错 JSON 提取（仿 llm_engine.engine._parse_json）。
-    qwen3.5:4b 偶尔会带 ```json``` markdown 包裹或前后多余文本。"""
-    if not text:
-        raise ValueError("LLM 返回空内容")
-    text = re.sub(r"```(?:json)?", "", text).strip()
-    start = text.find("{")
-    end = text.rfind("}") + 1
-    if start >= 0 and end > start:
-        return json.loads(text[start:end])
-    raise ValueError(f"未找到 JSON 块；原始：{text[:120]}")
+_CHUNK_PROMPT = """你是会议纪要助手。下面是一场长会议转写的第 {idx}/{total} 部分，请提取本段讨论要点。
+
+要求：3-6 条，每条 15-40 字，保留具体的人名、数字、结论和待办；不要泛泛而谈。
+每条一行、以"- "开头；只输出要点行，不要 JSON、不要其他内容。
+
+转写文本：
+{transcript}
+
+/no_think"""
+
+_MERGE_PROMPT = """你是会议纪要助手。下面是一场长会议按时间顺序分段提取的要点清单，请汇总生成一份完整纪要。
+
+严格按以下四个字段输出，不要 JSON、不要 markdown 代码块、不要其他内容：
+标题：6-15 字，反映核心主题
+摘要：50-100 字一段话，提炼核心观点
+要点：
+- 每条一行以"- "开头，4-8 条，每条 10-30 字，合并重复、覆盖全程要点
+关键词：3-6 个名词性短语，用、分隔，便于后期检索
+
+分段要点清单：
+{points}
+
+/no_think"""
 
 
-def _call_ollama_summary(transcript: str, model: str = "qwen3.5:4b", timeout: int = 60) -> dict:
-    """调 ollama 生成纪要。**不用 format=json**：实测 qwen3.5:4b + format=json 返回 response
-    字段为空（DEV PLAN 已记 qwen3 thinking mode 坑 + format=json 复合问题）；改用
-    engine._ask 同款策略：prompt 末尾 `/no_think`，输出文本后 _extract_json 容错提取。"""
+def _parse_summary_fields(raw: str) -> dict:
+    """解析行格式纪要输出（标题：/摘要：/要点行/关键词：）→ 与旧 JSON 同构的 dict。
+    字段不全就抛错带原文片段，不静默。"""
+    title, summary, points, keywords, mode = "", "", [], [], None
+    for line in raw.splitlines():
+        line = line.strip().lstrip("*# ")  # 容忍模型加 markdown 强调
+        if not line:
+            continue
+        if line.startswith("标题"):
+            title = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+            mode = None
+        elif line.startswith("摘要"):
+            summary = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+            mode = "summary"
+        elif line.startswith("关键词"):
+            kws = line.split("：", 1)[-1].split(":", 1)[-1]
+            keywords = [k.strip() for k in re.split(r"[、，,;；/|]", kws) if k.strip()]
+            mode = None
+        elif line.startswith("要点"):
+            mode = "points"
+        elif line[0] in "-•·":
+            points.append(line.lstrip("-•·").strip())
+        elif mode == "summary":
+            summary += line  # 摘要偶尔换行续写
+    if not title or not summary or not points:
+        raise ValueError(
+            f"纪要字段不全（title={bool(title)} summary={bool(summary)} "
+            f"points={len(points)}）；原始：{raw[:200]}"
+        )
+    return {"title": title, "summary": summary, "points": points, "keywords": keywords}
+
+
+def _parse_points(raw: str) -> list:
+    """解析分段要点输出：每行以 -/•/· 开头算一条。"""
+    pts = [ln.strip().lstrip("-•·").strip() for ln in raw.splitlines()
+           if ln.strip() and ln.strip()[0] in "-•·"]
+    pts = [p for p in pts if p]
+    if not pts:
+        raise ValueError(f"未提取到要点行；原始：{raw[:200]}")
+    return pts
+
+
+def _ollama_generate(prompt: str, model: str, timeout: int, num_predict: int = 800) -> str:
+    """调 ollama /api/generate 一次，返回去掉 <think> 的文本。**不用 format=json**：
+    实测 qwen3.5:4b + format=json 返回 response 字段为空（DEV PLAN 已记 qwen3
+    thinking mode 坑 + format=json 复合问题）；prompt 末尾 `/no_think`，
+    输出为行格式文本，由 _parse_summary_fields/_parse_points 解析。"""
     import requests
     s = requests.Session()
     s.trust_env = False  # 绕系统代理（DEV PLAN 已知坑）
-    prompt = _SUMMARY_PROMPT.format(transcript=transcript)
     r = s.post(
         "http://127.0.0.1:11434/api/generate",
         json={
@@ -335,7 +396,12 @@ def _call_ollama_summary(transcript: str, model: str = "qwen3.5:4b", timeout: in
             "prompt": prompt,  # prompt 内末尾已含 /no_think
             "stream": False,
             "think": False,
-            "options": {"temperature": 0.3, "num_predict": 800},
+            "options": {
+                "temperature": 0.3,
+                "num_predict": num_predict,
+                # 默认 ctx 4096 不够：8000 字 ≈ 5000+ token 会被静默截断头部
+                "num_ctx": _SUMMARY_NUM_CTX,
+            },
         },
         timeout=timeout,
     )
@@ -344,7 +410,79 @@ def _call_ollama_summary(transcript: str, model: str = "qwen3.5:4b", timeout: in
     raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
     if not raw:
         raise ValueError("LLM 返回空（可能 /no_think 未生效或 model 不支持）")
-    return _extract_json(raw)
+    return raw
+
+
+def _generate_fields(prompt: str, model: str, timeout: int, num_predict: int = 800) -> dict:
+    """_ollama_generate + _parse_summary_fields，格式不全重试 1 次。
+    小模型偶发漏字段，重跑一次通常就好；第二次仍失败则抛错让人看到，不静默。"""
+    try:
+        return _parse_summary_fields(_ollama_generate(prompt, model, timeout, num_predict))
+    except ValueError as e:
+        logger.warning(f"summary LLM 输出格式不全，重试一次：{e}")
+        return _parse_summary_fields(_ollama_generate(prompt, model, timeout, num_predict))
+
+
+def _dynamic_timeout(text_len: int) -> int:
+    """按输入长度给 timeout：3588 CPU prefill 慢，4000 字段落给到 ~5min 余量。"""
+    return 120 + text_len // 20
+
+
+def _split_transcript(transcript: str, chunk_size: int = _SUMMARY_CHUNK_SIZE) -> list:
+    """按字数切段，尽量在换行/句号处断开，避免拦腰截断一句话。"""
+    chunks = []
+    rest = transcript
+    while len(rest) > chunk_size:
+        cut = chunk_size
+        # 在 [chunk_size*0.6, chunk_size] 窗口内找最后一个换行或句读
+        window = rest[int(chunk_size * 0.6):chunk_size]
+        for sep in ("\n", "。", "！", "？", "，"):
+            pos = window.rfind(sep)
+            if pos >= 0:
+                cut = int(chunk_size * 0.6) + pos + 1
+                break
+        chunks.append(rest[:cut])
+        rest = rest[cut:]
+    if rest.strip():
+        chunks.append(rest)
+    return chunks
+
+
+def _call_ollama_summary(transcript: str, model: str = "qwen3.5:4b") -> dict:
+    """生成纪要。短文本（≤_SUMMARY_CHUNK_THRESHOLD 字）单次调用；
+    长文本切段提要点→汇总。返回 dict 额外带 _chunks / _elapsed_sec 供上层记录耗时。"""
+    t0 = time.time()
+
+    if len(transcript) <= _SUMMARY_CHUNK_THRESHOLD:
+        prompt = _SUMMARY_PROMPT.format(transcript=transcript)
+        result = _generate_fields(prompt, model, _dynamic_timeout(len(transcript)))
+        result["_chunks"] = 1
+        result["_elapsed_sec"] = round(time.time() - t0, 1)
+        return result
+
+    # 长文本：切段 → 每段提要点 → 汇总
+    chunks = _split_transcript(transcript)
+    total = len(chunks)
+    logger.info(f"summary 分段：{len(transcript)} 字 → {total} 段")
+    all_points = []
+    for i, chunk in enumerate(chunks, 1):
+        prompt = _CHUNK_PROMPT.format(idx=i, total=total, transcript=chunk)
+        try:
+            raw = _ollama_generate(prompt, model, _dynamic_timeout(len(chunk)), num_predict=400)
+            pts = _parse_points(raw)
+        except Exception as e:
+            # 明确报哪一段挂了，不静默吞（单段失败=纪要不完整，宁可整体失败让人看到）
+            raise RuntimeError(f"分段 {i}/{total} 要点提取失败：{e}") from e
+        all_points.extend(pts)
+        logger.info(f"summary 分段 {i}/{total} 完成，累计要点 {len(all_points)} 条"
+                    f"（{round(time.time() - t0)}s）")
+
+    points_text = "\n".join(f"- {p}" for p in all_points)
+    merge_prompt = _MERGE_PROMPT.format(points=points_text)
+    result = _generate_fields(merge_prompt, model, _dynamic_timeout(len(points_text)))
+    result["_chunks"] = total
+    result["_elapsed_sec"] = round(time.time() - t0, 1)
+    return result
 
 
 @_app.post("/audio/summary")
@@ -376,6 +514,9 @@ def audio_summary():
         "transcript": transcript,
         "model": "qwen3.5:4b",
         "version": "1.0",
+        # CR-DIG7201 P0-a：分段数 + 生成耗时（验收记录 + 前端展示）
+        "chunks": int(result.get("_chunks") or 1),
+        "elapsed_sec": float(result.get("_elapsed_sec") or 0),
     }
 
     # B 路：留档到 summaries/<id>-<safe_title>.json（知识库源）
