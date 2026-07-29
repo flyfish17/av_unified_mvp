@@ -18,6 +18,12 @@ audio:
     silence_threshold: 0.012
     url: ws://127.0.0.1:10095
 llm:
+  # 纪要 LLM 后端（CR-DIG7201 P0-b）。缺省 = ollama CPU；上 NPU 时取消注释：
+  # summary:
+  #   backend: rkllm                                        # ollama | rkllm
+  #   url: http://127.0.0.1:8000/v1/chat/completions        # RKLLM-API-Server
+  #   model: qwen3-4b-16k
+  #   unload_url: http://127.0.0.1:8000/v1/models/unload    # 跑完释放 NPU 内存
   ollama:
     model_fast: qwen3.5:4b
     model_smart: qwen3.5:4b

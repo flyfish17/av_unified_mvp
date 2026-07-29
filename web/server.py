@@ -314,6 +314,59 @@ _SUMMARY_CHUNK_THRESHOLD = 8000   # 字；超过走分段路径
 _SUMMARY_CHUNK_SIZE = 4000        # 每段目标字数
 _SUMMARY_NUM_CTX = 7168           # 单段 / 短文本统一 ctx（4000 字 ≈ 2500-3000 token）
 
+
+# ── 纪要 LLM 后端（CR-DIG7201 P0-b）────────────────────────────────────
+# backend=ollama（默认，CPU）| rkllm（NPU，RKLLM-API-Server OpenAI 兼容）。
+# 配置在 system_config.yaml 的 llm.summary 段，每次调用现读（改配置不用重启）。
+def _summary_cfg() -> dict:
+    import yaml
+    p = _PROJECT_ROOT / "config" / "system_config.yaml"
+    if not p.exists():
+        return {}
+    with open(p, encoding="utf-8") as f:
+        cfg = yaml.safe_load(f) or {}
+    return (cfg.get("llm") or {}).get("summary") or {}
+
+
+def _rkllm_generate(prompt: str, timeout: int, num_predict: int, cfg: dict) -> str:
+    """调 RKLLM-API-Server（OpenAI /v1/chat/completions，NPU）。
+    与 ollama 的差异：chat 风格 messages 数组，回包取 choices[0].message.content。"""
+    import requests
+    s = requests.Session()
+    s.trust_env = False
+    r = s.post(
+        cfg.get("url", "http://127.0.0.1:8000/v1/chat/completions"),
+        json={
+            "model": cfg.get("model", "qwen3-4b-16k"),
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "temperature": 0.3,
+            "max_tokens": num_predict,
+        },
+        timeout=timeout,
+    )
+    r.raise_for_status()
+    raw = (r.json().get("choices") or [{}])[0].get("message", {}).get("content", "")
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    if not raw:
+        raise ValueError("rkllm 返回空 content")
+    return raw
+
+
+def _rkllm_unload(cfg: dict) -> None:
+    """纪要跑完释放 NPU 内存（会中 NPU 让给视觉）。失败只告警不影响已出纪要。"""
+    url = cfg.get("unload_url")
+    if not url:
+        return
+    import requests
+    try:
+        s = requests.Session()
+        s.trust_env = False
+        s.post(url, timeout=10)
+        logger.info("rkllm 模型已 unload，NPU 内存释放")
+    except Exception as e:
+        logger.warning(f"rkllm unload 失败（NPU 内存未释放）：{e}")
+
 _CHUNK_PROMPT = """你是会议纪要助手。下面是一场长会议转写的第 {idx}/{total} 部分，请提取本段讨论要点。
 
 要求：3-6 条，每条 15-40 字，保留具体的人名、数字、结论和待办；不要泛泛而谈。
@@ -413,14 +466,22 @@ def _ollama_generate(prompt: str, model: str, timeout: int, num_predict: int = 8
     return raw
 
 
+def _llm_generate(prompt: str, model: str, timeout: int, num_predict: int = 800) -> str:
+    """按 llm.summary.backend 分发：rkllm（NPU）或 ollama（CPU，默认）。"""
+    cfg = _summary_cfg()
+    if cfg.get("backend") == "rkllm":
+        return _rkllm_generate(prompt, timeout, num_predict, cfg)
+    return _ollama_generate(prompt, model, timeout, num_predict)
+
+
 def _generate_fields(prompt: str, model: str, timeout: int, num_predict: int = 800) -> dict:
-    """_ollama_generate + _parse_summary_fields，格式不全重试 1 次。
+    """_llm_generate + _parse_summary_fields，格式不全重试 1 次。
     小模型偶发漏字段，重跑一次通常就好；第二次仍失败则抛错让人看到，不静默。"""
     try:
-        return _parse_summary_fields(_ollama_generate(prompt, model, timeout, num_predict))
+        return _parse_summary_fields(_llm_generate(prompt, model, timeout, num_predict))
     except ValueError as e:
         logger.warning(f"summary LLM 输出格式不全，重试一次：{e}")
-        return _parse_summary_fields(_ollama_generate(prompt, model, timeout, num_predict))
+        return _parse_summary_fields(_llm_generate(prompt, model, timeout, num_predict))
 
 
 def _dynamic_timeout(text_len: int, num_predict: int = 800) -> int:
@@ -470,7 +531,7 @@ def _call_ollama_summary(transcript: str, model: str = "qwen3.5:4b") -> dict:
     for i, chunk in enumerate(chunks, 1):
         prompt = _CHUNK_PROMPT.format(idx=i, total=total, transcript=chunk)
         try:
-            raw = _ollama_generate(prompt, model, _dynamic_timeout(len(chunk), 400), num_predict=400)
+            raw = _llm_generate(prompt, model, _dynamic_timeout(len(chunk), 400), num_predict=400)
             pts = _parse_points(raw)
         except Exception as e:
             # 明确报哪一段挂了，不静默吞（单段失败=纪要不完整，宁可整体失败让人看到）
@@ -498,11 +559,16 @@ def audio_summary():
     if len(transcript) < 30:
         return {"ok": False, "error": "转写文本太短（需至少 30 字）"}, 400
 
+    cfg = _summary_cfg()
     try:
         result = _call_ollama_summary(transcript)
     except Exception as e:
         logger.warning(f"summary LLM 调用失败：{e}")
         return {"ok": False, "error": f"LLM 调用失败：{e}"}, 502
+    finally:
+        # P0-b：NPU 后端跑完（无论成败）释放模型内存，会中 NPU 让给视觉
+        if cfg.get("backend") == "rkllm":
+            _rkllm_unload(cfg)
 
     now = datetime.datetime.now()
     summary = {
@@ -514,7 +580,7 @@ def audio_summary():
         "points": [str(x) for x in (result.get("points") or [])][:8],
         "keywords": [str(x) for x in (result.get("keywords") or [])][:10],
         "transcript": transcript,
-        "model": "qwen3.5:4b",
+        "model": cfg.get("model", "npu") if cfg.get("backend") == "rkllm" else "qwen3.5:4b",
         "version": "1.0",
         # CR-DIG7201 P0-a：分段数 + 生成耗时（验收记录 + 前端展示）
         "chunks": int(result.get("_chunks") or 1),
