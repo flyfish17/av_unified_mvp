@@ -28,7 +28,9 @@ VENV_PY="${AV_VENV_PY:-$HOME/creator_ai_demo/venv/bin/python}"
 LOG_FILE="${AV_LOG_FILE:-/tmp/main_supervisor.log}"
 DASHBOARD_PORT="${AV_DASHBOARD_PORT:-5050}"
 MJPEG_PORT="${AV_MJPEG_PORT:-5051}"
-EXPECTED_MODULES=9   # audio video llm system network scanner husion control_dispatch keyframe_filter
+# CR-DIG7201：3588 常驻 meeting_asr 纪要机 = 6 模块（audio system network scanner husion
+# control_dispatch）；不起 video/keyframe/openvocab/llm_engine。可用 AV_EXPECTED_MODULES 覆盖。
+EXPECTED_MODULES="${AV_EXPECTED_MODULES:-6}"
 WAIT_SECONDS="${AV_WAIT_SECONDS:-45}"
 
 # ── 颜色 ──────────────────────────────────────────────────────────────
