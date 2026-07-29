@@ -103,7 +103,21 @@ class AVSupervisor:
                 f"未知 app_profile: {app_profile!r}，可选 {sorted(APP_PROFILES)}"
             )
         self._app_profile = app_profile
-        self._managed_modules = APP_PROFILES[app_profile]
+        self._managed_modules = list(APP_PROFILES[app_profile])
+
+        # CR-DIG7201 P1：音频来源开关 audio.source: mic | net_multicast | [mic, net_multicast]
+        # 默认 mic（不改现状）。net_multicast = 会议主机 8 路组播（modules/net_audio_capture）。
+        source = self.cfg.get("audio", {}).get("source", "mic")
+        sources = source if isinstance(source, list) else [source]
+        unknown = set(sources) - {"mic", "net_multicast"}
+        if unknown:
+            raise ValueError(f"未知 audio.source: {sorted(unknown)}，可选 mic / net_multicast")
+        if "mic" not in sources:
+            self._managed_modules = [
+                m for m in self._managed_modules if m != "modules.audio_processor.main"
+            ]
+        if "net_multicast" in sources:
+            self._managed_modules.append("modules.net_audio_capture.main")
 
         self.mqtt = MQTTBridge(self.cfg.get("mqtt", {}))
         self._web_push = lambda *_: None

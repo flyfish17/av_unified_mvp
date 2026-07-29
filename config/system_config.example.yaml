@@ -3,6 +3,14 @@
 # 不起 video_processor/keyframe_filter/openvocab_filter，CPU 全给转写+纪要。
 # app_profile: meeting_asr
 audio:
+  # 音频来源（CR-DIG7201 P1）：mic（本地麦，默认）| net_multicast（会议主机 8 路组播）
+  # 可列表共存：source: [mic, net_multicast]
+  # source: net_multicast
+  # net_multicast:
+  #   group: 224.1.1.11
+  #   base_port: 1000        # 8 路 = 1000-1007，端口号定话筒路号
+  #   num_channels: 8
+  #   gate_threshold: 150    # int16 RMS 静音门阈值，闲路不占 FunASR decoder
   funasr:
     mode: websocket_2pass
     sample_rate: 16000
