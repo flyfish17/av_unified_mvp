@@ -856,7 +856,11 @@
   const PARA_SOFT_LIMIT = 250;
   const PARA_HARD_LIMIT = 400;
   const PARA_ENDS_PUNCT = /[。！？!?]\s*$/;
-  const _txState = { para: null, finalsText: "", lastFinalMs: 0 };
+  // CR-DIG7201 P3：会议主机多路话筒（payload 带 mic_id/speaker）按发言人分段分色；
+  // 本地麦（无 mic_id）行为不变
+  const MIC_COLORS = ["#e6a23c", "#4fc3f7", "#81c784", "#f48fb1",
+                      "#ba68c8", "#ffd54f", "#4db6ac", "#ff8a65"];
+  const _txState = { para: null, finalsText: "", lastFinalMs: 0, speaker: null };
   function fmtClock(ts) {
     const d = ts ? new Date(ts * 1000) : new Date();
     const p = n => String(n).padStart(2, "0");
@@ -875,18 +879,27 @@
     const stale = !_txState.para || !card.contains(_txState.para);
     const gapped = _txState.lastFinalMs > 0 &&
                    (nowMs - _txState.lastFinalMs) / 1000 > PARA_GAP_SEC;
+    // 发言人切换 → 强制开新段（多路话筒各说各的，不混段）
+    const spk = (ev.mic_id !== undefined && ev.mic_id !== null)
+      ? (ev.speaker || `话筒${ev.mic_id + 1}`) : null;
+    const spkChanged = spk !== _txState.speaker;
 
-    if (stale || gapped) {
+    if (stale || gapped || spkChanged) {
       const para = document.createElement("div");
       para.className = "tx-para";
+      const spkHtml = spk
+        ? `<span class="tx-spk" style="color:${MIC_COLORS[(ev.mic_id ?? 0) % 8]};font-weight:600">${escHtml(spk)}</span> · `
+        : "";
       para.innerHTML =
-        `<div class="tx-meta"><span class="tx-ts">${fmtClock(ev.ts)}</span></div>` +
+        `<div class="tx-meta">${spkHtml}<span class="tx-ts">${fmtClock(ev.ts)}</span></div>` +
         `<div class="tx-text"><span class="finals"></span><span class="live"></span></div>`;
+      para.dataset.speaker = spk || "";
       card.appendChild(para);
       while (card.querySelectorAll(".tx-para").length > 50) card.firstChild.remove();
       _txState.para = para;
       _txState.finalsText = "";
       _txState.lastFinalMs = 0;
+      _txState.speaker = spk;
     }
 
     const finalsEl = _txState.para.querySelector(".finals");
@@ -1892,7 +1905,8 @@
           const ts = p.querySelector(".tx-ts")?.textContent || "";
           // 只导出已定稿（.finals），未定稿的 .live 不算
           const txt = p.querySelector(".finals")?.textContent || "";
-          if (txt) lines.push(`[${ts}]\n${txt}\n`);
+          const spk = p.dataset.speaker;
+          if (txt) lines.push(`[${ts}]${spk ? ` [${spk}]` : ""}\n${txt}\n`);
         });
         const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
         const url = URL.createObjectURL(blob);
@@ -1924,11 +1938,13 @@
   function gatherTranscriptText() {
     const card = document.querySelector('[data-overview="transcript"] .strip-card-body');
     if (!card) return { text: "", durationSec: 0 };
-    const finals = card.querySelectorAll(".tx-para .finals");
     const parts = [];
-    finals.forEach(el => {
-      const t = el.textContent || "";
-      if (t.trim()) parts.push(t);
+    card.querySelectorAll(".tx-para").forEach(p => {
+      const t = p.querySelector(".finals")?.textContent || "";
+      if (!t.trim()) return;
+      // P3：多路话筒段带发言人前缀，纪要 LLM 据此区分谁说了什么
+      const spk = p.dataset.speaker;
+      parts.push(spk ? `[${spk}] ${t}` : t);
     });
     // 用第一段时间戳估算时长（仅用于元数据，不影响 LLM 调用）
     const firstTsEl = card.querySelector(".tx-para .tx-ts");
