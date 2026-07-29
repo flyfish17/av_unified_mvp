@@ -11,7 +11,7 @@
 | 阶段 | 内容 | 状态 | 时间 | commit | 验收数据 |
 |---|---|---|---|---|---|
 | P0-a | 会议转写 profile + 纪要分段 | ✅ done | 2026-07-28 17:45 | ce2cb00 | 2万字 37.4min 完整纪要；短会 5.5min 无回归 |
-| P0-b | 纪要上 NPU（rknn-llm） | ✅ done（模型定型待决） | 2026-07-29 10:30 | d87be0c | 1.7B 全程 NPU 2万字 374s=6.2min（CPU 的 1/6）；<3min 未达 |
+| P0-b | 纪要上 NPU（rknn-llm） | ✅ done + 已上线 | 2026-07-29 14:15 | 84043af | 3588 切 meeting_asr 常驻纪要机；1.7B 全程端到端 2万字 535s 高质量纪要 |
 | P1 | 组播收包离线验证（net_audio_capture + mock） | ✅ done | 2026-07-29 11:15 | 20e04a5 | Mac+3588 跨网 3 路全对；8 路满载数据见日志 |
 | P2 | 会议主机真机联调（8 路话筒区分） | ⏸ 挂起：主机发错型号 | 2026-07-29 | | 工厂补正确主机；需求升级为多源选择器（见待决4） |
 | P3 | 纪要按发言人分段 | ✅ done | 2026-07-29 11:35 | f83e62f | 纪要 3 要点正确标注发言人；dashboard 分色可视化通过 |
@@ -20,6 +20,15 @@
 
 <!-- 终端在此追加，最新在上 -->
 
+- **meeting_asr 常驻纪要机上线 done @2026-07-29 14:15  commit:84043af 4e2fa13**（DECISIONS 决策 1-5 执行完成）
+  **切换动作（3588 生产，62 demo 已确认可用无空窗）**：
+  - 代码：main.py meeting_asr 排除 llm_engine（省 2GB IOVA）；server.py chunk 阈值/大小可配（1.7B ctx 4096 保护）、merge+短路径 summary prompt 撑实（禁空话套话）；启动脚本 EXPECTED_MODULES 9→6。git archive 同步到生产 /home/firefly/av_unified_mvp（不动 gitignore 的 config）。
+  - config：`app_profile: meeting_asr` + `llm.summary`{backend rkllm, model qwen3-1.7b, url/unload_url, chunk_threshold/size 3500}。原 config 已备份 .bak-cr7201-*。
+  - **关 thinking**（关键）：`/home/firefly/models/Qwen3-1.7B/model_config.json` = capabilities:[instruct] + sampling.temperature 0.3。实测 completion_tokens 295→8、generate 26s→0.7s（qwen3 默认 thinking，`/no_think` 对该 server 无效，per-request temperature 也不生效，必须走 model_config.json）。
+  - **切换手法**：SIGKILL 老 supervisor+module（绕过 supervisor.stop() 的 docker stop funasr，保住 funasr/mosquitto）→ systemctl restart av-demo（systemd 接管起 meeting_asr）。funasr Up 全程未掉。
+  **验收**：6 模块（audio/system/network×2/scanner/husion/control，无 video/keyframe/openvocab/llm_engine）✅；dashboard 5050=200 ✅；audio_processor 麦克风+FunASR 正常 ✅；NPU 空闲无意图 daemon ✅；**端到端 2万字→NPU 1.7B 535s（8.9min）出高质量纪要**：7 段、摘要有实质内容（撑 summary 生效）、要点带发言人归属、8 要点 6 关键词字段齐、thinking=False ✅。
+  **耗时说明**：535s > 决策5 基线 6.2min。主因 chunk 3500（防短会超 4k ctx）→ 7 段 + summary 撑长。**取舍**：3500 保短会（15-30min，纪要机最常见场景）ctx 安全余量；2万字≈3小时长会 8.9min 罕见且会后非实时可接受。想压速可把 chunk 提到 4000（P0-b 验证过 2756tok<4096 安全，减 1 段）——留作可选优化，未擅自改。
+  **产品化 SOP 待补**（决策4，现未装）：① rkllm server systemd 自启（现 nohup，重启掉）；② `ip_unprivileged_port_start=1000`（组播 P2 用，runtime 设置重启失效）；③ model_config.json 关 thinking 纳入部署清单。
 - 阶段P3 done @2026-07-29 11:35  commit:f83e62f（P2 被跳过原因见下条）
   ① 纪要发言人归属：带 [话筒N] 标签的 3 人对话 → 3 要点各自正确标注（预算明细→话筒1、安装协调→话筒2、验收标准→话筒3），Mac qwen3.5:4b 实测 ✅
   ② dashboard：mic_id 存在时按发言人切段 + 8 色板分色标签，本地麦行为不变；Chrome 可视化验证通过 ✅
