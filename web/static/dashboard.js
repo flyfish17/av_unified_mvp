@@ -176,9 +176,18 @@
     delete cleanEv.__channel;
     const handlers = channelHandlers.get(ch);
     if (!handlers) return;
+    // 7/29 双倍转写修复：tickerForward 每条事件只转发一次，不随 handler 数放大。
+    // audio_processor 与 net_audio_capture 都声明 channel="transcript"（P1 起），
+    // 两个模块各注册一个 handler → 旧代码对每个 handler 都调 tickerForward
+    // → 总览转写卡每句 append 两遍。tickerForward 内部只按 channel 分发，
+    // module 参数仅作存在性判断，转发一次即为正确语义（punctuator 注释同款坑）。
+    let forwarded = false;
     handlers.forEach(({ handler, module }) => {
       try { handler(cleanEv); } catch (err) { console.warn(err); }
-      if (module) { try { tickerForward(module, ch, cleanEv); } catch (_) {} }
+      if (module && !forwarded) {
+        forwarded = true;
+        try { tickerForward(module, ch, cleanEv); } catch (_) {}
+      }
     });
   };
 
