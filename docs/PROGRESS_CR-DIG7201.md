@@ -12,13 +12,23 @@
 |---|---|---|---|---|---|
 | P0-a | 会议转写 profile + 纪要分段 | ✅ done | 2026-07-28 17:45 | ce2cb00 | 2万字 37.4min 完整纪要；短会 5.5min 无回归 |
 | P0-b | 纪要上 NPU（rknn-llm） | ✅ done（模型定型待决） | 2026-07-29 10:30 | d87be0c | 1.7B 全程 NPU 2万字 374s=6.2min（CPU 的 1/6）；<3min 未达 |
-| P1 | 组播收包离线验证（net_audio_capture + mock） | ⬜ 未开工 | | | |
+| P1 | 组播收包离线验证（net_audio_capture + mock） | ✅ done | 2026-07-29 11:15 | 20e04a5 | Mac+3588 跨网 3 路全对；8 路满载数据见日志 |
 | P2 | 会议主机真机联调（8 路话筒区分） | ⬜ 未开工 | | | |
 | P3 | 纪要按发言人分段 | ⬜ 未开工 | | | |
 
 ## 进度日志（追加式）
 
 <!-- 终端在此追加，最新在上 -->
+
+- 阶段P1 done @2026-07-29 11:15  commit:20e04a5
+  **验收实测**：
+  ① Mac 本地 + **Mac→3588 跨网组播**：3 路不同 TTS wav → 3 路 final 全对、无串路、ITN 标点正常、mic_id/speaker/seq_id 正确（`seq_id=mic_id*10000+n` 防跨路冲突）✅
+  ② 模块自身开销：8 路收包+降采样+静音门仅 **~28% 单核**（3588，很轻）✅
+  ③ **并发上限（生产全开：视频+意图链在跑）**：3 路同时讲话正常；**8 路持续同时讲话不可持续**——funasr-wss 372% + ollama 233% → load 24+，decode 积压（85s 零新 final），停止后 ~4 分钟自行消化恢复，**5050 全程 200**。真实会议 RMS 静音门下同时活跃话筒通常 ≤3，可承受；meeting_asr 形态（视频关+意图关）余量更大，P2 复测。
+  **两个系统性发现**：
+  a) **测试 final 流进生产意图链**（av/audio/command_punctuated → llm_engine → ollama 每条 final 一次推理，实测 ollama 被打到 300%）→ meeting 产品必须断开意图链 = 待决项 2 的实测佐证。
+  b) FunASR 2pass 的 final 靠 server 端 VAD 检出**尾部静音**结算——静音门关门/断流时必须补 ~1s 静音帧，否则永远没有 final（实测踩坑已修）。
+  **部署注记**：协议端口 1000-1007 是特权端口，3588 已 `sysctl net.ipv4.ip_unprivileged_port_start=1000`（**runtime 设置，重启失效**，需入部署 SOP）；pgrep/pkill 防自匹配字符类会被"模式里含目标明文"绕过（`.mai[n]` 内含 capture 明文），远程清进程后用无模式 `ps|grep` 复核。
 
 - 阶段P0-b done @2026-07-29 10:30  commit:d87be0c（后端切换代码）
   **部署（已装，用户授权）**：RKLLM-API-Server（GatekeeperZA）@ 3588 `:8000`，`/home/firefly/RKLLM-API-Server` + venv `/home/firefly/rkllm-server-venv`，librkllmrt 用板上已有 1.2.3（`RKLLM_LIB_PATH`，未动 /usr/lib、未装 systemd → **重启不自启，产品化时补**）。模型 `/home/firefly/models/`：qwen3-4b-16k（W8A8_G128 5.3G）、qwen3-1.7b（w8a8 2.4G，ctx 上限 4k）、qwen2.5-1.5b（旧 PoC）。
