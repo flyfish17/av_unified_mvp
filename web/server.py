@@ -297,9 +297,11 @@ _SUMMARY_PROMPT = """你是会议纪要助手。下面是一段语音转写文�
 
 严格按以下四个字段输出，不要 JSON、不要 markdown 代码块、不要其他内容：
 标题：6-15 字，反映核心主题
-摘要：50-100 字一段话，提炼核心观点
+摘要：80-150 字一段话。必须写出会议达成的具体结论、关键数字、决策事项和待办安排，
+      像向没参会的人交代"这场会定了什么"。禁止写"会议围绕…展开讨论""就…进行了交流"
+      这类空话套话——每句都要有实质信息。
 要点：
-- 每条一行以"- "开头，3-5 条，每条 10-30 字，覆盖讨论要点
+- 每条一行以"- "开头，3-5 条，每条 10-30 字，覆盖讨论要点，保留具体人名/数字/结论
 关键词：3-6 个名词性短语，用、分隔，便于后期检索
 
 转写若带 [话筒N] 发言人标签，要点尽量注明发言人（谁提出、谁确认、谁负责）。
@@ -384,9 +386,11 @@ _MERGE_PROMPT = """你是会议纪要助手。下面是一场长会议按时间�
 
 严格按以下四个字段输出，不要 JSON、不要 markdown 代码块、不要其他内容：
 标题：6-15 字，反映核心主题
-摘要：50-100 字一段话，提炼核心观点
+摘要：80-150 字一段话。必须写出会议达成的具体结论、关键数字、决策事项和待办安排，
+      像向没参会的人交代"这场会定了什么"。禁止写"会议围绕…展开讨论""就…进行了交流"
+      这类空话套话——每句都要有实质信息。
 要点：
-- 每条一行以"- "开头，4-8 条，每条 10-30 字，合并重复、覆盖全程要点
+- 每条一行以"- "开头，4-8 条，每条 10-30 字，合并重复、覆盖全程要点，保留具体人名/数字/结论
 关键词：3-6 个名词性短语，用、分隔，便于后期检索
 
 要点清单若带发言人（话筒N），汇总时保留发言人归属（谁提出、谁决策、谁负责）。
@@ -517,11 +521,18 @@ def _split_transcript(transcript: str, chunk_size: int = _SUMMARY_CHUNK_SIZE) ->
 
 
 def _call_ollama_summary(transcript: str, model: str = "qwen3.5:4b") -> dict:
-    """生成纪要。短文本（≤_SUMMARY_CHUNK_THRESHOLD 字）单次调用；
-    长文本切段提要点→汇总。返回 dict 额外带 _chunks / _elapsed_sec 供上层记录耗时。"""
-    t0 = time.time()
+    """生成纪要。短文本（≤阈值）单次调用；长文本切段提要点→汇总。
+    返回 dict 额外带 _chunks / _elapsed_sec 供上层记录耗时。
 
-    if len(transcript) <= _SUMMARY_CHUNK_THRESHOLD:
+    阈值/分段大小可被 llm.summary.chunk_threshold_chars / chunk_size_chars 覆盖：
+    NPU 上 1.7B 模型 ctx 仅 4096 token（≈2700 汉字），必须配小值（如 3500 字），
+    否则 15-30 分钟的短会走单次调用就会超模型 ctx。默认值针对 ollama 大 ctx。"""
+    t0 = time.time()
+    cfg = _summary_cfg()
+    threshold = int(cfg.get("chunk_threshold_chars") or _SUMMARY_CHUNK_THRESHOLD)
+    chunk_size = int(cfg.get("chunk_size_chars") or _SUMMARY_CHUNK_SIZE)
+
+    if len(transcript) <= threshold:
         prompt = _SUMMARY_PROMPT.format(transcript=transcript)
         result = _generate_fields(prompt, model, _dynamic_timeout(len(transcript)))
         result["_chunks"] = 1
@@ -529,7 +540,7 @@ def _call_ollama_summary(transcript: str, model: str = "qwen3.5:4b") -> dict:
         return result
 
     # 长文本：切段 → 每段提要点 → 汇总
-    chunks = _split_transcript(transcript)
+    chunks = _split_transcript(transcript, chunk_size)
     total = len(chunks)
     logger.info(f"summary 分段：{len(transcript)} 字 → {total} 段")
     all_points = []

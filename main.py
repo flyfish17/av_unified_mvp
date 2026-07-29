@@ -67,13 +67,17 @@ MANAGED_MODULES = [
 ]
 
 # CR-DIG7201：应用形态 profile（config 顶层 app_profile / 环境变量 AV_APP_PROFILE）。
-# meeting_asr = 纯会议转写产品（快捷会议 7 系列），视频链路整条不起，
-# 3588 的 4 核 CPU 全部留给 FunASR 转写 + ollama 纪要。
+# meeting_asr = 纯会议转写纪要产品（快捷会议 7 系列 CR-DIG7201-A），视频链路整条不起，
+# 3588 的 4 核 CPU 全部留给 FunASR 转写 + 纪要。
+# llm_engine 也不起：① 纯纪要产品用不到意图识别/设备控制；② 它的 1.5B 意图 daemon
+# 常驻占 NPU ~2GB IOVA，会和纪要用的 1.7B RKLLM 抢 NPU（P0-b 实测 IOVA -12 冲突），
+# 不起它才能把 NPU 完整留给纪要模型。
 _MEETING_ASR_EXCLUDE = {
     "modules.video_processor.main",
     "modules.keyframe_filter.main",
     "modules.openvocab_filter.main",
     "modules.scene_analyzer.main",  # 当前不在 MANAGED_MODULES，防御性排除
+    "modules.llm_engine.main",
 }
 APP_PROFILES = {
     "full": MANAGED_MODULES,
