@@ -1290,6 +1290,28 @@
     MODULES_META.forEach(m => { if (s[m.id] === false) hideModule(m.id); });
   }
 
+  // CR-DIG7201 第7条：按 app_profile 隐藏无关卡，纯纪要产品出厂界面就该干净。
+  // full 零回归；meeting_asr 只留纪要相关卡（转写卡——纪要走卡内"生成纪要"按钮弹窗，
+  // 发言人分段也在转写卡内）。用 removeWidget 让 GridStack 重排无空洞；
+  // 不写 VISIBILITY_KEY —— 这是形态决定非用户偏好，切回 full 自然全显、也不污染用户手动偏好。
+  const PROFILE_KEEP = {
+    meeting_asr: new Set(["overview-transcript"]),
+  };
+  function applyProfileVisibility() {
+    const prof = document.body.dataset.appProfile || "full";
+    const keep = PROFILE_KEEP[prof];
+    if (!keep) return;  // full 或未知 profile 不动
+    const grid = window.__overviewGrid;
+    MODULES_META.forEach(m => {
+      if (keep.has(m.id)) return;
+      const wrap = getGridItem(m.id);
+      if (wrap && wrap.style.display !== "none") {
+        if (grid) grid.removeWidget(wrap, false);  // false = 不删 DOM，只移出网格
+        wrap.style.display = "none";
+      }
+    });
+  }
+
   // ── 客户视图开关（顶栏 toggle · 默认关）──────────────────────────
   // 进入客户视图：备份当前可见性偏好，仅显示 CUSTOMER_VIEW_MODULES 列出的模块
   // 退出客户视图：把备份的可见性偏好写回，并按其重新 apply
@@ -1858,6 +1880,7 @@
   injectHideButtons();
   setupLayoutPopup();
   applyVisibility();
+  applyProfileVisibility();  // CR-DIG7201 第7条：按 app_profile 隐藏无关卡（meeting_asr 只留纪要）
   setupCustomerViewToggle();
   setupAddSourceForm();
   setupLanScan();

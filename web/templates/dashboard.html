@@ -936,7 +936,7 @@
     }
   </style>
 </head>
-<body>
+<body data-app-profile="{{ app_profile|default('full') }}">
   <!-- 启动 splash：首次加载短暂全屏 LOGO；?nosplash 跳过 -->
   <div id="splash">
     <div class="splash-logo">CREATOR AI 视听理解平台<span class="badge">CREATOR</span></div>

@@ -122,9 +122,25 @@ def push_event(ev: dict) -> None:
     push("transcript", ev)
 
 
+def _app_profile() -> str:
+    """读当前应用形态 profile（环境变量优先，其次 config，缺省 full）。
+    供前端按 profile 显隐卡片（CR-DIG7201 第7条：纯纪要产品出厂界面干净）。"""
+    import os
+    import yaml
+    prof = os.environ.get("AV_APP_PROFILE")
+    if prof:
+        return prof
+    p = _PROJECT_ROOT / "config" / "system_config.yaml"
+    if p.exists():
+        with open(p, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        return cfg.get("app_profile") or "full"
+    return "full"
+
+
 @_app.get("/")
 def index():
-    return _flask.render_template("dashboard.html")
+    return _flask.render_template("dashboard.html", app_profile=_app_profile())
 
 
 @_app.get("/config/device_catalog")
