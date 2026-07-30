@@ -11,14 +11,17 @@ modules/audio_processor/main.py
 """
 import io
 import logging
+import math
 import os
 import signal
+import struct
 import sys
 import threading
 import wave
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlparse, parse_qs
 
 import yaml
 
@@ -54,13 +57,79 @@ class _AudioExportHandler(BaseHTTPRequestHandler):
             return self._serve_wav()
         self.send_error(404)
 
+    # WAV(RIFF) 的 size 字段是 32-bit 无符号 → 单个 WAV 的 PCM 上限 4G。
+    # 全音频超 4G（约 35 小时）时按此切片，每片独立 WAV，前端循环下 ?part=N。
+    _WAV_PART_MAX = 4 * 1024 ** 3 - 4096  # 留头部余量
+
     def _serve_wav(self):
         proc = self.processor_ref
         if proc is None:
             self.send_response(503)
             self.send_header("Content-Length", "0"); self.end_headers()
             return
-        pcm = proc.get_pcm_buffer()
+        # 全音频：优先读磁盘会话文件（流式，支持整场 + >4G 切片）；
+        # ARM/旧路径无 get_session_path → 回退内存 buffer（最近若干秒，旧行为）。
+        get_path = getattr(proc, "get_session_path", None)
+        path = get_path() if callable(get_path) else None
+        if path and os.path.exists(path) and os.path.getsize(path) > 0:
+            return self._serve_wav_from_file(path)
+        return self._serve_wav_from_buffer(proc)
+
+    def _serve_wav_from_file(self, path):
+        """磁盘会话文件（PCM）流式加 WAV 头返回。?part=N 取第 N 片（超 4G 才多片）。"""
+        qs = parse_qs(urlparse(self.path).query)
+        try:
+            part = int(qs.get("part", ["0"])[0])
+        except ValueError:
+            part = 0
+        size = os.path.getsize(path)
+        parts = max(1, math.ceil(size / self._WAV_PART_MAX))
+        if part < 0 or part >= parts:
+            self.send_response(416)
+            self.send_header("Content-Length", "0"); self.end_headers()
+            return
+        offset = part * self._WAV_PART_MAX
+        data_len = min(self._WAV_PART_MAX, size - offset)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        suffix = f"-part{part + 1}of{parts}" if parts > 1 else ""
+        self.send_response(200)
+        self.send_header("Content-Type", "audio/wav")
+        self.send_header("Content-Length", str(44 + data_len))
+        self.send_header("Content-Disposition",
+                         f'attachment; filename="audio-{stamp}{suffix}.wav"')
+        self.send_header("X-Audio-Parts", str(parts))  # 前端据此循环下多片
+        self.send_header("Access-Control-Expose-Headers", "X-Audio-Parts")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            self.wfile.write(self._wav_header(self.sample_rate, data_len))
+            with open(path, "rb") as f:
+                f.seek(offset)
+                remaining = data_len
+                while remaining > 0:
+                    chunk = f.read(min(1 << 20, remaining))  # 1MB/次
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+
+    @staticmethod
+    def _wav_header(rate: int, data_len: int) -> bytes:
+        """44 字节 WAV 头（int16 mono）。流式用，不能用 wave 模块（需 seekable）。"""
+        return struct.pack(
+            "<4sI4s4sIHHIIHH4sI",
+            b"RIFF", 36 + data_len, b"WAVE",
+            b"fmt ", 16, 1, 1, rate, rate * 2, 2, 16,
+            b"data", data_len,
+        )
+
+    def _serve_wav_from_buffer(self, proc):
+        """回退：内存 buffer（ARM/旧路径，最近若干秒）。"""
+        get_buf = getattr(proc, "get_pcm_buffer", None)
+        pcm = get_buf() if callable(get_buf) else b""
         if not pcm:
             self.send_response(204)
             self.send_header("Content-Length", "0"); self.end_headers()
@@ -68,7 +137,7 @@ class _AudioExportHandler(BaseHTTPRequestHandler):
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wf:
             wf.setnchannels(1)
-            wf.setsampwidth(2)  # int16
+            wf.setsampwidth(2)
             wf.setframerate(self.sample_rate)
             wf.writeframes(pcm)
         wav_bytes = buf.getvalue()

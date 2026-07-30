@@ -14,6 +14,7 @@ import threading
 import time
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
@@ -90,14 +91,16 @@ class AudioProcessor:
         self._pcm_frames_received = 0
         self._mic_self_check_done = False
 
-        # PCM 环形缓冲：留最近 N 秒原音，前端"导出原音"按钮调 get_pcm_buffer 打包 WAV。
-        # int16 mono @ sample_rate × N 秒 × 2 byte ≈ 9.6MB（5min @ 16kHz），可接受。
-        # 不持久化磁盘（演示场景），supervisor 重启就丢；如客户要长录改 _pcm_ring_seconds。
-        self._pcm_ring_seconds = 300
-        self._pcm_ring_max_bytes = self.sample_rate * 2 * self._pcm_ring_seconds
-        self._pcm_ring: "collections.deque[bytes]" = collections.deque()
-        self._pcm_ring_total = 0
-        self._pcm_ring_lock = threading.Lock()
+        # 全音频落盘（CR-DIG7201 生产版）：采集边写盘，一场会（start→stop）一个文件。
+        # 不在内存存全量——几小时会议几百 MB、5G 上限=5G 内存，3588 会 OOM。
+        # 磁盘 data/audio/session-<ts>.pcm 持久化，5G 总上限滚动删最老会话文件。
+        # 导出时（get_session_path）加 WAV 头返回；单场 >4G（WAV 上限）由 web 层切片。
+        self._audio_dir = Path(__file__).resolve().parents[2] / "data" / "audio"
+        self._audio_dir.mkdir(parents=True, exist_ok=True)
+        self._audio_total_cap = 5 * 1024 ** 3   # 5G 总上限（约 44 小时 @16kHz）
+        self._session_file = None               # 当前会话文件句柄（写入中）
+        self._session_path: Optional[Path] = None
+        self._session_lock = threading.Lock()
 
     # ── 启动/停止 ─────────────────────────────────────────────────────
 
@@ -116,6 +119,8 @@ class AudioProcessor:
         self._pcm_frames_received = 0
         self._mic_self_check_done = False
         self._last_partial = ""
+        # 全音频落盘：一次 start（开机/点开始）= 一场会，开新会话文件
+        self._open_session_file()
         if self.mode == "local_offline":
             self._start_local_offline()
             return
@@ -152,6 +157,8 @@ class AudioProcessor:
                 self._stream.close()
             except Exception:
                 pass
+        # 全音频落盘：一场会结束，关会话文件（下次 start 开新场）
+        self._close_session_file()
         logger.info("音频处理器已停止")
 
     # ── websocket_2pass ───────────────────────────────────────────────
@@ -252,12 +259,11 @@ class AudioProcessor:
         gained_f32 = filtered_f32 * self._denoise_gain
         pcm_i16 = np.clip(gained_f32 * 32768.0, -32768.0, 32767.0).astype(np.int16)
         pcm = pcm_i16.tobytes()
-        # 写环形 buffer（旁路 tee，不影响 send_q 流向 FunASR）
-        with self._pcm_ring_lock:
-            self._pcm_ring.append(pcm)
-            self._pcm_ring_total += len(pcm)
-            while self._pcm_ring_total > self._pcm_ring_max_bytes and self._pcm_ring:
-                self._pcm_ring_total -= len(self._pcm_ring.popleft())
+        # 写会话文件（旁路 tee，不影响 send_q 流向 FunASR）。全音频落盘不吞异常，
+        # 写盘失败（磁盘满等）直接报错让人看到（转写不受影响，仍走 send_q）。
+        with self._session_lock:
+            if self._session_file is not None:
+                self._session_file.write(pcm)
         try:
             self._send_q.put_nowait(pcm)
         except queue.Full:
@@ -267,10 +273,52 @@ class AudioProcessor:
             except (queue.Empty, queue.Full):
                 pass
 
-    def get_pcm_buffer(self) -> bytes:
-        """返回当前环形 buffer 的 PCM 字节流（int16 mono @ sample_rate）。"""
-        with self._pcm_ring_lock:
-            return b"".join(self._pcm_ring)
+    # ── 全音频会话文件（CR-DIG7201 生产版）─────────────────────────────
+    def _open_session_file(self):
+        """开新会话文件（一场会 = start→stop）。开新前先按 5G 上限滚动腾空间。"""
+        with self._session_lock:
+            if self._session_file is not None:
+                return
+            self._enforce_disk_cap()
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            self._session_path = self._audio_dir / f"session-{stamp}.pcm"
+            self._session_file = open(self._session_path, "wb")
+            logger.info(f"音频落盘会话开始: {self._session_path}")
+
+    def _close_session_file(self):
+        with self._session_lock:
+            if self._session_file is not None:
+                try:
+                    self._session_file.close()
+                except Exception as e:
+                    logger.warning(f"关闭会话文件失败: {e}")
+                self._session_file = None
+
+    def _enforce_disk_cap(self):
+        """所有会话文件总和超 5G → 删最老（保留当前会话，至少留 1 个）。"""
+        files = sorted(self._audio_dir.glob("session-*.pcm"),
+                       key=lambda p: p.stat().st_mtime)
+        total = sum(p.stat().st_size for p in files)
+        while total > self._audio_total_cap and len(files) > 1:
+            oldest = files.pop(0)
+            sz = oldest.stat().st_size
+            try:
+                oldest.unlink()
+                total -= sz
+                logger.info(f"5G 上限滚动删除最老会话: {oldest.name}")
+            except Exception as e:
+                logger.warning(f"滚动删除失败 {oldest.name}: {e}")
+                break
+
+    def get_session_path(self) -> Optional[str]:
+        """返回当前会话文件路径（供 web 层加 WAV 头导出）。先 flush 保证已写数据可读。"""
+        with self._session_lock:
+            if self._session_file is not None:
+                try:
+                    self._session_file.flush()
+                except Exception:
+                    pass
+            return str(self._session_path) if self._session_path else None
 
     def _run_ws_loop(self):
         try:
