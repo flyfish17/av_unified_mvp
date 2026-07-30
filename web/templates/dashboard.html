@@ -37,6 +37,16 @@
         "nav    stage"
         "ticker ticker";
     }
+    /* CR-DIG7201 第7条延伸：纯纪要产品是单页（只总览转写卡），左侧多视图导航整栏隐藏，
+       主区占满 —— 去掉 nav 列/区域，否则 grid 第一列会留 --nav-w 空白。full 不受影响。 */
+    body[data-app-profile="meeting_asr"] {
+      grid-template-columns: 1fr;
+      grid-template-areas:
+        "header"
+        "stage"
+        "ticker";
+    }
+    body[data-app-profile="meeting_asr"] nav { display: none; }
     a { color: var(--accent); text-decoration: none; }
     code { color: var(--accent-2); font-family: ui-monospace, SFMono-Regular, monospace; }
 
