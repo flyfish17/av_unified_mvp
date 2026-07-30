@@ -20,6 +20,12 @@
 
 <!-- 终端在此追加，最新在上 -->
 
+- **全音频落盘导出 done @2026-07-30  commit（processor.py+main.py）**（生产版，替代内存 5min ring）
+  - 需求：导出原音要**整场会议全部**音频（原内存环形 buffer 只留最近 5min）。用户拍板：每场会一个文件、5G 上限滚动删最老。
+  - 内存 ring → 磁盘落盘：采集边写 `data/audio/session-<ts>.pcm`，一场会（processor.start→stop）一个文件。不在内存存全量（几小时几百MB、5G=5G内存会 OOM）。5G 总上限滚动删最老会话（保当前，约 44h）。
+  - 导出 `/audio/export.wav` 流式读磁盘加 WAV 头；WAV 4G(RIFF 32-bit)硬上限，超 4G(≈35h)按 `?part=N` 切片 + `X-Audio-Parts` 头——**每场会一文件<4G 正常不触发，纯超长防御**。ARM 路径 getattr 回退旧 buffer 不坏。前端零改动（已是 `<a download>` 原生流式下载）。
+  - **验收（3588 真机，重启走 SIGKILL 保 funasr）**：会话文件线性增长 117s→3.67MB（32KB/s，**无 9.6MB=5min 封顶**）；导出 **163.5s 全程音频** 16kHz 单声道 WAV 正确、单片、filename 正确；单元测 WAV 往返 + 5G 滚动删最老保当前均过。
+  - **磁盘**：3588 /home 151G 可用，5G 上限占比小。会话文件在 `data/audio/`（gitignore，重启保留）。
 - **DECISIONS 第7条 前端卡片按 profile 显隐 done @2026-07-29 14:55  commit:d484373**（已上线生产）
   - server.py index 注入 app_profile（env>config>full）；dashboard.html body 承载；dashboard.js `applyProfileVisibility` 用 GridStack removeWidget 隐藏非白名单卡（无网格空洞）、不写 VISIBILITY_KEY（形态决定非用户偏好）。
   - meeting_asr 白名单=转写卡（纪要弹窗+发言人分段都在卡内）；隐藏其余 10 张（nodered/video/intent/scene/husion/openvocab/quick-control/lan-scan/add-source/online-stream）。full 零回归。
