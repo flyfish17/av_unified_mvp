@@ -24,7 +24,12 @@
   - server.py index 注入 app_profile（env>config>full）；dashboard.html body 承载；dashboard.js `applyProfileVisibility` 用 GridStack removeWidget 隐藏非白名单卡（无网格空洞）、不写 VISIBILITY_KEY（形态决定非用户偏好）。
   - meeting_asr 白名单=转写卡（纪要弹窗+发言人分段都在卡内）；隐藏其余 10 张（nodered/video/intent/scene/husion/openvocab/quick-control/lan-scan/add-source/online-stream）。full 零回归。
   - **Chrome 实测**：meeting_asr（5052）+ 生产 5050 主卡片区只剩转写卡界面干净；full（5051）Node-RED/视频墙等全卡保留。生产已部署重启（SIGKILL 保 funasr）。
-  - **留观**：左侧导航模块列表仍全显（含离线模块）——第7条只覆盖主卡片区（overview-*）；左侧导航按 profile 过滤是延伸项，未做，待定。
+  - ~~留观：左侧导航仍全显~~ → 已解决（下条，方案一）。
+- **左侧导航整栏隐藏 done @2026-07-30  commit（dashboard.html 模板）**（第7条延伸，用户选方案一）
+  - 纪要机是单页产品，左侧多视图导航整栏多余（含一排离线模块噪音）。纯 CSS：`body[data-app-profile=meeting_asr]` 改 grid 单列 + 去 nav 区域 + `nav{display:none}`，主区占满无左侧空白。复用 data-app-profile，零 JS。full 零回归。
+  - **对比过方案二（过滤条目）**：方案一纯 CSS ~5 行 vs 方案二 JS ~15-25 行+维护 nav 白名单；单页产品不需多视图切换器 → 方案一更小更适合。
+  - **部署**：仅改模板，TEMPLATES_AUTO_RELOAD 生效，scp 到生产刷新即见效，**无需重启 supervisor（零转写中断）**。生产 5050 已验证渲染新 CSS、200。
+  - 注：本轮 Chrome extension 断连未截图，靠 curl 验证 HTML/CSS 就位 + 逻辑审查；视觉效果待浏览器刷新确认。
 
 - **meeting_asr 常驻纪要机上线 done @2026-07-29 14:15  commit:84043af 4e2fa13**（DECISIONS 决策 1-5 执行完成）
   **切换动作（3588 生产，62 demo 已确认可用无空窗）**：
