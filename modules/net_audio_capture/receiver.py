@@ -31,9 +31,10 @@ logger = logging.getLogger(__name__)
 _TAG_RE = re.compile(r"<\|[^|]+\|>")
 
 PACKET_HEADER_BYTES = 4
-PACKET_SAMPLES = 320
-PACKET_PCM_BYTES = PACKET_SAMPLES * 2
-PACKET_TOTAL_BYTES = PACKET_HEADER_BYTES + PACKET_PCM_BYTES  # 644
+# 原厂 doc 称每包 320 sample / 644B；2026-08-03 真机（会议主机 192.168.2.2）实测为
+# 160 sample / 324B（doc 不可信，已抓包对照）。故不写死包长：4 字节头 + 任意偶数字节 PCM，
+# 按实际长度解，兼容不同型号/配置的包长，头部 ID 仍做合法性交叉校验。
+MIN_PACKET_BYTES = PACKET_HEADER_BYTES + 2  # 至少 1 个 16bit sample
 
 
 @dataclass
@@ -280,11 +281,11 @@ class UdpMicChannel:
                 continue
             except OSError:
                 return  # socket 已关闭
-            if len(data) != PACKET_TOTAL_BYTES:
+            if len(data) < MIN_PACKET_BYTES or (len(data) - PACKET_HEADER_BYTES) % 2 != 0:
                 self.bad_packets += 1
                 if self.bad_packets <= 3 or self.bad_packets % 1000 == 0:
                     logger.warning(
-                        f"[mic{self.mic_id}] 包长异常 {len(data)}B（应 {PACKET_TOTAL_BYTES}B，"
+                        f"[mic{self.mic_id}] 包长异常 {len(data)}B（需 4 字节头+偶数 PCM，"
                         f"累计 {self.bad_packets}）"
                     )
                 continue
@@ -305,7 +306,10 @@ class UdpMicChannel:
                     )
                 expected_id = id1
 
-            pcm48 = np.frombuffer(data, dtype="<i2", offset=PACKET_HEADER_BYTES)
+            # 2026-08-03 真机实测：PCM 是大端（BE）。包头 ID 也是大端（00 08 00 08），
+            # 整个协议大端一致。原按小端 "<i2" 解会把安静波形（大端小负值 ff f1=-15）
+            # 解成满量程噪声（0xf1ff=-3585）→ 听感嗡嗡、转写幻听碎片（曾误判为工频干扰）。
+            pcm48 = np.frombuffer(data, dtype=">i2", offset=PACKET_HEADER_BYTES)
             # 静音门：48K 原始域算 RMS，避免白做降采样
             rms = float(np.sqrt(np.mean(pcm48.astype(np.float64) ** 2)))
             now = time.time()
