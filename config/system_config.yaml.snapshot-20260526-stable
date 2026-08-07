@@ -1,0 +1,56 @@
+mqtt:
+  broker: 127.0.0.1
+  port: 1883
+  client_id: av_3588_001
+  keepalive: 60
+  topics:
+    audio_command: av/audio/command
+    audio_partial: av/audio/partial
+    control: av/control
+    discovery: av/discovery
+    video_detect: av/video/detect
+audio:
+  funasr:
+    mode: websocket_2pass
+    sample_rate: 16000
+    chunk_size:
+    - 5
+    - 10
+    - 5
+    chunk_interval: 10
+    chunk_interval_ms: 60
+    hotwords: ''
+    use_itn: true
+    silence_duration_ms: 600
+    silence_threshold: 0.012
+    url: ws://127.0.0.1:10095
+llm:
+  ollama:
+    model_fast: qwen2.5-coder:1.5b
+    model_smart: qwen2.5-coder:1.5b
+    timeout: 30
+    url: http://127.0.0.1:11434/api/generate
+  escalate_to_jetson: true
+  host_label: '3588'
+video:
+  sources:
+  - enabled: true
+    name: USB罗技C920
+    url: /dev/video20
+  - name: 1608门口
+    url: rtsp://admin:a12345678@192.168.5.181:554/Streaming/Channels/301
+    enabled: true
+  - name: 财务室
+    url: rtsp://admin:a12345678@192.168.5.181:554/Streaming/Channels/1001
+    enabled: true
+  - name: 办公室
+    url: rtsp://admin:a12345678@192.168.5.181:554/Streaming/Channels/601
+    enabled: true
+  yolo:
+    model: yolov8n.pt
+    confidence: 0.5
+    inference_fps: 2
+    target_classes:
+    - person
+system:
+  default_location: ''
