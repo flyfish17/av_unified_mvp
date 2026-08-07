@@ -1,4 +1,16 @@
+# 应用形态 profile：决定 supervisor 拉起哪些模块（见 main.py APP_PROFILES）。
+# full（默认，可省略）= 全部模块；meeting_asr = 纯会议转写（CR-DIG7201-A），
+# 不起 video_processor/keyframe_filter/openvocab_filter，CPU 全给转写+纪要。
+# app_profile: meeting_asr
 audio:
+  # 音频来源（CR-DIG7201 P1）：mic（本地麦，默认）| net_multicast（会议主机 8 路组播）
+  # 可列表共存：source: [mic, net_multicast]
+  # source: net_multicast
+  # net_multicast:
+  #   group: 224.1.1.11
+  #   base_port: 1000        # 8 路 = 1000-1007，端口号定话筒路号
+  #   num_channels: 8
+  #   gate_threshold: 150    # int16 RMS 静音门阈值，闲路不占 FunASR decoder
   funasr:
     mode: websocket_2pass
     sample_rate: 16000
@@ -14,6 +26,12 @@ audio:
     silence_threshold: 0.012
     url: ws://127.0.0.1:10095
 llm:
+  # 纪要 LLM 后端（CR-DIG7201 P0-b）。缺省 = ollama CPU；上 NPU 时取消注释：
+  # summary:
+  #   backend: rkllm                                        # ollama | rkllm
+  #   url: http://127.0.0.1:8000/v1/chat/completions        # RKLLM-API-Server
+  #   model: qwen3-4b-16k
+  #   unload_url: http://127.0.0.1:8000/v1/models/unload    # 跑完释放 NPU 内存
   ollama:
     model_fast: qwen3.5:4b
     model_smart: qwen3.5:4b

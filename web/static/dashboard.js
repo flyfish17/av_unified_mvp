@@ -176,9 +176,18 @@
     delete cleanEv.__channel;
     const handlers = channelHandlers.get(ch);
     if (!handlers) return;
+    // 7/29 双倍转写修复：tickerForward 每条事件只转发一次，不随 handler 数放大。
+    // audio_processor 与 net_audio_capture 都声明 channel="transcript"（P1 起），
+    // 两个模块各注册一个 handler → 旧代码对每个 handler 都调 tickerForward
+    // → 总览转写卡每句 append 两遍。tickerForward 内部只按 channel 分发，
+    // module 参数仅作存在性判断，转发一次即为正确语义（punctuator 注释同款坑）。
+    let forwarded = false;
     handlers.forEach(({ handler, module }) => {
       try { handler(cleanEv); } catch (err) { console.warn(err); }
-      if (module) { try { tickerForward(module, ch, cleanEv); } catch (_) {} }
+      if (module && !forwarded) {
+        forwarded = true;
+        try { tickerForward(module, ch, cleanEv); } catch (_) {}
+      }
     });
   };
 
@@ -856,7 +865,11 @@
   const PARA_SOFT_LIMIT = 250;
   const PARA_HARD_LIMIT = 400;
   const PARA_ENDS_PUNCT = /[。！？!?]\s*$/;
-  const _txState = { para: null, finalsText: "", lastFinalMs: 0 };
+  // CR-DIG7201 P3：会议主机多路话筒（payload 带 mic_id/speaker）按发言人分段分色；
+  // 本地麦（无 mic_id）行为不变
+  const MIC_COLORS = ["#e6a23c", "#4fc3f7", "#81c784", "#f48fb1",
+                      "#ba68c8", "#ffd54f", "#4db6ac", "#ff8a65"];
+  const _txStates = new Map();  // spkKey(""=本地麦) → { para, finalsText, lastFinalMs }
   function fmtClock(ts) {
     const d = ts ? new Date(ts * 1000) : new Date();
     const p = n => String(n).padStart(2, "0");
@@ -872,27 +885,40 @@
     pulseEl(card.closest(".strip-card"));
 
     const nowMs = Date.now();
-    const stale = !_txState.para || !card.contains(_txState.para);
-    const gapped = _txState.lastFinalMs > 0 &&
-                   (nowMs - _txState.lastFinalMs) / 1000 > PARA_GAP_SEC;
+    // CR-DIG7201 转写体验（2026-08-07）：per-speaker 段指针 — 多路话筒碎 final
+    // 交错到达时各归各段（同话筒 60s 内追加回自己最近的段，即使段不在 DOM 末尾），
+    // 替代原"发言人一切换就开新段"→ 消除单词级小段穿插。本地麦（无 mic_id）空键，行为不变。
+    const spk = (ev.mic_id !== undefined && ev.mic_id !== null)
+      ? (ev.speaker || `话筒${ev.mic_id + 1}`) : null;
+    let st = _txStates.get(spk || "");
+    if (!st) { st = { para: null, finalsText: "", lastFinalMs: 0 }; _txStates.set(spk || "", st); }
+    const stale = !st.para || !card.contains(st.para);
+    const gapped = st.lastFinalMs > 0 &&
+                   (nowMs - st.lastFinalMs) / 1000 > PARA_GAP_SEC;
 
     if (stale || gapped) {
       const para = document.createElement("div");
       para.className = "tx-para";
+      const spkHtml = spk
+        ? `<span class="tx-spk" style="color:${MIC_COLORS[(ev.mic_id ?? 0) % 8]};font-weight:600">${escHtml(spk)}</span> · `
+        : "";
       para.innerHTML =
-        `<div class="tx-meta"><span class="tx-ts">${fmtClock(ev.ts)}</span></div>` +
+        `<div class="tx-meta">${spkHtml}<span class="tx-ts">${fmtClock(ev.ts)}</span></div>` +
         `<div class="tx-text"><span class="finals"></span><span class="live"></span></div>`;
+      para.dataset.speaker = spk || "";
       card.appendChild(para);
       while (card.querySelectorAll(".tx-para").length > 50) card.firstChild.remove();
-      _txState.para = para;
-      _txState.finalsText = "";
-      _txState.lastFinalMs = 0;
+      st.para = para;
+      st.finalsText = "";
+      st.lastFinalMs = 0;
     }
 
-    const finalsEl = _txState.para.querySelector(".finals");
-    const liveEl   = _txState.para.querySelector(".live");
+    const finalsEl = st.para.querySelector(".finals");
+    const liveEl   = st.para.querySelector(".live");
     if (ev.is_final) {
-      const chunk = ev.text || "";
+      let chunk = ev.text || "";
+      // 段首悬空标点清理：上游碎 final 常以逗号/句号开头，归段后落段首扎眼（2026-08-07）
+      if (chunk && !st.finalsText) chunk = chunk.replace(/^[，。、；：！？,.;:!?\s]+/, "");
       if (chunk) {
         // final 定稿：包成 tx-final-flash span 追加（绿色短闪 0.5s fade 回主色）
         // 不再 finalsEl.textContent = 全文（会刷掉前面 span 的动画），改 appendChild
@@ -901,14 +927,14 @@
         span.textContent = chunk;
         finalsEl.appendChild(span);
       }
-      _txState.finalsText += chunk;
+      st.finalsText += chunk;
       liveEl.textContent = "";
-      _txState.lastFinalMs = nowMs;
+      st.lastFinalMs = nowMs;
       // 篇幅自然分段：本段已饱和 → 标记下次 final 开新段
-      const len = _txState.finalsText.length;
-      const endedClean = PARA_ENDS_PUNCT.test(_txState.finalsText);
+      const len = st.finalsText.length;
+      const endedClean = PARA_ENDS_PUNCT.test(st.finalsText);
       if (len >= PARA_HARD_LIMIT || (len >= PARA_SOFT_LIMIT && endedClean)) {
-        _txState.para = null;
+        st.para = null;
       }
     } else if (ev.text) {
       // partial 增量 append：FunASR 2pass-online 每条 ev.text 是一段新词（非累积）
@@ -1275,6 +1301,28 @@
   function applyVisibility() {
     const s = loadVisibility();
     MODULES_META.forEach(m => { if (s[m.id] === false) hideModule(m.id); });
+  }
+
+  // CR-DIG7201 第7条：按 app_profile 隐藏无关卡，纯纪要产品出厂界面就该干净。
+  // full 零回归；meeting_asr 只留纪要相关卡（转写卡——纪要走卡内"生成纪要"按钮弹窗，
+  // 发言人分段也在转写卡内）。用 removeWidget 让 GridStack 重排无空洞；
+  // 不写 VISIBILITY_KEY —— 这是形态决定非用户偏好，切回 full 自然全显、也不污染用户手动偏好。
+  const PROFILE_KEEP = {
+    meeting_asr: new Set(["overview-transcript"]),
+  };
+  function applyProfileVisibility() {
+    const prof = document.body.dataset.appProfile || "full";
+    const keep = PROFILE_KEEP[prof];
+    if (!keep) return;  // full 或未知 profile 不动
+    const grid = window.__overviewGrid;
+    MODULES_META.forEach(m => {
+      if (keep.has(m.id)) return;
+      const wrap = getGridItem(m.id);
+      if (wrap && wrap.style.display !== "none") {
+        if (grid) grid.removeWidget(wrap, false);  // false = 不删 DOM，只移出网格
+        wrap.style.display = "none";
+      }
+    });
   }
 
   // ── 客户视图开关（顶栏 toggle · 默认关）──────────────────────────
@@ -1845,6 +1893,7 @@
   injectHideButtons();
   setupLayoutPopup();
   applyVisibility();
+  applyProfileVisibility();  // CR-DIG7201 第7条：按 app_profile 隐藏无关卡（meeting_asr 只留纪要）
   setupCustomerViewToggle();
   setupAddSourceForm();
   setupLanScan();
@@ -1892,7 +1941,8 @@
           const ts = p.querySelector(".tx-ts")?.textContent || "";
           // 只导出已定稿（.finals），未定稿的 .live 不算
           const txt = p.querySelector(".finals")?.textContent || "";
-          if (txt) lines.push(`[${ts}]\n${txt}\n`);
+          const spk = p.dataset.speaker;
+          if (txt) lines.push(`[${ts}]${spk ? ` [${spk}]` : ""}\n${txt}\n`);
         });
         const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
         const url = URL.createObjectURL(blob);
@@ -1924,11 +1974,13 @@
   function gatherTranscriptText() {
     const card = document.querySelector('[data-overview="transcript"] .strip-card-body');
     if (!card) return { text: "", durationSec: 0 };
-    const finals = card.querySelectorAll(".tx-para .finals");
     const parts = [];
-    finals.forEach(el => {
-      const t = el.textContent || "";
-      if (t.trim()) parts.push(t);
+    card.querySelectorAll(".tx-para").forEach(p => {
+      const t = p.querySelector(".finals")?.textContent || "";
+      if (!t.trim()) return;
+      // P3：多路话筒段带发言人前缀，纪要 LLM 据此区分谁说了什么
+      const spk = p.dataset.speaker;
+      parts.push(spk ? `[${spk}] ${t}` : t);
     });
     // 用第一段时间戳估算时长（仅用于元数据，不影响 LLM 调用）
     const firstTsEl = card.querySelector(".tx-para .tx-ts");
@@ -1951,7 +2003,7 @@
       alert("当前转写内容太少，至少需要 30 字才能生成纪要");
       return;
     }
-    const modal = openSummaryModal({ loading: true });
+    const modal = openSummaryModal({ loading: true, charCount: text.length });
     btn.disabled = true;
     try {
       const r = await fetch("/audio/summary", {
@@ -1972,19 +2024,37 @@
     }
   }
 
-  function openSummaryModal({ loading }) {
+  let summaryTimerId = null;
+
+  function openSummaryModal({ loading, charCount }) {
     closeSummaryModal();  // 防止重叠
     const modal = document.createElement("div");
     modal.className = "summary-modal";
+    // 长转写走后端分段（>8000 字）。3588 CPU 实测吞吐 ≈ 600 字/分钟（prefill 8 tok/s），
+    // 按此给"最长约 X 分钟"上限；Mac 等强机会远快于估计，措辞留余地
+    const isLong = (charCount || 0) > 8000;
+    const estMin = Math.max(1, Math.ceil((charCount || 0) / 600));
+    const hint = isLong
+      ? `长会议 ${charCount} 字分段生成中，本机 CPU 推理最长约 ${estMin} 分钟`
+      : `qwen3.5:4b · 视设备算力数秒到数分钟`;
     modal.innerHTML = `<div class="summary-card${loading ? " loading" : ""}">
-      ${loading ? "✦ 正在生成纪要…<br><span style='font-size:11px'>（qwen3.5:4b · 约 5-15 秒）</span>" : ""}
+      ${loading ? `✦ 正在生成纪要…<br><span style='font-size:11px'>（${hint} · 已用时 <span data-sm-elapsed>0</span>s）</span>` : ""}
     </div>`;
     modal.onclick = (e) => { if (e.target === modal) closeSummaryModal(); };
     document.body.appendChild(modal);
+    if (loading) {
+      const t0 = Date.now();
+      summaryTimerId = setInterval(() => {
+        const el = modal.querySelector("[data-sm-elapsed]");
+        if (!el) { clearInterval(summaryTimerId); summaryTimerId = null; return; }
+        el.textContent = Math.round((Date.now() - t0) / 1000);
+      }, 1000);
+    }
     return modal;
   }
 
   function closeSummaryModal() {
+    if (summaryTimerId) { clearInterval(summaryTimerId); summaryTimerId = null; }
     document.querySelectorAll(".summary-modal").forEach(m => m.remove());
   }
 
@@ -1996,10 +2066,13 @@
     const ptsHtml = (data.points || []).map(p => `<li>${escHtmlSafe(p)}</li>`).join("");
     const kwsHtml = (data.keywords || []).map(k => `<span class="kw">${escHtmlSafe(k)}</span>`).join("");
     const dur = data.duration_sec ? `${Math.round(data.duration_sec / 60)} 分钟 · ` : "";
+    const gen = data.elapsed_sec
+      ? `生成 ${Math.round(data.elapsed_sec)}s${data.chunks > 1 ? `（${data.chunks} 段）` : ""} · `
+      : "";
     const fileMeta = data.file ? `已留档 summaries/${escHtmlSafe(data.file)}` : "";
     card.innerHTML = `
       <h2>${escHtmlSafe(data.title)}</h2>
-      <div class="summary-meta">${dur}${data.id} · ${fileMeta}</div>
+      <div class="summary-meta">${dur}${gen}${data.id} · ${fileMeta}</div>
       <p class="sm-summary">${escHtmlSafe(data.summary)}</p>
       <h3>关键点</h3>
       <ul class="sm-points">${ptsHtml}</ul>
