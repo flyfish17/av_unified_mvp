@@ -214,11 +214,14 @@ class UdpMicChannel:
 
     静音门：闲置话筒不喂 FunASR（8 路全喂 3588 扛不住 8 个 online decoder）。
     RMS 超阈值开门，低于阈值持续 hangover_ms 后关门；关门期数据丢弃（≈静音）。
+    hangover 默认 1800ms（2026-08-07 由 800 上调）：真人句内停顿常见 0.8-1.5s，
+    800ms 门逢停顿即关门补静音强制结算 final → 一句话被切成 2-4 字碎片；
+    1800ms 让词间停顿不触发门切（server VAD 的自然分句不受此参数控制）。
     """
 
     def __init__(self, mic_id: int, group: str, port: int, funasr_cfg: dict,
                  callback: Callable[[MicTranscriptEvent], None],
-                 gate_threshold: float = 150.0, gate_hangover_ms: int = 800):
+                 gate_threshold: float = 150.0, gate_hangover_ms: int = 1800):
         self.mic_id = mic_id
         self.group = group
         self.port = port

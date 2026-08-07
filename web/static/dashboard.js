@@ -869,7 +869,7 @@
   // 本地麦（无 mic_id）行为不变
   const MIC_COLORS = ["#e6a23c", "#4fc3f7", "#81c784", "#f48fb1",
                       "#ba68c8", "#ffd54f", "#4db6ac", "#ff8a65"];
-  const _txState = { para: null, finalsText: "", lastFinalMs: 0, speaker: null };
+  const _txStates = new Map();  // spkKey(""=本地麦) → { para, finalsText, lastFinalMs }
   function fmtClock(ts) {
     const d = ts ? new Date(ts * 1000) : new Date();
     const p = n => String(n).padStart(2, "0");
@@ -885,15 +885,18 @@
     pulseEl(card.closest(".strip-card"));
 
     const nowMs = Date.now();
-    const stale = !_txState.para || !card.contains(_txState.para);
-    const gapped = _txState.lastFinalMs > 0 &&
-                   (nowMs - _txState.lastFinalMs) / 1000 > PARA_GAP_SEC;
-    // 发言人切换 → 强制开新段（多路话筒各说各的，不混段）
+    // CR-DIG7201 转写体验（2026-08-07）：per-speaker 段指针 — 多路话筒碎 final
+    // 交错到达时各归各段（同话筒 60s 内追加回自己最近的段，即使段不在 DOM 末尾），
+    // 替代原"发言人一切换就开新段"→ 消除单词级小段穿插。本地麦（无 mic_id）空键，行为不变。
     const spk = (ev.mic_id !== undefined && ev.mic_id !== null)
       ? (ev.speaker || `话筒${ev.mic_id + 1}`) : null;
-    const spkChanged = spk !== _txState.speaker;
+    let st = _txStates.get(spk || "");
+    if (!st) { st = { para: null, finalsText: "", lastFinalMs: 0 }; _txStates.set(spk || "", st); }
+    const stale = !st.para || !card.contains(st.para);
+    const gapped = st.lastFinalMs > 0 &&
+                   (nowMs - st.lastFinalMs) / 1000 > PARA_GAP_SEC;
 
-    if (stale || gapped || spkChanged) {
+    if (stale || gapped) {
       const para = document.createElement("div");
       para.className = "tx-para";
       const spkHtml = spk
@@ -905,16 +908,17 @@
       para.dataset.speaker = spk || "";
       card.appendChild(para);
       while (card.querySelectorAll(".tx-para").length > 50) card.firstChild.remove();
-      _txState.para = para;
-      _txState.finalsText = "";
-      _txState.lastFinalMs = 0;
-      _txState.speaker = spk;
+      st.para = para;
+      st.finalsText = "";
+      st.lastFinalMs = 0;
     }
 
-    const finalsEl = _txState.para.querySelector(".finals");
-    const liveEl   = _txState.para.querySelector(".live");
+    const finalsEl = st.para.querySelector(".finals");
+    const liveEl   = st.para.querySelector(".live");
     if (ev.is_final) {
-      const chunk = ev.text || "";
+      let chunk = ev.text || "";
+      // 段首悬空标点清理：上游碎 final 常以逗号/句号开头，归段后落段首扎眼（2026-08-07）
+      if (chunk && !st.finalsText) chunk = chunk.replace(/^[，。、；：！？,.;:!?\s]+/, "");
       if (chunk) {
         // final 定稿：包成 tx-final-flash span 追加（绿色短闪 0.5s fade 回主色）
         // 不再 finalsEl.textContent = 全文（会刷掉前面 span 的动画），改 appendChild
@@ -923,14 +927,14 @@
         span.textContent = chunk;
         finalsEl.appendChild(span);
       }
-      _txState.finalsText += chunk;
+      st.finalsText += chunk;
       liveEl.textContent = "";
-      _txState.lastFinalMs = nowMs;
+      st.lastFinalMs = nowMs;
       // 篇幅自然分段：本段已饱和 → 标记下次 final 开新段
-      const len = _txState.finalsText.length;
-      const endedClean = PARA_ENDS_PUNCT.test(_txState.finalsText);
+      const len = st.finalsText.length;
+      const endedClean = PARA_ENDS_PUNCT.test(st.finalsText);
       if (len >= PARA_HARD_LIMIT || (len >= PARA_SOFT_LIMIT && endedClean)) {
-        _txState.para = null;
+        st.para = null;
       }
     } else if (ev.text) {
       // partial 增量 append：FunASR 2pass-online 每条 ev.text 是一段新词（非累积）

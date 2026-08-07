@@ -11,6 +11,7 @@ audio:
   #   base_port: 1000        # 8 路 = 1000-1007，端口号定话筒路号
   #   num_channels: 8
   #   gate_threshold: 150    # int16 RMS 静音门阈值，闲路不占 FunASR decoder
+  #   gate_hangover_ms: 1800 # 静音门关门等待：词间停顿(<1.8s)不强制结算 final，防碎句
   funasr:
     mode: websocket_2pass
     sample_rate: 16000

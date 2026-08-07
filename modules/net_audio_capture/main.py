@@ -41,6 +41,7 @@ class NetAudioCaptureModule(BaseModule):
         self._base_port = int(mc.get("base_port", 1000))
         self._num_channels = int(mc.get("num_channels", 8))
         self._gate_threshold = float(mc.get("gate_threshold", 150.0))
+        self._gate_hangover_ms = int(mc.get("gate_hangover_ms", 1800))
 
         topics = cfg.get("mqtt", {}).get("topics", {})
         streams = [
@@ -78,6 +79,7 @@ class NetAudioCaptureModule(BaseModule):
                 funasr_cfg=funasr_cfg_of(self.cfg),
                 callback=self._on_transcript,
                 gate_threshold=self._gate_threshold,
+                gate_hangover_ms=self._gate_hangover_ms,
             )
             ch.start()
             self._channels.append(ch)

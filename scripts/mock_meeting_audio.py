@@ -3,8 +3,10 @@
 scripts/mock_meeting_audio.py
 会议主机组播发包模拟器（CR-DIG7201 P1 离线验证）。
 
-把 wav 按原厂协议切包发到组播：4B 头（16bit ID 大端×2）+ 320 sample × 16bit LE，
+把 wav 按原厂协议切包发到组播：4B 头（16bit ID 大端×2）+ 320 sample × 16bit BE，
 48000Hz 单声道，6.667ms/包 实时节奏。
+（2026-08-07 对齐 P2 真机纠偏：PCM 大端；真机实为 160 sample/324B，
+receiver 弹性包长两者都收，mock 保持 320 sample 不影响验证。）
 
 用法：
   python scripts/mock_meeting_audio.py --ch 0:a.wav --ch 2:b.wav [--loop] \
@@ -63,7 +65,8 @@ def send_channel(mic_id: int, wav_path: str, group: str, base_port: int,
             if stop.is_set():
                 break
             chunk = pcm[i * 320:(i + 1) * 320]
-            sock.sendto(header + chunk.astype("<i2").tobytes(), (group, port))
+            # P2 真机纠偏（2026-08-03）：全协议大端，receiver 按 >i2 解；LE 会被解成满量程噪声
+            sock.sendto(header + chunk.astype(">i2").tobytes(), (group, port))
             t_next += interval
             delay = t_next - time.monotonic()
             if delay > 0:
