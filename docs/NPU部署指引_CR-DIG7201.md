@@ -16,6 +16,23 @@
 - **复用路径（省掉环境搭建）**：保留 daemon 的 rkllm 调用核 → 换 4B-16k 模型 → 套一层 HTTP（自己加 Flask，或把 poc 调用核塞进 RKLLM-API-Server 的 server 框架）。
 - ⚠️ daemon（PID 2975，7/27 起）在跑，动它前先确认有无依赖；扩 context 到 16k 要**实测 NPU 内存**（4B W8A8 + 16k KV cache，16G 够不够）。
 
+## 🚨 下载卡点解决 + 最快验证路（2026-07-29 主 Claude 联网查证）
+**当前卡点**：4B .rkllm 从 HF/hf-mirror 下载中断（Mac 缓存 2.9G / 5.3GB，无活跃下载进程）。代码侧 P0-b 已完成（commit d87be0c 后端可切 rkllm），**只差模型到位**。
+
+**解法（按推荐序）**：
+1. **⭐ 最快验证路（不等 4B）**：板上现成 `Qwen2.5-1.5B-Instruct_W8A8_RK3588.rkllm` 直接跑通 NPU 纪要链路（rkllm-poc daemon），用**短样本**（<2000 token，配现 context 2048）测 prefill/decode tok/s，外推 2 万字 → **先拿到"NPU 能否 ~2min"的答案**，回答产品卖点问题；4B 质量后补。（注：1.5B daemon PID 2975 在跑，测速可复用其 stdin/stdout 协议。）
+2. **换国内源拉 4B**：modelscope（魔搭）拉**原始 Qwen3-4B 权重**（国内快）→ 本地 `rkllm-toolkit v1.2.1b1` 自转 W8A8：`export_rkllm.py --target-platform rk3588 --num_npu_core 3 --quantized_dtype w8a8 --max-context-len 16384`（**16k 必须转换时指定**）。可能比等 HF 下现成 .rkllm 快。
+3. **续传/换现成 .rkllm**：HF `kamyarkazemi1373/Qwen3-4B-W8A8-RK3588` 或 `randomblock1/Qwen3-4B-Instruct-2507-rk3588`（16k 版）——都是转好的，续传或换镜像。
+- 参考：CSDN/博客园/魔乐社区有完整 Qwen3-4B RK3588 转换流程（中文）；RKLLM Toolkit v1.2.1b1 确认支持 Qwen3-0.6B/1.7B/4B。
+
+## ⚠️ 内存约束实测（2026-07-29 主 Claude 触发 OOM 发现）
+主 Claude 测 NPU `qwen3-4b-16k` 出**全量 2 万字**(12.6k token)纪要 → **253s 连接断 + 触发 OOM killer 杀 ollama**（已 systemd 自愈，生产无损）。
+- **根因**：16G 内存下 NPU(4B-16k ~5GB 模型 + 16k KV) + ollama(qwen3.5:4b ~5.7GB) + 视听(video/FunASR) **三者同跑内存不足**。
+- **P0-b 必做的内存管理**：换 NPU 后**下线 ollama**（`systemctl stop ollama`，省 5.7GB）+ `meeting_asr` profile 关视频链路；NPU 纪要跑完调 `/v1/models/unload` 释放。**三者不能同时占内存**。
+- **全量 vs 分段**：即使 NPU，全量 12.6k token 的 KV cache 也吃内存；先在"停 ollama + 关视频"的**干净环境**测全量能否成，不成则 NPU 也走分段。
+- **待终端**：干净环境（停 ollama + 关视频）下测 NPU 4B 出纪要**真实耗时/tok/s**——这才是 CR-DIG7201 卖点的准数。
+- ⚠️ **教训**：勿在生产满载时对 NPU 发大请求（会 OOM 连累 ollama/视听）。
+
 ## 三步（若不复用 poc、从零走官方，参考）
 
 ### ① 拿模型（二选一）

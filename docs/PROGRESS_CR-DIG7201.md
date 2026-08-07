@@ -20,6 +20,21 @@
 
 <!-- 终端在此追加，最新在上 -->
 
+- **转写碎句修复（待决项 5-1 启用执行） done @2026-08-07 14:25（主 Claude，A/B 实测 + 真浏览器验收）**
+  用户启用 8/3 入档的"final 颗粒度过细"项：碎 final 交错显示话筒1/话筒2 单词级小段，界面乱。
+  **A/B 实测推翻方案①假设（重要，防复跑）**：TTS 素材带 0.8-1.5s 句内停顿（`say [[slnc]]`），双路交错发。对照组 hangover=800：12 条 final、平均 8.5 字、8 次交错换段；**实验组 hangover=1800：12 条、8.5 字、切分点完全一致 = 零改善**。根因：门开着时真实停顿静音照喂 server，**FunASR server 端 VAD 才是分句者**，hangover 只控"关门补静音"时机。→ 方案①降级为辅助（减少关门数据丢弃、防重开门丢字），**碎句解药 = 方案②前端归段**；根治上游颗粒度须动 server VAD 参数（方案③，留观未动）。
+  **方案②落地（dashboard.js，主力）**：`_txState` 单指针 → `_txStates` per-speaker Map，同话筒 final 归回自己最近的段（60s PARA_GAP 复用，即使段不在 DOM 末尾），删除"发言人切换强制开新段"；本地麦空键行为不变。取文/导出按段拼 + dataset.speaker 前缀，格式不变且"谁的话归谁一段"对纪要 LLM 更友好。**Chrome 真浏览器验收（5050 生产）**：mock 双路 loop 发流 → 话筒1/话筒2 各归一整段、段头一次性色彩标签、碎 final 段内静默追加、零穿插 ✅。
+  **方案①同步上线**：receiver 默认 800→1800 + `gate_hangover_ms` 进 config（板上已显式写 1800，example 已注释）。
+  **顺手修**：mock_meeting_audio.py 字节序 LE→BE（P2 真机纠偏时漏改，LE 会被 receiver `>i2` 解成噪声，mock 才能继续当验证工具）。
+  **部署**：receiver/main/dashboard.js scp 生产（备份 .bak-hangover-20260807），config 备份后插参数块；kill 模块 supervisor 自动重拉（14:17 起 8 路全绑、FunASR 8 路连上）。dashboard.js 静态文件刷新即生效。
+  **踩坑复现台账预言**：`pkill -f "modules.net_audio_capture.main"` 明文匹配把 ssh 远程 shell 自己杀了（P1 部署注记原话警告过）——远程杀进程用 `pgrep -f "net_audio_captur[e]"` 字符类写法。
+
+- **产品化 SOP 欠账兑现（重启失效项修复） done @2026-08-07 14:00（主 Claude，板上运维无代码改动）**
+  背景：板子 8/4 16:15 重启，"SOP 待补"预言的两项全部兑现失效，**纪要核心链断 3 天**：① sysctl 特权端口回落 1024 → net_audio_capture 绑 1000 失败 crash-loop（supervisor 退避重拉 3 天）；② rkllm server（nohup）:8000 掉，无自启。dashboard 5050 一直 200 = 壳活链断，无人察觉——**教训：壳的 200 不代表链路健康，探活应看 1000-1007 绑定 + :8000**。
+  修复（板上，均已持久化）：① `/etc/sysctl.d/99-av-multicast.conf` 固化 `ip_unprivileged_port_start=1000`（先 `sysctl -w` 即时生效，supervisor 下轮重拉自愈，零人工干预）；② 新装 `/etc/systemd/system/rkllm-api.service`（User=firefly，`RKLLM_LIB_PATH=/home/firefly/rkllm-poc/artifacts/.../librkllmrt.so`，gunicorn 官方参数 `-w 1 -k gthread --threads 4 --timeout 300 -b 0.0.0.0:8000`，Restart=on-failure，enabled）；③ `model_config.json` 关 thinking 核对仍在（capabilities:[instruct]、temp 0.3，文件级不受重启影响）。
+  验收：8 路 1000-1007 全绑定（单进程 8 fd）、mic 通道连 FunASR ws:10095；:8000 三模型识别（1.7b/1.5b/4b-16k）、**NPU 冒烟推理通**（1.7b 出 token + unload 还 IOVA `{"status":"ok"}`）；模块 6/6。SOP 待补三项就此全清（③ 本属部署清单项，已核）。
+  注：husion poll 失败（192.168.5.253:6000 no route）= 湖森设备不在线，旧况与本次无关。
+
 - **P2 真机联调 done @2026-08-03（主 Claude，正确 7 系列主机）  commit: 见本次提交**
   正确快捷 7 系列主机到货上电，音频从 **AudioLink 口**走组播（源 `192.168.2.2:100` → `224.1.1.11:1000-1007`）。
   **协议实测两处纠偏（原厂 doc 是工程草稿、注释里自己都打问号，抓真实流量为准）**：
@@ -97,9 +112,14 @@
 
 1. **纪要模型定型**（P0-b ②）：A=1.7B 全程（6.2min，质量中，summary 偏薄）；B=1.7B 分段+4B 汇总（est 9-10min，质量高，4B 有偶发 SIGSEGV 风险）；C=先 A 上线、B 做后续优化。终端建议 **C**。
 2. **meeting_asr 形态 llm_engine 去向**（P0-b ④，NPU IOVA 冲突）：意图识别切 ollama CPU（`AV_LLM_BACKEND=ollama`）还是 meeting 产品直接不起 llm_engine？纯转写产品用不到意图控制的话建议后者。
-3. rkllm API server 未装 systemd（重启不自启）——产品化部署 SOP 时补，还是现在就装？
+3. ~~rkllm API server 未装 systemd（重启不自启）~~ ✅ 已解决 @2026-08-07：`rkllm-api.service` 已装并 enable（见进度日志），sysctl 特权端口同步持久化。
 4. **音频多源选择器**（2026-07-29 用户提，P2 现场触发）：主机发错型号（发来的是别的设备，网上抓到的 224.1.1.32 RTP 流是硬盘录像机分布式盒子，与转写无关），工厂将补正确会议主机。需求升级：视听程序支持音频源可选——**网络组播抓包 / 线路输入(line-in) / USB**，像讯飞一样"扫描后列出、标出已连接的、选中连接"，≥2 源可选。工作量评估见下方专节，待用户拍板分阶段。
     - 硬件已核实（3588）：card0 ES8323 板载 line-in（空闲，留给主机模拟 Audio out）、card2 C920 USB 麦（生产在用）、网络组播（P1 net_audio_capture 已通）——三源齐备不冲突。
+
+5. **转写体验优化（2026-08-03 P2 真机后，用户界面实测提出，均暂不做·入档备用）**：
+    - ~~**final 结算颗粒度过细（主要，用户洞察）**~~ ✅ **已解决 @2026-08-07**（用户启用，见进度日志）：方案② per-speaker 前端归段 = 主力落地；方案① hangover 800→1800 同步上线但 **A/B 实测证明对碎句无效**（分句者是 server VAD，非我们的门），定性为防丢字辅助；方案③（server VAD 参数）留观——若真实会议仍嫌上游 final 碎（影响导出原文颗粒度，不影响界面），再动 FunASR 容器参数。原始分析存档：hangover 800ms 逢停顿关门补静音强制结算 + 交错显示 → 视觉碎似串音；有声书连续无停顿=长句。
+    - **降串扰"最响话筒选择"（次要，真实会议空话筒场景）**：某话筒无本地声源（安静）时，邻座 1 米外发言会被它拾成 final → 发言人归属错。8/3 双话筒实测因话筒2 一直有有声书（强信号）压制串音、未暴露。方案：net_audio_capture 模块层收集同一时间窗各路 RMS，仅最强路发布 final、抑制弱路（麦克风阵列 loudest-mic gating，约几十行）。
+    - 用户 8/3 判断：当前无大范围串音，**暂不动**，方案入档备用，真实会议实测再定。
 
 ## 音频多源选择器 · 工作量评估（2026-07-29）
 
