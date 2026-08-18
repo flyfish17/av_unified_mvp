@@ -123,6 +123,10 @@ class AVSupervisor:
         if "net_multicast" in sources:
             self._managed_modules.append("modules.net_audio_capture.main")
 
+        # 门禁联动（公司大门云眸远程开门）：配置 door_access.enabled 才拉起
+        if self.cfg.get("door_access", {}).get("enabled"):
+            self._managed_modules.append("modules.door_access.main")
+
         self.mqtt = MQTTBridge(self.cfg.get("mqtt", {}))
         self._web_push = lambda *_: None
 
@@ -379,6 +383,9 @@ class AVSupervisor:
             topics.get("audio_listening", "av/audio/listening"),
             self._on_audio_listening,
         )
+        # 门禁联动：访客弹窗 + 开门结果 → door SSE channel（payload.event 区分 visitor/result）
+        self.mqtt.subscribe("av/door/visitor", self._on_door)
+        self.mqtt.subscribe("av/door/result", self._on_door)
 
     def _on_audio_partial(self, topic: str, payload: dict):
         """BaseModule 双层载荷 → 提取内层推到 transcript SSE"""
@@ -393,6 +400,10 @@ class AVSupervisor:
     def _on_video_detect(self, topic: str, payload: dict):
         """BaseModule publish 后字段在顶层（header + camera/time/detections）"""
         self._web_push("video", payload)
+
+    def _on_door(self, topic: str, payload: dict):
+        """door_access 事件（visitor/result 由 payload.event 区分）→ door SSE"""
+        self._web_push("door", payload)
 
     def _on_llm_event(self, topic: str, payload: dict):
         """意图识别事件 → intent SSE（dashboard.js 能处理双层或单层）"""

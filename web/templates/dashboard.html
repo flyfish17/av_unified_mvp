@@ -720,6 +720,32 @@
     .hdr-toggle.on:hover  { background: rgba(46,160,67,0.10); }
     .hdr-toggle.off:hover { background: rgba(107,118,132,0.10); color: var(--text-2); }
 
+    /* ── 门禁弹窗（door_access：门口有人 → 右上角卡片 + 开门按钮） ── */
+    .door-popup {
+      position: fixed; top: 64px; right: 20px; z-index: 9500;
+      width: 300px; background: var(--panel); border: 1px solid var(--accent);
+      border-radius: 10px; padding: 16px 18px; color: var(--text);
+      box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+    }
+    .door-popup h3 { margin: 0 0 4px; font-size: 16px; color: var(--accent); }
+    .door-popup .door-meta {
+      font-size: 11px; color: var(--dim);
+      font-family: ui-monospace, monospace; margin-bottom: 12px;
+    }
+    .door-popup .door-status { font-size: 13px; margin: 8px 0; min-height: 18px; }
+    .door-popup .door-status.ok  { color: var(--final); }
+    .door-popup .door-status.err { color: #f85149; }
+    .door-actions { display: flex; gap: 8px; }
+    .door-actions button {
+      flex: 1; padding: 8px 0; border-radius: 6px; font-size: 14px; cursor: pointer;
+      border: 1px solid var(--line); background: transparent; color: var(--text-2);
+    }
+    .door-actions .door-open-btn {
+      background: var(--accent); border-color: var(--accent);
+      color: #fff; font-weight: 600;
+    }
+    .door-actions button:disabled { opacity: 0.5; cursor: default; }
+
     /* ── 纪要弹窗（C 档：✦ 生成纪要 按钮触发） ───────────────── */
     .summary-modal {
       position: fixed; inset: 0; z-index: 9000;

@@ -204,6 +204,92 @@
     try { handleListening(ev); } catch (err) { console.warn(err); }
   });
 
+  // 门禁联动：door channel（supervisor 桥接 av/door/visitor + av/door/result）
+  // visitor → 右上角弹窗（开门按钮）；result → 弹窗内状态行更新
+  subscribeChannel("door", (ev) => {
+    try { handleDoorEvent(ev); } catch (err) { console.warn(err); }
+  });
+
+  let _doorPopupTimer = null;
+  function handleDoorEvent(ev) {
+    if (ev.event === "visitor") showDoorPopup(ev);
+    else if (ev.event === "result") showDoorResult(ev);
+  }
+
+  function showDoorPopup(ev) {
+    // SSE 快照重放会把最后一条 visitor 推给新开/刷新的页面；
+    // 超过 60s（与弹窗自动收起时长一致）的陈旧事件丢弃，人早走了
+    if (ev.ts && Date.now() / 1000 - ev.ts > 60) return;
+    let popup = document.getElementById("door-popup");
+    if (!popup) {
+      popup = document.createElement("div");
+      popup.id = "door-popup";
+      popup.className = "door-popup";
+      popup.innerHTML = `
+        <h3>🚪 门口有人</h3>
+        <div class="door-meta"></div>
+        <div class="door-status"></div>
+        <div class="door-actions">
+          <button class="door-open-btn">开门</button>
+          <button class="door-dismiss-btn">忽略</button>
+        </div>`;
+      popup.querySelector(".door-open-btn").onclick = doorOpen;
+      popup.querySelector(".door-dismiss-btn").onclick = closeDoorPopup;
+      document.body.appendChild(popup);
+    }
+    const t = new Date((ev.ts || Date.now() / 1000) * 1000);
+    popup.querySelector(".door-meta").textContent =
+      `${ev.camera || "?"} · ${ev.person_count || 1} 人 · ${t.toLocaleTimeString()}`;
+    // 无人操作 60s 自动收起；期间再次触发（冷却后又有人）重置计时
+    clearTimeout(_doorPopupTimer);
+    _doorPopupTimer = setTimeout(closeDoorPopup, 60000);
+  }
+
+  function closeDoorPopup() {
+    clearTimeout(_doorPopupTimer);
+    const popup = document.getElementById("door-popup");
+    if (popup) popup.remove();
+  }
+
+  async function doorOpen() {
+    const popup = document.getElementById("door-popup");
+    if (!popup) return;
+    const btn = popup.querySelector(".door-open-btn");
+    const st = popup.querySelector(".door-status");
+    btn.disabled = true; btn.textContent = "开门中…";
+    st.className = "door-status"; st.textContent = "";
+    try {
+      const r = await fetch("/mqtt/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: "av/door/cmd", payload: { action: "open" } }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      // 实际结果由 av/door/result 经 door channel 回推 → showDoorResult
+    } catch (e) {
+      st.className = "door-status err"; st.textContent = `发送失败: ${e}`;
+      btn.disabled = false; btn.textContent = "开门";
+    }
+  }
+
+  function showDoorResult(ev) {
+    const popup = document.getElementById("door-popup");
+    if (!popup) return;
+    const btn = popup.querySelector(".door-open-btn");
+    const st = popup.querySelector(".door-status");
+    if (ev.ok) {
+      st.className = "door-status ok";
+      st.textContent = `✓ 已开门（${ev.latency_ms}ms，门 10 秒后自动上锁）`;
+      btn.textContent = "已开门";
+      clearTimeout(_doorPopupTimer);
+      _doorPopupTimer = setTimeout(closeDoorPopup, 5000);
+    } else {
+      st.className = "door-status err";
+      st.textContent = `✗ 开门失败: ${ev.message || ev.code}`;
+      btn.disabled = false; btn.textContent = "重试开门";
+    }
+  }
+
   function setHeaderStatus(text, cls) {
     const el = document.getElementById("header-status");
     if (el) { el.textContent = text; el.className = "pill " + cls; }

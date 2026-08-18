@@ -300,7 +300,14 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 
 ---
 
-### 2026-05-18 — 新阶段启动：两阶段框架定调 + 文档重构
+### 2026-08-18 — 门禁联动模块 door_access 落地（公司大门云眸远程开门）
+- **本次推进**：新增 `modules/door_access/`（云眸 token 缓存刷新 + 远程开门 + 门口 person 检测去抖 → av/door/visitor）；supervisor 按 `door_access.enabled` 条件拉起并桥接 door SSE channel；dashboard 右上角访客弹窗（开门按钮 + 结果状态行）；配置样例入 example yaml
+- **前置验证**（当日实测）：云眸 4 接口全链路通（token 7 天 / 事件查询 / 远程开门真开门，事件码 5/75 人脸过、5/21 开、5/22 关、3/1024 远程开、3/1029 心跳）；设备 E51574183 已绑 flyfish 账号；内网 ISAPI 备选路线卡在 isActivated=false + 无 admin 密码（192.168.2.88，DHCP 需改静态）
+- **踩坑已修**：模块内 token 稳定 401 根因 = 子类 `self.client_id` 被 BaseModule.__init__ 覆盖成 MQTT client_id（属性名撞车，base_module.py:64）——改名 hik_client_id 后 token 预热 604795s 通过。**BaseModule 子类禁用 client_id/broker/port 等基类字段名**
+- **未完成项**：① 门口摄像头尚未接入（camera_name=门口 待配真实源）；② 开门按钮无操作权限控制（内网任何人可开大门，上线前必须加）；③ 云眸消息通道 open_event_access 可替代轮询（注意 7 天不用自动停用）
+- **下次接手所需上下文**：账号/秘钥/设备/事件码见 memory `door-access-hik-cloud`；测试配置样例 `config/system_config.example.yaml` door_access 段；协议原文 iCloud `设备协议/门禁开门协议.docx`
+
+
 - 战略定位写入第一行："AI 技术底座 + A/B/C 三层次（架构 = 形态对应）"
 - §1.6 三步框架升级为 §3 两阶段框架
 - 阶段一打 `v1.0-stage1-mac-validated` tag 固化（销售 >16GB Mac checkout 即用）

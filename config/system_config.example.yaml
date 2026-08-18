@@ -102,6 +102,17 @@ web:
   port: 8501
   transcript_enabled: true
   transcript_port: 5050
+# 门禁联动（modules/door_access）：门口摄像头 person → dashboard 弹窗 → 云眸远程开门
+# 秘钥在 open2.hik-cloud.com 秘钥管理页；协议见 设备协议/门禁开门协议.docx
+# door_access:
+#   enabled: true
+#   client_id: xxxxxxxx
+#   client_secret: xxxxxxxx
+#   device_serial: E51574183
+#   door_id: "1"
+#   camera_name: 门口          # av/video/detect 的 camera 字段等于此值才触发弹窗
+#   person_confidence: 0.6
+#   visitor_cooldown_s: 30
 husion:
   host: 192.168.5.253
   port: 6000
