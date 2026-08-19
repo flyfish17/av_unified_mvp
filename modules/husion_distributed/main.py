@@ -38,6 +38,8 @@ DEFAULT_HOST = "192.168.5.253"
 DEFAULT_PORT = 6000
 DEFAULT_ID_RANGES = [[5001, 5009]]   # [[start, end_inclusive], ...]
 DEFAULT_POLL_INTERVAL = 30           # 秒
+DEFAULT_QUIESCE_AFTER = 5            # 连续失败 N 次后判定网内无 husion，降频静默
+DEFAULT_QUIESCE_INTERVAL = 600       # 静默期探测间隔（秒），设备上线自动恢复正常轮询
 TCP_TIMEOUT = 4.0
 
 
@@ -95,6 +97,8 @@ class HusionDistributedModule(BaseModule):
         self.husion_port = int(h.get("port", DEFAULT_PORT))
         self.id_ranges = h.get("id_ranges", DEFAULT_ID_RANGES)
         self.poll_interval = float(h.get("poll_interval", DEFAULT_POLL_INTERVAL))
+        self.quiesce_after = int(h.get("quiesce_after", DEFAULT_QUIESCE_AFTER))
+        self.quiesce_interval = float(h.get("quiesce_interval", DEFAULT_QUIESCE_INTERVAL))
 
         # 启动时 endpoints 空，第一次 poll 后填充
         super().__init__("husion_distributed", cfg, streams=[], endpoints=[])
@@ -102,6 +106,7 @@ class HusionDistributedModule(BaseModule):
         self._poll_lock = threading.Lock()
         self._last_poll_ok = False
         self._last_poll_ts = 0.0
+        self._fail_streak = 0  # 连续 poll 失败计数，达 quiesce_after 后降频静默
 
         signal.signal(signal.SIGINT, lambda s, f: self.stop())
         signal.signal(signal.SIGTERM, lambda s, f: self.stop())
@@ -170,6 +175,9 @@ class HusionDistributedModule(BaseModule):
                 self.endpoints = eps
                 self._last_poll_ok = True
                 self._last_poll_ts = time.time()
+                if self._fail_streak >= self.quiesce_after:
+                    self.logger.info("husion 设备恢复可达，退出静默、恢复正常轮询")
+                self._fail_streak = 0
                 # 重新广播 discovery 让前端看到新 endpoints
                 if self._connected:
                     self._publish_discovery("online")
@@ -178,7 +186,15 @@ class HusionDistributedModule(BaseModule):
                 )
             except Exception as e:
                 self._last_poll_ok = False
-                self.logger.warning(f"husion poll 失败 ({self.husion_host}:{self.husion_port})：{e}")
+                self._fail_streak += 1
+                if self._fail_streak < self.quiesce_after:
+                    self.logger.warning(f"husion poll 失败 ({self.husion_host}:{self.husion_port})：{e}")
+                elif self._fail_streak == self.quiesce_after:
+                    self.logger.warning(
+                        f"husion 连续 {self.quiesce_after} 次不可达 ({self.husion_host}:{self.husion_port})，"
+                        f"判定网内无 husion 设备，轮询降频至 {self.quiesce_interval:.0f}s 静默探测（设备上线自动恢复）"
+                    )
+                # 静默期内不再刷 WARNING，仅保持低频探测
 
     def run(self) -> None:
         """覆盖 BaseModule.run：心跳 + 周期 poll husion 合一。"""
@@ -192,7 +208,12 @@ class HusionDistributedModule(BaseModule):
             while self._running.is_set():
                 time.sleep(1)
                 now = time.time()
-                if now - last_poll >= self.poll_interval and self._connected:
+                interval = (
+                    self.quiesce_interval
+                    if self._fail_streak >= self.quiesce_after
+                    else self.poll_interval
+                )
+                if now - last_poll >= interval and self._connected:
                     self._poll_once()
                     last_poll = now
                 if now - last_heartbeat >= self.HEARTBEAT_INTERVAL and self._connected:

@@ -157,6 +157,9 @@ fi
 # dashboard 2pass partial/final 渲染不匹配)。故在拉 supervisor 前轮询 10095 ws-ready
 # (就绪时 HTTP 426)。2026-06-09 真实重启实锤的回归。
 hdr "1.5 等待 FunASR 容器就绪（最多 90s）"
+# 兜底：supervisor stop() 会 docker stop funasr，unless-stopped 策略在"人为停止"后
+# 开机不会自动拉起 → 这里显式 start（已在跑则 no-op），防开机干等 90s 降级。
+docker start funasr 2>/dev/null || true
 FUNASR_READY=0
 for i in $(seq 1 90); do
     code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:10095/ 2>/dev/null || echo 000)"

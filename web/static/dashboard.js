@@ -1746,6 +1746,8 @@
   // 10s 轮询 /api/husion/state；前台可见才拉，避免 idle tab 一直打 husion。
   // 9 设备列表（id 5001-5009：name + ip + dev_type + online）+ 5 个场景按钮（rx_id=5008）。
   function setupHusionPanel() {
+    // meeting_asr 纪要版无 husion 场景：卡片已隐藏，轮询也不起（避免 /api/husion/state 持续 502）
+    if ((document.body.dataset.appProfile || "full") === "meeting_asr") return;
     const card = document.querySelector('[data-overview="husion"]');
     if (!card) return;
     const devEl   = card.querySelector("#husion-devices");

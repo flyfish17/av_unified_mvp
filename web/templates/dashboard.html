@@ -1540,8 +1540,11 @@
           select.appendChild(husionGroup);
         } catch (_) {}
       }
-      refreshHusion();
-      setInterval(refreshHusion, 30000);
+      // meeting_asr 纪要版无 husion 场景，不起周期拉取
+      if ((document.body.dataset.appProfile || 'full') !== 'meeting_asr') {
+        refreshHusion();
+        setInterval(refreshHusion, 30000);
+      }
     })();
 
   </script>
