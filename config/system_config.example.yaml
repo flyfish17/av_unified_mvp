@@ -12,6 +12,9 @@ audio:
   #   num_channels: 8
   #   gate_threshold: 150    # int16 RMS 静音门阈值，闲路不占 FunASR decoder
   #   gate_hangover_ms: 1800 # 静音门关门等待：词间停顿(<1.8s)不强制结算 final，防碎句
+  #   mic_names:             # 话筒号(1-8) → 发言人名；未配置的路回退"话筒N"；改后重启 net_audio_capture 生效
+  #     "1": 张三
+  #     "2": 李四
   funasr:
     mode: websocket_2pass
     sample_rate: 16000

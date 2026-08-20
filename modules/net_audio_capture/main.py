@@ -42,6 +42,12 @@ class NetAudioCaptureModule(BaseModule):
         self._num_channels = int(mc.get("num_channels", 8))
         self._gate_threshold = float(mc.get("gate_threshold", 150.0))
         self._gate_hangover_ms = int(mc.get("gate_hangover_ms", 1800))
+        # 话筒号(1-based) → 发言人名映射；未配置的路回退"话筒N"。
+        # yaml 键可能被解析成 int，统一转 str 查表；空值视为未配置。
+        raw_names = mc.get("mic_names") or {}
+        self._mic_names = {
+            str(k): str(v).strip() for k, v in raw_names.items() if str(v).strip()
+        }
 
         topics = cfg.get("mqtt", {}).get("topics", {})
         streams = [
@@ -99,7 +105,7 @@ class NetAudioCaptureModule(BaseModule):
     # ── transcript → MQTT（对齐 audio_processor funasr_2pass 路径的 topic 契约）──
 
     def _on_transcript(self, ev: MicTranscriptEvent) -> None:
-        speaker = f"话筒{ev.mic_id + 1}"
+        speaker = self._mic_names.get(str(ev.mic_id + 1), f"话筒{ev.mic_id + 1}")
         inner = {
             "event_type": "transcription",
             "text": ev.text,
