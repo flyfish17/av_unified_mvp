@@ -1314,6 +1314,7 @@
     const s = loadVisibility(); s[id] = false; saveVisibility(s);
   }
   function showModule(id) {
+    if (isProfileHidden(id)) return;  // 形态隐藏的模块不给开回（防布局弹窗/show-all 绕过）
     const grid = window.__overviewGrid;
     const wrap = getGridItem(id);
     if (!grid || !wrap) return;
@@ -1350,9 +1351,18 @@
     if (!body) return;
     body.innerHTML = "";
     MODULES_META.forEach(m => {
+      const lbl = document.createElement("label");
+      if (isProfileHidden(m.id)) {
+        // 形态隐藏：灰置不可点（形态决定非用户偏好，不给开回的入口）
+        lbl.innerHTML = `<input type="checkbox" disabled> ${escHtml(m.title)}`;
+        lbl.style.opacity = "0.35";
+        lbl.style.cursor = "not-allowed";
+        lbl.title = "当前产品形态不含此模块";
+        body.appendChild(lbl);
+        return;
+      }
       const wrap = getGridItem(m.id);
       const visible = wrap && wrap.style.display !== "none";
-      const lbl = document.createElement("label");
       lbl.innerHTML = `<input type="checkbox" ${visible ? "checked" : ""}> ${escHtml(m.title)}`;
       lbl.querySelector("input").onchange = () => toggleModule(m.id);
       body.appendChild(lbl);
@@ -1373,7 +1383,7 @@
     });
     document.getElementById("layout-show-all").onclick = (e) => {
       e.stopPropagation();
-      MODULES_META.forEach(m => showModule(m.id));
+      MODULES_META.forEach(m => { if (!isProfileHidden(m.id)) showModule(m.id); });
       buildLayoutPopupBody();
     };
     document.getElementById("layout-reset").onclick = (e) => {
@@ -1396,10 +1406,21 @@
   const PROFILE_KEEP = {
     meeting_asr: new Set(["overview-transcript"]),
   };
+  // 模块是否被当前 profile 形态隐藏（形态决定，非用户偏好，用户不可开回）
+  function isProfileHidden(id) {
+    const keep = PROFILE_KEEP[document.body.dataset.appProfile || "full"];
+    return !!keep && !keep.has(id);
+  }
   function applyProfileVisibility() {
     const prof = document.body.dataset.appProfile || "full";
     const keep = PROFILE_KEEP[prof];
     if (!keep) return;  // full 或未知 profile 不动
+    // 纪要机形态下顶栏"旧页"链接与"客户视图"开关无意义（客户视图是 full demo 的
+    // 演示脸切换，此形态卡已被 profile 移除，点了只会乱版）——2026-08-20 用户拍板去掉
+    const cvBtn = document.getElementById("cv-toggle");
+    if (cvBtn) cvBtn.style.display = "none";
+    const legacy = document.querySelector('a[href="/transcript"]');
+    if (legacy && legacy.parentElement) legacy.parentElement.style.display = "none";
     const grid = window.__overviewGrid;
     MODULES_META.forEach(m => {
       if (keep.has(m.id)) return;
