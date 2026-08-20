@@ -986,7 +986,8 @@
       const para = document.createElement("div");
       para.className = "tx-para";
       const spkHtml = spk
-        ? `<span class="tx-spk" style="color:${MIC_COLORS[(ev.mic_id ?? 0) % 8]};font-weight:600">${escHtml(spk)}</span> · `
+        ? `<span class="tx-spk" data-mic-id="${ev.mic_id ?? 0}" title="点击改名"` +
+          ` style="color:${MIC_COLORS[(ev.mic_id ?? 0) % 8]};font-weight:600;cursor:pointer">${escHtml(spk)}</span> · `
         : "";
       para.innerHTML =
         `<div class="tx-meta">${spkHtml}<span class="tx-ts">${fmtClock(ev.ts)}</span></div>` +
@@ -1397,6 +1398,53 @@
   function applyVisibility() {
     const s = loadVisibility();
     MODULES_META.forEach(m => { if (s[m.id] === false) hideModule(m.id); });
+  }
+
+  // ── 话筒就地改名（2026-08-20 用户需求：点转写里的"话筒N"标签直接改）──────
+  // 点击 .tx-spk → 内联输入框 → Enter/失焦提交 POST /api/mic/rename（后端写
+  // data/mic_names.json 持久化 + MQTT 热更新采集模块，不断流）→ 本页同话筒
+  // 标签全部刷新；Esc 取消；提交空值 = 恢复默认"话筒N"。
+  function setupMicRename() {
+    const card = document.querySelector('[data-overview="transcript"] .strip-card-body');
+    if (!card) return;
+    card.addEventListener("click", (e) => {
+      const spkEl = e.target.closest(".tx-spk");
+      if (!spkEl || spkEl.dataset.micId === undefined || spkEl.querySelector("input")) return;
+      const micId = parseInt(spkEl.dataset.micId, 10);
+      const old = spkEl.textContent;
+      const input = document.createElement("input");
+      input.value = old;
+      input.maxLength = 16;
+      input.style.cssText = "width:96px;background:transparent;border:1px solid currentColor;" +
+                            "color:inherit;font:inherit;border-radius:3px;padding:0 4px";
+      spkEl.textContent = "";
+      spkEl.appendChild(input);
+      input.focus();
+      input.select();
+      let done = false;
+      const finish = (commit) => {
+        if (done) return;
+        done = true;
+        const name = input.value.trim();
+        spkEl.textContent = old;  // 先复原旧名，提交成功后统一刷新
+        if (!commit || name === old) return;
+        fetch("/api/mic/rename", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mic_id: micId, name }),
+        }).then(r => r.json()).then(res => {
+          if (!res || !res.ok) return;
+          const label = name || `话筒${micId + 1}`;
+          document.querySelectorAll(`.tx-spk[data-mic-id="${micId}"]`)
+            .forEach(el => { if (!el.querySelector("input")) el.textContent = label; });
+        }).catch(() => {});
+      };
+      input.onkeydown = (ev2) => {
+        if (ev2.key === "Enter") finish(true);
+        else if (ev2.key === "Escape") finish(false);
+      };
+      input.onblur = () => finish(true);
+    });
   }
 
   // CR-DIG7201 第7条：按 app_profile 隐藏无关卡，纯纪要产品出厂界面就该干净。
@@ -2008,6 +2056,7 @@
   setupLanScan();
   setupQuickControl();
   setupHusionPanel();
+  setupMicRename();  // 话筒就地改名（点转写里的话筒标签）
   setupSceneWatchPicker();
   setupSystemExit();
   setupIntentToggle();

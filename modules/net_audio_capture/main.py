@@ -9,6 +9,7 @@ modules/net_audio_capture/main.py
   - partial → av/audio/partial，final → av/audio/command_punctuated
     payload 带 mic_id / speaker 字段（下游按需取用，不破坏现有订阅）
 """
+import json
 import logging
 import signal
 import sys
@@ -42,12 +43,16 @@ class NetAudioCaptureModule(BaseModule):
         self._num_channels = int(mc.get("num_channels", 8))
         self._gate_threshold = float(mc.get("gate_threshold", 150.0))
         self._gate_hangover_ms = int(mc.get("gate_hangover_ms", 1800))
-        # 话筒号(1-based) → 发言人名映射；未配置的路回退"话筒N"。
-        # yaml 键可能被解析成 int，统一转 str 查表；空值视为未配置。
-        raw_names = mc.get("mic_names") or {}
-        self._mic_names = {
-            str(k): str(v).strip() for k, v in raw_names.items() if str(v).strip()
+        # 话筒号(1-based) → 发言人名映射；未配置的路回退"话筒N"。两层：
+        #   config mic_names       = 出厂预配兜底（yaml 键可能解析成 int，统一转 str）
+        #   data/mic_names.json    = 用户就地改名（dashboard 点话筒标签 → web
+        #                            /api/mic/rename 写入），优先级高于 config
+        self._mic_names_base = {
+            str(k): str(v).strip()
+            for k, v in (mc.get("mic_names") or {}).items() if str(v).strip()
         }
+        self._mic_names_file = Path("data/mic_names.json")
+        self._mic_names = self._merged_mic_names(self._load_user_mic_names())
 
         topics = cfg.get("mqtt", {}).get("topics", {})
         streams = [
@@ -67,8 +72,26 @@ class NetAudioCaptureModule(BaseModule):
         signal.signal(signal.SIGINT, lambda s, f: self.stop())
         signal.signal(signal.SIGTERM, lambda s, f: self.stop())
 
+    def _load_user_mic_names(self) -> dict:
+        try:
+            return json.loads(self._mic_names_file.read_text(encoding="utf-8")) or {}
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    def _merged_mic_names(self, user_names: dict) -> dict:
+        """config 出厂层打底，用户层（json/热更新 payload）覆盖。"""
+        merged = dict(self._mic_names_base)
+        merged.update({
+            str(k): str(v).strip() for k, v in (user_names or {}).items() if str(v).strip()
+        })
+        return merged
+
     def _handle_message(self, topic: str, payload: dict) -> None:
-        pass  # 暂无入向控制；后续如需分路开关再加 av/audio/net_cmd
+        # 用户就地改名：dashboard 点话筒标签 → web /api/mic/rename → 本 topic 热更新，
+        # 不重启不断流。payload.mic_names = 用户层全量表（与 data/mic_names.json 同步）。
+        if topic == "av/audio/net_cmd" and payload.get("cmd") == "set_mic_names":
+            self._mic_names = self._merged_mic_names(payload.get("mic_names"))
+            self.logger.info(f"话筒命名热更新: {self._mic_names or '（全部默认）'}")
 
     def _discovery_payload(self, event: str) -> dict:
         payload = super()._discovery_payload(event)
@@ -77,6 +100,7 @@ class NetAudioCaptureModule(BaseModule):
 
     def start(self) -> None:
         super().start()
+        self.subscribe("av/audio/net_cmd")  # 就地改名热更新入口
         for i in range(self._num_channels):
             ch = UdpMicChannel(
                 mic_id=i,

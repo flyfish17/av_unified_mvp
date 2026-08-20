@@ -208,6 +208,36 @@ def husion_scene_switch():
         return {"ok": False, "error": str(e)}, 502
 
 
+@_app.post("/api/mic/rename")
+def mic_rename():
+    """就地话筒改名（2026-08-20 用户需求：点转写里的"话筒N"标签直接改）。
+
+    写 data/mic_names.json（用户层持久化，重启保留）+ MQTT 广播 av/audio/net_cmd
+    让 net_audio_capture 热更新命名表（不重启不断流）。
+    body: {"mic_id": 0基路号, "name": "张三"}；name 空串 = 恢复默认"话筒N"。
+    """
+    body = _flask.request.get_json(force=True, silent=True) or {}
+    mic_id = body.get("mic_id")
+    name = str(body.get("name") or "").strip()
+    if not isinstance(mic_id, int) or not (0 <= mic_id < 32):
+        return {"ok": False, "error": "mic_id 非法"}, 400
+    path = pathlib.Path("data/mic_names.json")
+    try:
+        names = json.loads(path.read_text(encoding="utf-8")) or {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        names = {}
+    key = str(mic_id + 1)  # 存 1 基话筒号，与 config mic_names 键一致
+    if name:
+        names[key] = name
+    else:
+        names.pop(key, None)
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps(names, ensure_ascii=False, indent=2), encoding="utf-8")
+    if _mqtt_publish is not None:
+        _mqtt_publish("av/audio/net_cmd", {"cmd": "set_mic_names", "mic_names": names})
+    return {"ok": True, "mic_names": names}
+
+
 @_app.get("/transcript")
 def index_transcript():
     """旧单页面板，向后兼容。"""
