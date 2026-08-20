@@ -39,12 +39,15 @@ MIN_PACKET_BYTES = PACKET_HEADER_BYTES + 2  # 至少 1 个 16bit sample
 
 @dataclass
 class MicTranscriptEvent:
-    mic_id: int          # 0-based 路号（端口 - base_port）
+    mic_id: int          # 0-based 路号（端口 - base_port）⚠️ 仅是传输通道号，
+                         # 会议主机会动态重分配"话筒→端口"（2026-08-20 实锤对调），
+                         # 发言人身份一律用 physical_id
     text: str
     is_final: bool
     seq_id: int
     ts: float
     raw_mode: str
+    physical_id: int = -1  # 包头 16bit 话筒 ID = 物理话筒稳定身份（-1 未知）
 
 
 class Downsampler48to16:
@@ -71,6 +74,8 @@ class Downsampler48to16:
 class FunASRSession:
     """单路 FunASR websocket_2pass 会话，PCM 由 feed() 喂入（对照
     audio_processor.processor 的 ws 逻辑裁剪，去掉 sounddevice/降级路径）。"""
+
+    current_physical_id: int = -1  # 由 UdpMicChannel 在 gate 开门时写入包头 ID
 
     def __init__(self, mic_id: int, funasr_cfg: dict,
                  callback: Callable[[MicTranscriptEvent], None]):
@@ -199,6 +204,8 @@ class FunASRSession:
                 seq_id=self.mic_id * 10000 + self._seq,
                 ts=time.time(),
                 raw_mode=raw_mode or ("final" if is_final else "partial"),
+                # gate 开门时由 UdpMicChannel 快照的包头 ID（本段音频归属的物理话筒）
+                physical_id=self.current_physical_id,
             )
             if is_final:
                 self._seq += 1
@@ -324,7 +331,14 @@ class UdpMicChannel:
                 if not self._gate_open:
                     self._gate_open = True
                     self.gate_open_count += 1
-                    logger.info(f"[mic{self.mic_id}] 语音活动开始 (RMS={rms:.0f})")
+                    # 开门时快照包头 ID = 本段发言的物理话筒身份（主机会动态
+                    # 重分配话筒→端口，2026-08-20 实锤两话筒对调；ID 才跟人走）
+                    self._session.current_physical_id = (
+                        expected_id if expected_id is not None else -1
+                    )
+                    logger.info(
+                        f"[mic{self.mic_id}] 语音活动开始 (RMS={rms:.0f}, 话筒ID={expected_id})"
+                    )
                 self._gate_last_voice = now
             else:
                 self._maybe_close_gate(now)

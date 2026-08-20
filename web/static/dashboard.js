@@ -978,12 +978,17 @@
     // 两路改成同名后名字 key 会撞车，不同话筒内容混进同一段，段标签的
     // mic_id 与段内内容错位 → 点标签改名改到错误的路（实测事故）。
     const hasMic = ev.mic_id !== undefined && ev.mic_id !== null;
-    // 显示名统一按当前命名表（/api/mic/names），payload 旧 speaker 只作兜底，
-    // SSE 重放的历史事件不再显示当时旧名。
+    // 发言人身份 = 包头物理话筒 ID（2026-08-20：主机动态重分配话筒→端口，
+    // 端口路号会对调，ID 才跟话筒实体走）；旧事件无 physical_id 回退端口路号。
+    const physId = (ev.physical_id !== undefined && ev.physical_id !== null && ev.physical_id >= 0)
+      ? ev.physical_id : null;
+    // 显示名统一按当前命名表（/api/mic/names，key=物理ID），payload 旧 speaker
+    // 只作兜底，SSE 重放的历史事件不再显示当时旧名。
     const spk = hasMic
-      ? ((window.__micNames || {})[String(ev.mic_id + 1)] || ev.speaker || `话筒${ev.mic_id + 1}`)
+      ? ((physId !== null && (window.__micNames || {})[String(physId)])
+         || ev.speaker || `话筒${physId !== null ? physId : ev.mic_id + 1}`)
       : null;
-    const stKey = hasMic ? `mic${ev.mic_id}` : "";
+    const stKey = physId !== null ? `p${physId}` : (hasMic ? `mic${ev.mic_id}` : "");
     let st = _txStates.get(stKey);
     if (!st) { st = { para: null, finalsText: "", lastFinalMs: 0 }; _txStates.set(stKey, st); }
     const stale = !st.para || !card.contains(st.para);
@@ -993,9 +998,10 @@
     if (stale || gapped) {
       const para = document.createElement("div");
       para.className = "tx-para";
+      const colorIdx = (physId !== null ? physId : (ev.mic_id ?? 0)) % 8;
       const spkHtml = spk
-        ? `<span class="tx-spk" data-mic-id="${ev.mic_id ?? 0}" title="点击改名"` +
-          ` style="color:${MIC_COLORS[(ev.mic_id ?? 0) % 8]};font-weight:600;cursor:pointer">${escHtml(spk)}</span> · `
+        ? `<span class="tx-spk" data-phys-id="${physId !== null ? physId : ""}" title="点击改名"` +
+          ` style="color:${MIC_COLORS[colorIdx]};font-weight:600;cursor:pointer">${escHtml(spk)}</span> · `
         : "";
       para.innerHTML =
         `<div class="tx-meta">${spkHtml}<span class="tx-ts">${fmtClock(ev.ts)}</span></div>` +
@@ -1427,8 +1433,9 @@
       .catch(() => {});
     card.addEventListener("click", (e) => {
       const spkEl = e.target.closest(".tx-spk");
-      if (!spkEl || spkEl.dataset.micId === undefined || spkEl.querySelector("input")) return;
-      const micId = parseInt(spkEl.dataset.micId, 10);
+      // 只有带物理话筒 ID 的标签可改名（身份跟话筒实体走）
+      if (!spkEl || !spkEl.dataset.physId || spkEl.querySelector("input")) return;
+      const physId = parseInt(spkEl.dataset.physId, 10);
       const old = spkEl.textContent;
       const input = document.createElement("input");
       input.value = old;
@@ -1449,12 +1456,12 @@
         fetch("/api/mic/rename", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mic_id: micId, name }),
+          body: JSON.stringify({ physical_id: physId, name }),
         }).then(r => r.json()).then(res => {
           if (!res || !res.ok) return;
           window.__micNames = res.mic_names || window.__micNames;  // 同步命名表
-          const label = (window.__micNames || {})[String(micId + 1)] || `话筒${micId + 1}`;
-          document.querySelectorAll(`.tx-spk[data-mic-id="${micId}"]`)
+          const label = (window.__micNames || {})[String(physId)] || `话筒${physId}`;
+          document.querySelectorAll(`.tx-spk[data-phys-id="${physId}"]`)
             .forEach(el => { if (!el.querySelector("input")) el.textContent = label; });
         }).catch(() => {});
       };

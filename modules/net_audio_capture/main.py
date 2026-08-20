@@ -148,7 +148,13 @@ class NetAudioCaptureModule(BaseModule):
     # ── transcript → MQTT（对齐 audio_processor funasr_2pass 路径的 topic 契约）──
 
     def _on_transcript(self, ev: MicTranscriptEvent) -> None:
-        speaker = self._mic_names.get(str(ev.mic_id + 1), f"话筒{ev.mic_id + 1}")
+        # 发言人身份 = 包头物理话筒 ID（跟话筒实体走）。会议主机会动态重分配
+        # "话筒→端口"（2026-08-20 实锤两话筒对调），端口路号 mic_id 只作传输
+        # 通道，不再作命名 key；ID 未知（-1）才回退端口路号。
+        if ev.physical_id >= 0:
+            speaker = self._mic_names.get(str(ev.physical_id), f"话筒{ev.physical_id}")
+        else:
+            speaker = self._mic_names.get(str(ev.mic_id + 1), f"话筒{ev.mic_id + 1}")
         inner = {
             "event_type": "transcription",
             "text": ev.text,
@@ -157,6 +163,7 @@ class NetAudioCaptureModule(BaseModule):
             "raw_mode": ev.raw_mode,
             "ts": ev.ts,
             "mic_id": ev.mic_id,
+            "physical_id": ev.physical_id,
             "speaker": speaker,
         }
         if ev.is_final:

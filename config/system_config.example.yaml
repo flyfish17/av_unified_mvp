@@ -12,7 +12,9 @@ audio:
   #   num_channels: 8
   #   gate_threshold: 150    # int16 RMS 静音门阈值，闲路不占 FunASR decoder
   #   gate_hangover_ms: 1800 # 静音门关门等待：词间停顿(<1.8s)不强制结算 final，防碎句
-  #   mic_names:             # 话筒号(1-8) → 发言人名；未配置的路回退"话筒N"；改后重启 net_audio_capture 生效
+  #   mic_names:             # 物理话筒ID(组播包头16bit ID,日志"首包头部 ID"可见) → 发言人名；
+  #                          # ⚠️ key 不是端口路号——主机会动态重分配话筒→端口(8/20实锤对调)，名字跟话筒实体走；
+  #                          # 未配置回退"话筒<ID>"；通常直接在 dashboard 点标签改名，此处仅出厂预配
   #     "1": 张三
   #     "2": 李四
   #   record_session: true   # 会话原音录制（gate 后有声混音落盘 data/recordings/ + :5052 导出），默认开
