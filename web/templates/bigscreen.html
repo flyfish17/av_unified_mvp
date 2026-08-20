@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CREATOR AI 实时转写</title>
+  <!--
+    公司演示环境 P0 · 全屏转写大屏（底座线 R1c，2026-08-20）
+    场景：研发中心百寸电视全屏打开 http://<板>:5050/bigscreen，3-5 米可读，纯展示无任何操作面。
+    数据：复用 /events/transcript SSE + GET /api/mic/names 命名表，零新增后端逻辑。
+    渲染原则照搬 dashboard.js pushOverviewTranscript（回流清单 §C 2/3 条）：
+      - 归段/染色 key = 物理话筒 ID（p<physId>），显示名不参与归段
+      - 显示名一律按当前命名表渲染，事件 payload 的 speaker 快照只作兜底
+      - partial 灰字逐字蹦（tx-flash）+ final 绿闪定稿（tx-final-flash）
+    本页自包含：样式与 JS 全部内联，不引用 dashboard.js（那是操作面逻辑）。
+  -->
+  <style>
+    :root {
+      /* 配色与 dashboard.html 同源，保持产品观感一致 */
+      --bg:        #0a0e14;
+      --line-soft: #1e2532;
+      --text:      #e6edf3;
+      --text-2:    #b9c2d0;
+      --dim:       #6b7684;
+      --live:      #f0b429;
+      --final:     #2ea043;
+      --warn:      #f85149;
+      /* 大屏字号：正文 3-5 米可读（1080p 电视上约 61px），下限 40px */
+      --fs-body:   clamp(40px, 3.4vw, 68px);
+      --header-h:  64px;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%; overflow: hidden;
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+      cursor: none; /* 电视墙纯展示，藏掉鼠标指针 */
+    }
+
+    /* ── 顶部一行小字：左品牌位 + 右实时时钟 ─────────────────────── */
+    header {
+      height: var(--header-h); padding: 0 44px;
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--line-soft);
+      font-size: 24px; color: var(--text-2); letter-spacing: 1px;
+    }
+    .brand { display: flex; align-items: center; gap: 14px; font-weight: 600; }
+    /* SSE 连接状态点：绿=已连接，黄=断开自动重连（纯指示，非操作元素） */
+    .conn-dot {
+      width: 12px; height: 12px; border-radius: 50%;
+      background: var(--dim); transition: background .4s, box-shadow .4s;
+    }
+    .conn-dot.ok   { background: var(--final); box-shadow: 0 0 10px var(--final); }
+    .conn-dot.err  { background: var(--live);  box-shadow: 0 0 10px var(--live); }
+    .clock { display: flex; align-items: baseline; gap: 18px; }
+    .clock .date { font-size: 20px; color: var(--dim); }
+    .clock .time { font-family: ui-monospace, Menlo, monospace; font-size: 28px; color: var(--text); }
+
+    /* ── 转写流：占满剩余屏幕，自动跟随最新，隐藏滚动条 ───────────── */
+    #flow {
+      position: absolute; top: var(--header-h); bottom: 0; left: 0; right: 0;
+      overflow-y: auto; scrollbar-width: none; overscroll-behavior: none;
+      padding: 28px 64px 48px;
+      transition: opacity .8s ease;
+    }
+    #flow::-webkit-scrollbar { display: none; }
+    body.standby #flow { opacity: .3; } /* 待机时正文淡出，突出待机提示 */
+
+    /* 段落结构与 dashboard 转写卡同构（tx-para/tx-meta/tx-text/finals/live） */
+    .tx-para { padding: 26px 0 30px; border-bottom: 1px solid var(--line-soft); }
+    .tx-para:last-child { border-bottom: 0; }
+    .tx-meta { margin-bottom: 10px; font-size: calc(var(--fs-body) * 0.55); color: var(--dim); }
+    .tx-spk  { font-weight: 700; font-size: calc(var(--fs-body) * 0.72); } /* 发言人名更醒目，颜色由 JS 按物理 ID 分配 */
+    .tx-ts   { font-family: ui-monospace, Menlo, monospace; }
+    .tx-text {
+      font-size: var(--fs-body); line-height: 1.62;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .tx-text .finals { color: var(--text); }                 /* 定稿主色 */
+    .tx-text .live   { color: var(--text-2); opacity: .55; } /* 未定稿灰字 */
+    /* partial 逐字蹦：新词出现瞬间橙黄高亮 0.5s 淡回灰（与 dashboard 同款观感） */
+    .tx-text .live .tx-flash { animation: tx-flash-in 0.5s ease-out; }
+    @keyframes tx-flash-in {
+      0%   { color: var(--live); text-shadow: 0 0 10px rgba(240, 180, 41, 0.85); }
+      100% { color: inherit;     text-shadow: none; }
+    }
+    /* final 定稿：新定稿文字绿色短闪 0.5s 淡回主色 */
+    .tx-text .finals .tx-final-flash { animation: tx-final-flash-in 0.5s ease-out; }
+    @keyframes tx-final-flash-in {
+      0%   { color: var(--final); text-shadow: 0 0 10px rgba(46, 160, 67, 0.65); }
+      100% { color: inherit;      text-shadow: none; }
+    }
+
+    /* ── 待机提示：长时间无新内容时淡显"等待发言…"，不留死屏 ─────── */
+    #standby {
+      position: absolute; top: 46%; left: 50%; transform: translate(-50%, -50%);
+      font-size: 46px; color: var(--dim); letter-spacing: 6px;
+      opacity: 0; pointer-events: none; transition: opacity .8s ease;
+    }
+    body.standby #standby { opacity: 1; }
+    #standby .pulse { animation: standby-pulse 2.4s ease-in-out infinite; display: inline-block; }
+    @keyframes standby-pulse {
+      0%, 100% { opacity: .35; }
+      50%      { opacity: 1; }
+    }
+  </style>
+</head>
+<body class="standby">
+  <header>
+    <div class="brand"><span class="conn-dot" id="conn"></span>CREATOR AI 实时转写</div>
+    <div class="clock"><span class="date" id="date"></span><span class="time" id="time"></span></div>
+  </header>
+  <div id="flow"></div>
+  <div id="standby"><span class="pulse">等待发言…</span></div>
+
+  <script>
+  (() => {
+    "use strict";
+    // ── 归段参数与发言人配色：与 dashboard.js 完全一致（照搬，勿独立演化）──
+    const PARA_GAP_SEC    = 60;   // 同一发言人静音 >60s 换段
+    const PARA_SOFT_LIMIT = 250;  // 累积 >=250 字且句末标点收尾 → 自然换段
+    const PARA_HARD_LIMIT = 400;  // 累积 >=400 字硬切兜底
+    const PARA_ENDS_PUNCT = /[。！？!?]\s*$/;
+    const MIC_COLORS = ["#e6a23c", "#4fc3f7", "#81c784", "#f48fb1",
+                        "#ba68c8", "#ffd54f", "#4db6ac", "#ff8a65"];
+    const MAX_PARAS = 50;         // DOM 段落上限（超出移除最旧）
+    const IDLE_MS   = 120000;     // 无新内容 2 分钟进入待机态
+
+    const flow = document.getElementById("flow");
+    const _txStates = new Map();  // stKey（p<物理ID> / mic<路号> / ""=本地麦）→ {para, finalsText, lastFinalMs}
+    let micNames = {};            // 当前命名表（物理ID → 显示名），显示名唯一事实源
+    let lastEvMs = 0;             // 最近一条转写事件时间，驱动待机判定
+
+    function fmtClock(ts) {
+      const d = ts ? new Date(ts * 1000) : new Date();
+      const p = n => String(n).padStart(2, "0");
+      return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    }
+
+    // ── 命名表：进页拉一次 + 每 30s 刷新（防运维侧改名后大屏漂移），
+    //    刷新后就地更新已有段落标签，改名无需等新事件 ──────────────────
+    function refreshNames() {
+      fetch("/api/mic/names").then(r => r.json()).then(res => {
+        if (!res || !res.ok) return;
+        micNames = res.mic_names || {};
+        document.querySelectorAll(".tx-spk[data-phys-id]").forEach(el => {
+          const pid = el.dataset.physId;
+          if (pid !== "") el.textContent = micNames[pid] || `话筒${pid}`;
+        });
+      }).catch(() => {}); // 网络抖动静默，30s 后自然重试
+    }
+    refreshNames();
+    setInterval(refreshNames, 30000);
+
+    // ── 核心渲染：dashboard.js pushOverviewTranscript 的纯展示裁剪版 ──
+    // 差异仅两点：无点击改名交互；大屏永远自动跟随（无人上翻历史）。
+    function pushTranscript(ev) {
+      const nowMs = Date.now();
+      // 归段 key = 物理话筒 ID（会议主机会动态重排话筒→端口，ID 才跟话筒实体走）；
+      // 旧事件无 physical_id 回退端口路号；本地麦（无 mic_id）空键
+      const hasMic = ev.mic_id !== undefined && ev.mic_id !== null;
+      const physId = (ev.physical_id !== undefined && ev.physical_id !== null && ev.physical_id >= 0)
+        ? ev.physical_id : null;
+      // 显示名统一按当前命名表（key=物理ID）；payload 旧 speaker 只作兜底，
+      // SSE 重放的历史事件不显示当时旧名（回流清单 C-2）
+      const spk = hasMic
+        ? ((physId !== null && micNames[String(physId)])
+           || ev.speaker || `话筒${physId !== null ? physId : ev.mic_id + 1}`)
+        : null;
+      const stKey = physId !== null ? `p${physId}` : (hasMic ? `mic${ev.mic_id}` : "");
+      let st = _txStates.get(stKey);
+      if (!st) { st = { para: null, finalsText: "", lastFinalMs: 0 }; _txStates.set(stKey, st); }
+      const stale = !st.para || !flow.contains(st.para);
+      const gapped = st.lastFinalMs > 0 && (nowMs - st.lastFinalMs) / 1000 > PARA_GAP_SEC;
+
+      if (stale || gapped) {
+        // 开新段：meta 行（发言人名 + 时间戳）+ 正文（finals 定稿 / live 灰字）
+        const para = document.createElement("div");
+        para.className = "tx-para";
+        const meta = document.createElement("div");
+        meta.className = "tx-meta";
+        if (spk) {
+          const spkEl = document.createElement("span");
+          spkEl.className = "tx-spk";
+          spkEl.dataset.physId = physId !== null ? String(physId) : "";
+          spkEl.style.color = MIC_COLORS[(physId !== null ? physId : (ev.mic_id ?? 0)) % 8];
+          spkEl.textContent = spk;
+          meta.appendChild(spkEl);
+          meta.appendChild(document.createTextNode(" · "));
+        }
+        const tsEl = document.createElement("span");
+        tsEl.className = "tx-ts";
+        tsEl.textContent = fmtClock(ev.ts);
+        meta.appendChild(tsEl);
+        const text = document.createElement("div");
+        text.className = "tx-text";
+        text.innerHTML = '<span class="finals"></span><span class="live"></span>';
+        para.appendChild(meta);
+        para.appendChild(text);
+        flow.appendChild(para);
+        while (flow.querySelectorAll(".tx-para").length > MAX_PARAS) flow.firstChild.remove();
+        st.para = para;
+        st.finalsText = "";
+        st.lastFinalMs = 0;
+      }
+
+      // 每次事件把段标签刷成当前显示名（消除首屏命名表未加载的 race）
+      const spkEl0 = st.para.querySelector(".tx-spk");
+      if (spkEl0 && spk) spkEl0.textContent = spk;
+
+      const finalsEl = st.para.querySelector(".finals");
+      const liveEl   = st.para.querySelector(".live");
+      if (ev.is_final) {
+        let chunk = ev.text || "";
+        // 段首悬空标点清理（上游碎 final 常以逗号开头，落段首扎眼）
+        if (chunk && !st.finalsText) chunk = chunk.replace(/^[，。、；：！？,.;:!?\s]+/, "");
+        if (chunk) {
+          const span = document.createElement("span");
+          span.className = "tx-final-flash";
+          span.textContent = chunk;
+          finalsEl.appendChild(span);
+        }
+        st.finalsText += chunk;
+        liveEl.textContent = "";
+        st.lastFinalMs = nowMs;
+        // 篇幅自然分段：本段饱和 → 下条 final 开新段
+        const len = st.finalsText.length;
+        if (len >= PARA_HARD_LIMIT || (len >= PARA_SOFT_LIMIT && PARA_ENDS_PUNCT.test(st.finalsText))) {
+          st.para = null;
+        }
+      } else if (ev.text) {
+        // partial 增量 append：FunASR 2pass-online 每条 text 是一段新词（非累积）
+        const span = document.createElement("span");
+        span.className = "tx-flash";
+        span.textContent = ev.text;
+        liveEl.appendChild(span);
+      }
+      flow.scrollTop = flow.scrollHeight; // 大屏纯展示，永远跟随最新
+    }
+
+    // ── SSE 订阅：直连 transcript 频道（无需聚合频道，大屏只关心转写）──
+    const conn = document.getElementById("conn");
+    const sse = new EventSource("/events/transcript");
+    sse.onopen  = () => { conn.className = "conn-dot ok"; };
+    sse.onerror = () => { conn.className = "conn-dot err"; }; // EventSource 自动重连
+    sse.onmessage = (e) => {
+      let ev;
+      try { ev = JSON.parse(e.data); } catch (_) { return; }
+      if (!ev || ev.type === "hello") return;
+      if (!(ev.text || "").trim()) return; // 与 dashboard tickerForward 同：空文本不上屏
+      lastEvMs = Date.now();
+      document.body.classList.remove("standby");
+      pushTranscript(ev);
+    };
+
+    // ── 待机判定：超时淡显"等待发言…"，时钟持续走动证明系统存活 ────
+    setInterval(() => {
+      if (Date.now() - lastEvMs > IDLE_MS) document.body.classList.add("standby");
+    }, 5000);
+
+    // ── 顶部实时时钟 ──────────────────────────────────────────────
+    const WEEKS = ["日", "一", "二", "三", "四", "五", "六"];
+    function tickClock() {
+      const d = new Date();
+      const p = n => String(n).padStart(2, "0");
+      document.getElementById("time").textContent =
+        `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+      document.getElementById("date").textContent =
+        `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} 周${WEEKS[d.getDay()]}`;
+    }
+    tickClock();
+    setInterval(tickClock, 500);
+  })();
+  </script>
+</body>
+</html>

@@ -7,6 +7,7 @@ web/server.py
 
     GET /                       主面板（订阅式动态生成 panels）
     GET /transcript             仅转写单页（旧接口，向后兼容）
+    GET /bigscreen              全屏转写大屏（演示环境电视墙，纯展示）
     GET /events/<channel>       SSE 流；channel 任意字符串（不含 /）
     GET /events/discovery       模块公告流（驱动前端动态面板）
     POST /mock/<channel>        推一条 fake event；body 即 payload
@@ -288,6 +289,14 @@ def mic_rename():
 def index_transcript():
     """旧单页面板，向后兼容。"""
     return _flask.render_template("transcript.html")
+
+
+@_app.get("/bigscreen")
+def index_bigscreen():
+    """全屏转写大屏（底座线 R1c，公司演示环境 P0）：百寸电视纯展示面。
+    数据复用 /events/transcript SSE + /api/mic/names 命名表，零新增后端逻辑；
+    页面自包含（样式/JS 内联），不依赖 dashboard.js。"""
+    return _flask.render_template("bigscreen.html")
 
 
 def _make_sse(channel: str):
