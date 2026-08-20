@@ -208,6 +208,33 @@ def husion_scene_switch():
         return {"ok": False, "error": str(e)}, 502
 
 
+def _mic_names_merged() -> dict:
+    """当前话筒命名合并表：config 出厂层打底 + data/mic_names.json 用户层覆盖
+    （与 net_audio_capture._merged_mic_names 同语义）。前端渲染统一按此表。"""
+    import yaml
+    base = {}
+    p = _PROJECT_ROOT / "config" / "system_config.yaml"
+    if p.exists():
+        with open(p, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        raw = ((cfg.get("audio") or {}).get("net_multicast") or {}).get("mic_names") or {}
+        base = {str(k): str(v).strip() for k, v in raw.items() if str(v).strip()}
+    try:
+        user = json.loads(pathlib.Path("data/mic_names.json").read_text(encoding="utf-8")) or {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        user = {}
+    base.update({str(k): str(v).strip() for k, v in user.items() if str(v).strip()})
+    return base
+
+
+@_app.get("/api/mic/names")
+def mic_names_get():
+    """当前话筒命名表（合并层）。前端按此统一渲染显示名——SSE 重放的历史事件
+    带的是事件发生时的旧 speaker，若直接显示会出现同一路多个名字（2026-08-20
+    用户实测"刷新后话筒名错乱"的诱因之一），故显示名一律以本表为准。"""
+    return {"ok": True, "mic_names": _mic_names_merged()}
+
+
 @_app.post("/api/mic/rename")
 def mic_rename():
     """就地话筒改名（2026-08-20 用户需求：点转写里的"话筒N"标签直接改）。
@@ -235,7 +262,7 @@ def mic_rename():
     path.write_text(json.dumps(names, ensure_ascii=False, indent=2), encoding="utf-8")
     if _mqtt_publish is not None:
         _mqtt_publish("av/audio/net_cmd", {"cmd": "set_mic_names", "mic_names": names})
-    return {"ok": True, "mic_names": names}
+    return {"ok": True, "mic_names": _mic_names_merged()}  # 返回合并层供前端直接刷新显示
 
 
 @_app.get("/transcript")

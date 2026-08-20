@@ -974,10 +974,18 @@
     // CR-DIG7201 转写体验（2026-08-07）：per-speaker 段指针 — 多路话筒碎 final
     // 交错到达时各归各段（同话筒 60s 内追加回自己最近的段，即使段不在 DOM 末尾），
     // 替代原"发言人一切换就开新段"→ 消除单词级小段穿插。本地麦（无 mic_id）空键，行为不变。
-    const spk = (ev.mic_id !== undefined && ev.mic_id !== null)
-      ? (ev.speaker || `话筒${ev.mic_id + 1}`) : null;
-    let st = _txStates.get(spk || "");
-    if (!st) { st = { para: null, finalsText: "", lastFinalMs: 0 }; _txStates.set(spk || "", st); }
+    // 2026-08-20 错乱修复：归段 key 必须用物理路 mic_id，不能用显示名——
+    // 两路改成同名后名字 key 会撞车，不同话筒内容混进同一段，段标签的
+    // mic_id 与段内内容错位 → 点标签改名改到错误的路（实测事故）。
+    const hasMic = ev.mic_id !== undefined && ev.mic_id !== null;
+    // 显示名统一按当前命名表（/api/mic/names），payload 旧 speaker 只作兜底，
+    // SSE 重放的历史事件不再显示当时旧名。
+    const spk = hasMic
+      ? ((window.__micNames || {})[String(ev.mic_id + 1)] || ev.speaker || `话筒${ev.mic_id + 1}`)
+      : null;
+    const stKey = hasMic ? `mic${ev.mic_id}` : "";
+    let st = _txStates.get(stKey);
+    if (!st) { st = { para: null, finalsText: "", lastFinalMs: 0 }; _txStates.set(stKey, st); }
     const stale = !st.para || !card.contains(st.para);
     const gapped = st.lastFinalMs > 0 &&
                    (nowMs - st.lastFinalMs) / 1000 > PARA_GAP_SEC;
@@ -999,6 +1007,11 @@
       st.finalsText = "";
       st.lastFinalMs = 0;
     }
+
+    // 每次事件顺手把段标签刷成当前显示名（消除首屏命名表未加载的 race，
+    // 以及改名后既有段落的名字漂移）；正在内联编辑时不覆盖
+    const spkEl0 = st.para.querySelector(".tx-spk");
+    if (spkEl0 && spk && !spkEl0.querySelector("input")) spkEl0.textContent = spk;
 
     const finalsEl = st.para.querySelector(".finals");
     const liveEl   = st.para.querySelector(".live");
@@ -1407,6 +1420,11 @@
   function setupMicRename() {
     const card = document.querySelector('[data-overview="transcript"] .strip-card-body');
     if (!card) return;
+    // 加载当前命名表（合并层）——所有显示名以此为准
+    window.__micNames = window.__micNames || {};
+    fetch("/api/mic/names").then(r => r.json())
+      .then(res => { if (res && res.ok) window.__micNames = res.mic_names || {}; })
+      .catch(() => {});
     card.addEventListener("click", (e) => {
       const spkEl = e.target.closest(".tx-spk");
       if (!spkEl || spkEl.dataset.micId === undefined || spkEl.querySelector("input")) return;
@@ -1434,7 +1452,8 @@
           body: JSON.stringify({ mic_id: micId, name }),
         }).then(r => r.json()).then(res => {
           if (!res || !res.ok) return;
-          const label = name || `话筒${micId + 1}`;
+          window.__micNames = res.mic_names || window.__micNames;  // 同步命名表
+          const label = (window.__micNames || {})[String(micId + 1)] || `话筒${micId + 1}`;
           document.querySelectorAll(`.tx-spk[data-mic-id="${micId}"]`)
             .forEach(el => { if (!el.querySelector("input")) el.textContent = label; });
         }).catch(() => {});
