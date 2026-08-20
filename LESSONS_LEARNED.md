@@ -18,6 +18,11 @@
 | **代理** | requests 调 `127.0.0.1` 走系统代理（Clash）→ 404 | Python requests 默认读 env `HTTP_PROXY` | `requests.Session(); s.trust_env = False` |
 | **Node-RED** | function 节点 setTimeout / context state 重启不 reset | flow context 重启后不清 | 用 `flow.set/get` + `initialize` 字段；timer 在 `finalize` 清 |
 | **Git** | iCloud 路径偶发 `.git/index.lock write timed out` | iCloud 同步与 git lock 冲突 | `rm .git/index.lock` 后重 add；长跑用 worktree 出 iCloud |
+| **浏览器** | HTTP 站点下载落成"未确认 N.crdownload" | Chrome 对非 HTTPS 页面 blob+download 安全挂起 | 弃 blob，走 `POST /api/download` 服务器附件（Content-Disposition）；下载栏"保留"确认是平台行为无法消除 |
+| **浏览器** | `navigator.clipboard` 复制失败 | 非安全上下文（HTTP）该 API 不可用，非权限问题 | `copyText()` 降级 `execCommand("copy")`（dashboard.js 有现成 helper） |
+| **前端** | 刷新后发言人旧名满屏/错乱 | SSE 重放事件带发生时刻快照，显示层直用必错 | 显示状态按"当前表"渲染（GET /api/mic/names 模式），快照只兜底；归段 key 用稳定身份不用显示名 |
+| **架构** | 话筒改名后名字"对调" | 身份绑了传输通道（端口），会议主机按启动顺序动态重分配话筒→端口（8/20 实锤 ID 15/35 互换） | 身份用组播包头物理 ID；通用原则：**身份 ≠ 通道** |
+| **重启** | demo-start 后系统全灭（0 模块） | supervisor 优雅退出需 10s+，撞残留进程触发"旧进程在跑不重启"保护跳过启动 | pkill 后等 `pgrep=0` 再启，或 `--force`；pkill pattern 必须 `[x]` 打断防 ssh 自杀 |
 | **Creator** | admin 单 session 限制，多端 login 后续返 code=3 | 协议限制 | 同 token 串起来或让出旧 session |
 | **rsync** | 改 3588 上代码同步到错路径 | 5/14 同步到 `/home/firefly/creator_ai_demo/modules/` 但 supervisor 跑 `/home/firefly/av_unified_mvp/modules/` 浪费 30min | 同步前 `readlink /proc/<supervisor_pid>/cwd` 确认 cwd |
 | **3588 sudo** | 没有 sudo 权限 | user 维护权限，没给 root | 写脚本前用 `cat /etc/passwd \| head -5` 等 noop 命令验证；需要 sudo 的事走 user 现场 |
