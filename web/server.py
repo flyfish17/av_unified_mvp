@@ -208,6 +208,23 @@ def husion_scene_switch():
         return {"ok": False, "error": str(e)}, 502
 
 
+@_app.post("/api/download")
+def download_echo():
+    """通用文本下载回吐：前端把要保存的内容 form POST 过来，以附件响应触发
+    浏览器标准下载。背景（2026-08-20 用户实测）：HTTP 站点上 blob+download
+    属性的下载被 Chrome 安全挂起成"未确认 xxx.crdownload"，走服务器
+    Content-Disposition 附件下载绕开（同源导航下载不触发该拦截）。"""
+    from urllib.parse import quote
+    fname = (_flask.request.form.get("filename") or "download.txt").strip()
+    fname = re.sub(r'[\\/:*?"<>|\r\n]', "_", fname)[:120] or "download.txt"
+    content = _flask.request.form.get("content") or ""
+    resp = _flask.make_response(content.encode("utf-8"))
+    resp.headers["Content-Type"] = "application/octet-stream"
+    resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(fname)}"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 def _mic_names_merged() -> dict:
     """当前话筒命名合并表：config 出厂层打底 + data/mic_names.json 用户层覆盖
     （与 net_audio_capture._merged_mic_names 同语义）。前端渲染统一按此表。"""

@@ -1423,6 +1423,23 @@
   // 点击 .tx-spk → 内联输入框 → Enter/失焦提交 POST /api/mic/rename（后端写
   // data/mic_names.json 持久化 + MQTT 热更新采集模块，不断流）→ 本页同话筒
   // 标签全部刷新；Esc 取消；提交空值 = 恢复默认"话筒N"。
+  // ── 服务器附件下载（2026-08-20）：HTTP 站点上 blob+download 的下载被
+  // Chrome 安全挂起成"未确认 xxx.crdownload"，改 form POST /api/download
+  // 走 Content-Disposition 附件下载。textarea 而非 input——input value 提交
+  // 时换行会被浏览器规范化剥离。
+  function serverDownload(filename, content) {
+    const f = document.createElement("form");
+    f.method = "POST"; f.action = "/api/download"; f.style.display = "none";
+    const fn = document.createElement("input");
+    fn.type = "hidden"; fn.name = "filename"; fn.value = filename;
+    const ta = document.createElement("textarea");
+    ta.name = "content"; ta.value = content;
+    f.appendChild(fn); f.appendChild(ta);
+    document.body.appendChild(f);
+    f.submit();
+    setTimeout(() => document.body.removeChild(f), 1000);
+  }
+
   function setupMicRename() {
     const card = document.querySelector('[data-overview="transcript"] .strip-card-body');
     if (!card) return;
@@ -2130,13 +2147,10 @@
           const spk = p.querySelector(".tx-spk")?.textContent || p.dataset.speaker || "";
           if (txt) lines.push(`[${ts}]${spk ? ` [${spk}]` : ""}\n${txt}\n`);
         });
-        const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-        a.href = url; a.download = `transcript-${stamp}.txt`;
-        document.body.appendChild(a); a.click();
-        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 3000);
+        const d0 = new Date();
+        const p0 = n => String(n).padStart(2, "0");
+        const txStamp = `${d0.getFullYear()}${p0(d0.getMonth() + 1)}${p0(d0.getDate())}-${p0(d0.getHours())}${p0(d0.getMinutes())}`;
+        serverDownload(`transcript-${txStamp}.txt`, lines.join("\n"));
       };
     }
     if (audioBtn) {
@@ -2284,18 +2298,13 @@
       catch { alert("复制失败 — 浏览器可能未授权剪贴板权限"); }
     };
     card.querySelector("[data-sm-md]").onclick = () => {
-      const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      // 文件名 = 时间 + 纪要标题（清洗文件系统非法字符），方便后期利用；
-      // revoke 延到 3s——过早回收 blob URL 会把下载中断成 .crdownload 残件
+      // 文件名 = 时间 + 纪要标题（清洗非法字符），方便后期利用；
+      // 走服务器附件下载（blob 在 HTTP 站点被 Chrome 挂起 .crdownload）
       const d = new Date();
       const pad = n => String(n).padStart(2, "0");
       const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
       const title = String(data.title || "未命名").replace(/[\\/:*?"<>|\n\r]/g, "_").slice(0, 40);
-      a.href = url; a.download = `纪要-${stamp}-${title}.md`;
-      document.body.appendChild(a); a.click();
-      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 3000);
+      serverDownload(`纪要-${stamp}-${title}.md`, md);
     };
     card.querySelector("[data-sm-close]").onclick = closeSummaryModal;
   }
