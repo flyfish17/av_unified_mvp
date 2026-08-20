@@ -1440,6 +1440,24 @@
     setTimeout(() => document.body.removeChild(f), 1000);
   }
 
+  // 复制文本：navigator.clipboard 在 HTTP 非安全上下文不可用（Chrome 限
+  // HTTPS/localhost，2026-08-20 用户实测"复制失败"），降级 execCommand("copy")
+  async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      try { await navigator.clipboard.writeText(text); return true; } catch (_) {}
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;left:-9999px;top:0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (_) {}
+    document.body.removeChild(ta);
+    return ok;
+  }
+
   function setupMicRename() {
     const card = document.querySelector('[data-overview="transcript"] .strip-card-body');
     if (!card) return;
@@ -2294,8 +2312,9 @@
     `;
     const md = summaryToMarkdown(data);
     card.querySelector("[data-sm-copy]").onclick = async () => {
-      try { await navigator.clipboard.writeText(md); flashBtn(card.querySelector("[data-sm-copy]"), "✓ 已复制"); }
-      catch { alert("复制失败 — 浏览器可能未授权剪贴板权限"); }
+      const ok = await copyText(md);
+      if (ok) flashBtn(card.querySelector("[data-sm-copy]"), "✓ 已复制");
+      else alert("复制失败 — 请改用「下载 .md」");
     };
     card.querySelector("[data-sm-md]").onclick = () => {
       // 文件名 = 时间 + 纪要标题（清洗非法字符），方便后期利用；
