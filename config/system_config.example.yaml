@@ -15,6 +15,7 @@ audio:
   #   mic_names:             # 话筒号(1-8) → 发言人名；未配置的路回退"话筒N"；改后重启 net_audio_capture 生效
   #     "1": 张三
   #     "2": 李四
+  #   record_session: true   # 会话原音录制（gate 后有声混音落盘 data/recordings/ + :5052 导出），默认开
   funasr:
     mode: websocket_2pass
     sample_rate: 16000

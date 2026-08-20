@@ -221,7 +221,11 @@ class UdpMicChannel:
 
     def __init__(self, mic_id: int, group: str, port: int, funasr_cfg: dict,
                  callback: Callable[[MicTranscriptEvent], None],
-                 gate_threshold: float = 150.0, gate_hangover_ms: int = 1800):
+                 gate_threshold: float = 150.0, gate_hangover_ms: int = 1800,
+                 pcm_tap: Optional[Callable[[int, np.ndarray], None]] = None):
+        # pcm_tap: gate 后 16k PCM 旁路（会话录制用，见 recorder.SessionRecorder）；
+        # 异常隔离，录制故障不影响转写主链
+        self._pcm_tap = pcm_tap
         self.mic_id = mic_id
         self.group = group
         self.port = port
@@ -330,6 +334,11 @@ class UdpMicChannel:
             pcm16 = self._down.feed(pcm48)
             if len(pcm16) == 0:
                 continue
+            if self._pcm_tap is not None:
+                try:
+                    self._pcm_tap(self.mic_id, pcm16)
+                except Exception:
+                    pass  # 录制旁路故障不影响转写主链
             self._out_buf = np.concatenate([self._out_buf, pcm16])
             while len(self._out_buf) >= self._frame_16k:
                 frame = self._out_buf[:self._frame_16k]

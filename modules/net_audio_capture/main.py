@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.base_module import BaseModule
 from modules.net_audio_capture.receiver import MicTranscriptEvent, UdpMicChannel
+from modules.net_audio_capture.recorder import SessionRecorder, start_export_http
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,6 +54,11 @@ class NetAudioCaptureModule(BaseModule):
         }
         self._mic_names_file = Path("data/mic_names.json")
         self._mic_names = self._merged_mic_names(self._load_user_mic_names())
+        # 会话原音录制（2026-08-20 拍板补齐）：gate 后混音落盘 + :5052 导出，
+        # config audio.net_multicast.record_session: false 可关（默认开）
+        self._record_session = bool(mc.get("record_session", True))
+        self._recorder = SessionRecorder(self._num_channels) if self._record_session else None
+        self._export_http = None
 
         topics = cfg.get("mqtt", {}).get("topics", {})
         streams = [
@@ -101,6 +107,9 @@ class NetAudioCaptureModule(BaseModule):
     def start(self) -> None:
         super().start()
         self.subscribe("av/audio/net_cmd")  # 就地改名热更新入口
+        if self._recorder is not None:
+            self._recorder.start()
+            self._export_http = start_export_http(self._recorder)
         for i in range(self._num_channels):
             ch = UdpMicChannel(
                 mic_id=i,
@@ -110,6 +119,7 @@ class NetAudioCaptureModule(BaseModule):
                 callback=self._on_transcript,
                 gate_threshold=self._gate_threshold,
                 gate_hangover_ms=self._gate_hangover_ms,
+                pcm_tap=self._recorder.feed if self._recorder is not None else None,
             )
             ch.start()
             self._channels.append(ch)
@@ -124,6 +134,15 @@ class NetAudioCaptureModule(BaseModule):
                 ch.stop()
             except Exception as e:
                 self.logger.warning(f"mic{ch.mic_id} stop 异常: {e}")
+        # 关导出 HTTP（防 supervisor 重拉时 5052 残留 EADDRINUSE）与录制器
+        if self._export_http is not None:
+            try:
+                self._export_http.shutdown()
+                self._export_http.server_close()
+            except Exception:
+                pass
+        if self._recorder is not None:
+            self._recorder.stop()
         super().stop()
 
     # ── transcript → MQTT（对齐 audio_processor funasr_2pass 路径的 topic 契约）──
