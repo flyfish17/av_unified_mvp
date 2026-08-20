@@ -1,0 +1,1509 @@
+[
+ {
+  "id": "om-flow-tab",
+  "type": "tab",
+  "label": "creator_om 越阈示教(只读)",
+  "disabled": false,
+  "info": "示教 flow:订 telemetry→越阈判定→debug 侧栏展示。2026-08-10 方案①整改:告警发布口(mqtt-out)已摘除,告警唯一正史 = alerting 模块(阈值在 config/thresholds.yaml / 前端阈值页)。此 tab 仅演示 Node-RED 如何订总线做二次开发,不产生告警。"
+ },
+ {
+  "id": "om-broker",
+  "type": "mqtt-broker",
+  "name": "creator_om 本机总线",
+  "broker": "127.0.0.1",
+  "port": "1883",
+  "clientid": "creator_om_nodered",
+  "autoConnect": true,
+  "usetls": false,
+  "protocolVersion": "4",
+  "keepalive": "60",
+  "cleansession": true
+ },
+ {
+  "id": "om-in-telemetry",
+  "type": "mqtt in",
+  "z": "om-flow-tab",
+  "name": "订 telemetry",
+  "topic": "creator/telemetry/#",
+  "qos": "0",
+  "datatype": "json",
+  "broker": "om-broker",
+  "nl": false,
+  "rap": true,
+  "inputs": 0,
+  "x": 140,
+  "y": 120,
+  "wires": [
+   [
+    "om-fn-threshold"
+   ]
+  ]
+ },
+ {
+  "id": "om-fn-threshold",
+  "type": "function",
+  "z": "om-flow-tab",
+  "name": "越阈判定(示教:仅 debug 展示,告警正史在 alerting 模块)",
+  "func": "// 阈值表：运维在此修改后点右上角「部署」即时生效\n// level 对齐 205：1=基本 2=重要 3=紧急\nconst TH = {\n    cpu:         { max: 90, level: 2 },\n    memory:      { max: 90, level: 2 },\n    temperature: { max: 65, level: 3 },\n};\nconst parts = msg.topic.split(\"/\");\nconst dev = parts[2], prop = parts[3];\nconst rule = TH[prop];\nif (!rule) return null;\nconst v = parseFloat(msg.payload.value);\nif (isNaN(v) || v <= rule.max) return null;\nmsg.topic = `creator/alarm/${dev}/${prop}`;\nmsg.payload = {\n    level: rule.level,\n    value: String(msg.payload.value),\n    status: 1,\n    alarm: `${prop} 越阈(Node-RED): ${v} > ${rule.max}`,\n    ts: msg.payload.ts,\n};\nreturn msg;",
+  "outputs": 1,
+  "timeout": 0,
+  "noerr": 0,
+  "x": 420,
+  "y": 120,
+  "wires": [
+   [
+    "om-debug"
+   ]
+  ]
+ },
+ {
+  "id": "om-debug",
+  "type": "debug",
+  "z": "om-flow-tab",
+  "name": "告警调试",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "complete": "payload",
+  "x": 690,
+  "y": 160,
+  "wires": []
+ },
+ {
+  "id": "ccr-tab",
+  "type": "tab",
+  "label": "CC 演示中控(62面板+真实协议链)",
+  "disabled": false,
+  "info": "2026-08-20 合并版 = 62版式整页面板 + 公司程序真实协议链。\n62面板按钮路由:空调=Modbus RTU 帧(从机0x32)→_dev:'ac';会议开始/结束=真实时序展开;灯/窗帘/全灯关=公司程序档案无此协议,安全占位仅记录。\n协议链(映射 docs/公司中控程序.txt+接口.txt+空调控制-协议记录.md):电源=TCP 5.21:38388 'PWR ON<n>\\r';矩阵=TCP 5.60:9876 'CutMatrix_源:1_组播:5000;';空调=TCP 5.211:82 Modbus;音量=串口 com1/ttyS3(RS232 hex,本地无害)。\n🔴 安全:ccr-config.live=false(默认位) 时全部 TCP 走本机 echo 127.0.0.1:7101 不碰真设备;live=true 才切真设备 IP。切 live 前必须于总确认现场设备可达。"
+ },
+ {
+  "id": "ccr-config",
+  "type": "function",
+  "z": "ccr-tab",
+  "name": "端点配置(live开关)",
+  "func": "// 单点配置:改 live 切安全/真实。真设备 IP 来自公司程序+接口.txt+空调协议记录\nflow.set('cfg', {\n  live: false,                    // ← 🔴 默认位=false 安全红线:全部 TCP 走本机 echo,不碰真设备\n  power:  {ip:'192.168.5.21',  port:38388},  // 继电器1/电源器(live=true 才发)\n  matrix: {ip:'192.168.5.60',  port:9876},   // 分布式矩阵(live=true 才发)\n  ac:     {ip:'192.168.5.211', port:82},     // 空调网关 USR-TCP232-304,Modbus RTU 透传(已实测 ACK;live=true 才发)\n  echo:   {ip:'127.0.0.1',     port:7101},   // 安全回显\n});\nnode.warn('CC 中控配置载入: live=' + flow.get('cfg').live);\n// 推 live 状态到 62 面板页脚(\"安全演示/真设备\"可视)\nreturn {payload:{_state:{live: flow.get('cfg').live}}};",
+  "outputs": 1,
+  "x": 160,
+  "y": 60,
+  "wires": [
+   [
+    "ccp-tpl"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-inject-cfg",
+  "type": "inject",
+  "z": "ccr-tab",
+  "name": "启动载配置",
+  "props": [
+   {
+    "p": "payload"
+   }
+  ],
+  "repeat": "",
+  "once": true,
+  "onceDelay": "0.3",
+  "topic": "",
+  "payload": "",
+  "payloadType": "date",
+  "x": 150,
+  "y": 20,
+  "wires": [
+   [
+    "ccr-config"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-theme",
+  "type": "ui-theme",
+  "name": "CC深",
+  "colors": {
+   "surface": "#141a22",
+   "primary": "#3aa0ff",
+   "bgPage": "#10151c",
+   "groupBg": "#1a2230",
+   "groupOutline": "#2a3a4f"
+  },
+  "sizes": {
+   "density": "default",
+   "pagePadding": "12px",
+   "groupGap": "12px",
+   "groupBorderRadius": "8px",
+   "widgetGap": "12px"
+  }
+ },
+ {
+  "id": "ccr-css",
+  "type": "ui-template",
+  "name": "全站CSS主题",
+  "ui": "ccp-base",
+  "group": "",
+  "template": "\n<style>\n/* ===== CC 中控 · 2代面板美化主题(选择器对齐 Dashboard 2.0 真实类名) ===== */\n:root{\n  --cc-accent:#3aa0ff; --cc-accent2:#38e1c8; --cc-text:#e6edf7; --cc-glow:rgba(58,160,255,.55);\n}\n/* 页面深色科技渐变底 */\n.nrdb-app{\n  background:radial-gradient(1200px 620px at 18% -12%, #172c50 0%, #0f1b30 42%, #0b1220 100%) !important;\n  color:var(--cc-text) !important; font-family:-apple-system,\"PingFang SC\",\"Microsoft YaHei\",sans-serif !important;\n}\n/* 顶栏 */\n.nrdb-app .v-app-bar, .nrdb-app header.v-toolbar{\n  background:linear-gradient(90deg,#0d1a30,#12243f) !important;\n  box-shadow:0 2px 18px rgba(0,0,0,.45) !important; border-bottom:1px solid rgba(58,160,255,.18) !important;\n}\n/* 分区卡片:玻璃质感 + 主色描边 + 阴影(覆盖 scoped 样式靠 !important) */\n.nrdb-app .nrdb-layout-group--grid{\n  background:linear-gradient(160deg,#1a2942,#141f33) !important;\n  border:1px solid rgba(58,160,255,.22) !important; border-radius:16px !important;\n  box-shadow:0 8px 30px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.04) !important;\n}\n/* 分区标题行 */\n.nrdb-app .group-header-row, .nrdb-app .group-header-row *{\n  color:var(--cc-accent) !important; font-weight:700 !important; letter-spacing:.5px;\n  font-size:15px !important; text-shadow:0 0 12px rgba(58,160,255,.35);\n}\n/* 按钮:大圆角 + 渐变 + 悬浮/按下发光(Vuetify v-btn) */\n.nrdb-app .v-btn{\n  border-radius:14px !important; font-weight:700 !important; letter-spacing:.5px;\n  min-height:54px !important; text-transform:none !important; font-size:15px !important;\n  background:linear-gradient(150deg,#223a5c,#182a44) !important; color:var(--cc-text) !important;\n  border:1px solid rgba(58,160,255,.30) !important;\n  box-shadow:0 6px 18px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.06) !important;\n  transition:transform .08s ease, box-shadow .2s ease, background .2s ease !important;\n}\n.nrdb-app .v-btn:hover{\n  background:linear-gradient(150deg,#2b4a76,#1d3454) !important;\n  box-shadow:0 8px 26px var(--cc-glow), inset 0 1px 0 rgba(255,255,255,.08) !important;\n  transform:translateY(-1px);\n}\n.nrdb-app .v-btn:active{ transform:translateY(1px) scale(.98); }\n.nrdb-app .v-btn .v-icon{ font-size:24px !important; color:var(--cc-accent2) !important; }\n/* 文本/状态胶囊 */\n.nrdb-app .nrdb-ui-text{\n  background:linear-gradient(160deg,#122036,#0e1a2c) !important; border-radius:12px !important;\n  border:1px solid rgba(56,225,200,.22) !important; padding:10px 14px !important;\n  box-shadow:inset 0 1px 0 rgba(255,255,255,.05) !important;\n}\n.nrdb-app .nrdb-ui-text-value{ color:var(--cc-accent2) !important; font-weight:700 !important; font-size:16px !important; }\n.nrdb-app .nrdb-ui-text-label{ color:#9fb3cc !important; }\n/* 滑条主色 */\n.nrdb-app .v-slider-track__fill{ background:var(--cc-accent) !important; }\n.nrdb-app .v-slider-thumb__surface{ background:var(--cc-accent) !important; }\n/* 左侧导航 */\n.nrdb-app .v-navigation-drawer{ background:linear-gradient(180deg,#0e1b31,#0b1626) !important; border-right:1px solid rgba(58,160,255,.15) !important; }\n.nrdb-app .v-list-item--active{ background:linear-gradient(90deg,rgba(58,160,255,.18),transparent) !important; border-left:3px solid var(--cc-accent) !important; }\n</style>\n",
+  "format": "css",
+  "storeOutMessages": false,
+  "passthru": false,
+  "resendOnRefresh": true,
+  "templateScope": "site",
+  "className": "",
+  "x": 160,
+  "y": 980,
+  "wires": [
+   []
+  ]
+ },
+ {
+  "id": "ccr-p-scene",
+  "type": "ui-page",
+  "name": "会议场景",
+  "ui": "ccp-base",
+  "path": "/scene",
+  "icon": "presentation",
+  "layout": "grid",
+  "theme": "ccr-theme",
+  "order": 2,
+  "className": "",
+  "visible": "true",
+  "disabled": "false"
+ },
+ {
+  "id": "ccr-p-power",
+  "type": "ui-page",
+  "name": "电源控制",
+  "ui": "ccp-base",
+  "path": "/power",
+  "icon": "power-plug",
+  "layout": "grid",
+  "theme": "ccr-theme",
+  "order": 3,
+  "className": "",
+  "visible": "true",
+  "disabled": "false"
+ },
+ {
+  "id": "ccr-p-matrix",
+  "type": "ui-page",
+  "name": "信号矩阵",
+  "ui": "ccp-base",
+  "path": "/matrix",
+  "icon": "video-switch",
+  "layout": "grid",
+  "theme": "ccr-theme",
+  "order": 4,
+  "className": "",
+  "visible": "true",
+  "disabled": "false"
+ },
+ {
+  "id": "ccr-p-vol",
+  "type": "ui-page",
+  "name": "音量控制",
+  "ui": "ccp-base",
+  "path": "/vol",
+  "icon": "volume-high",
+  "layout": "grid",
+  "theme": "ccr-theme",
+  "order": 5,
+  "className": "",
+  "visible": "true",
+  "disabled": "false"
+ },
+ {
+  "id": "ccr-p-diag",
+  "type": "ui-page",
+  "name": "指令监视",
+  "ui": "ccp-base",
+  "path": "/diag",
+  "icon": "console",
+  "layout": "grid",
+  "theme": "ccr-theme",
+  "order": 6,
+  "className": "",
+  "visible": "true",
+  "disabled": "false"
+ },
+ {
+  "id": "ccr-g-scene",
+  "type": "ui-group",
+  "name": "指挥中心会议",
+  "page": "ccr-p-scene",
+  "width": "6",
+  "height": "1",
+  "order": 1,
+  "showTitle": true,
+  "className": "",
+  "visible": "true",
+  "disabled": "false",
+  "groupType": "default"
+ },
+ {
+  "id": "ccr-g-scene-fb",
+  "type": "ui-group",
+  "name": "场景状态",
+  "page": "ccr-p-scene",
+  "width": "6",
+  "height": "1",
+  "order": 2,
+  "showTitle": true,
+  "className": "",
+  "visible": "true",
+  "disabled": "false",
+  "groupType": "default"
+ },
+ {
+  "id": "ccr-g-power",
+  "type": "ui-group",
+  "name": "8 路电源(继电器1 · TCP 5.21:38388)",
+  "page": "ccr-p-power",
+  "width": "6",
+  "height": "1",
+  "order": 1,
+  "showTitle": true,
+  "className": "",
+  "visible": "true",
+  "disabled": "false",
+  "groupType": "default"
+ },
+ {
+  "id": "ccr-g-matrix",
+  "type": "ui-group",
+  "name": "分布式矩阵(TCP 5.60:9876)",
+  "page": "ccr-p-matrix",
+  "width": "6",
+  "height": "1",
+  "order": 1,
+  "showTitle": true,
+  "className": "",
+  "visible": "true",
+  "disabled": "false",
+  "groupType": "default"
+ },
+ {
+  "id": "ccr-g-vol",
+  "type": "ui-group",
+  "name": "数字音频处理器(串口 com1 RS232)",
+  "page": "ccr-p-vol",
+  "width": "6",
+  "height": "1",
+  "order": 1,
+  "showTitle": true,
+  "className": "",
+  "visible": "true",
+  "disabled": "false",
+  "groupType": "default"
+ },
+ {
+  "id": "ccr-g-diag",
+  "type": "ui-group",
+  "name": "指令回显(发出的真实帧)",
+  "page": "ccr-p-diag",
+  "width": "6",
+  "height": "1",
+  "order": 1,
+  "showTitle": true,
+  "className": "",
+  "visible": "true",
+  "disabled": "false",
+  "groupType": "default"
+ },
+ {
+  "id": "ccr-tcp-route",
+  "type": "function",
+  "z": "ccr-tab",
+  "name": "TCP路由(live/echo)",
+  "func": "const cfg = flow.get('cfg') || {live:false, echo:{ip:'127.0.0.1',port:7101}};\nconst dev = msg._dev;\nconst tgt = (cfg.live && cfg[dev]) ? cfg[dev] : cfg.echo;   // 未知 _dev 一律保底 echo\nmsg.host = tgt.ip; msg.port = tgt.port;\n// 回显:把真实帧+目标发到指令监视(Buffer 显示 hex)\nconst fr = Buffer.isBuffer(msg.payload) ? msg.payload.toString('hex') : JSON.stringify(msg.payload);\nnode.send([msg, {payload: `[${cfg.live?'真设备':'echo'}] ${msg._label||dev} ${tgt.ip}:${tgt.port} ← ${fr}`}]);\nreturn null;",
+  "outputs": 2,
+  "x": 620,
+  "y": 420,
+  "wires": [
+   [
+    "ccr-tcp-req"
+   ],
+   [
+    "ccr-diag-txt",
+    "ccr-diag-dbg"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-tcp-req",
+  "type": "tcp request",
+  "z": "ccr-tab",
+  "name": "TCP发送",
+  "server": "",
+  "port": "",
+  "out": "time",
+  "splitc": "300",
+  "newline": "",
+  "trim": false,
+  "tls": "",
+  "x": 820,
+  "y": 400,
+  "wires": [
+   [
+    "ccr-tcp-reply"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-tcp-reply",
+  "type": "function",
+  "z": "ccr-tab",
+  "name": "回包→回显",
+  "func": "return {payload:'← 回包: '+String(msg.payload).trim()};",
+  "outputs": 1,
+  "x": 1000,
+  "y": 400,
+  "wires": [
+   [
+    "ccr-diag-txt"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-1-on",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-power",
+  "name": "",
+  "label": "1 开",
+  "order": 0,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "PWR ON1",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "1",
+  "payloadType": "num",
+  "topic": "on",
+  "topicType": "str",
+  "x": 140,
+  "y": 140,
+  "wires": [
+   [
+    "ccr-pw-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-1-off",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-power",
+  "name": "",
+  "label": "1 关",
+  "order": 1,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "PWR OFF1",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "1",
+  "payloadType": "num",
+  "topic": "off",
+  "topicType": "str",
+  "x": 140,
+  "y": 140,
+  "wires": [
+   [
+    "ccr-pw-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-2-on",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-power",
+  "name": "",
+  "label": "2 开",
+  "order": 2,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "PWR ON2",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "2",
+  "payloadType": "num",
+  "topic": "on",
+  "topicType": "str",
+  "x": 140,
+  "y": 180,
+  "wires": [
+   [
+    "ccr-pw-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-2-off",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-power",
+  "name": "",
+  "label": "2 关",
+  "order": 3,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "PWR OFF2",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "2",
+  "payloadType": "num",
+  "topic": "off",
+  "topicType": "str",
+  "x": 140,
+  "y": 180,
+  "wires": [
+   [
+    "ccr-pw-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-3-on",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-power",
+  "name": "",
+  "label": "3 开",
+  "order": 4,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "PWR ON3",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "3",
+  "payloadType": "num",
+  "topic": "on",
+  "topicType": "str",
+  "x": 140,
+  "y": 220,
+  "wires": [
+   [
+    "ccr-pw-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-3-off",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-power",
+  "name": "",
+  "label": "3 关",
+  "order": 5,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "PWR OFF3",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "3",
+  "payloadType": "num",
+  "topic": "off",
+  "topicType": "str",
+  "x": 140,
+  "y": 220,
+  "wires": [
+   [
+    "ccr-pw-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-4-on",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-power",
+  "name": "",
+  "label": "4 开",
+  "order": 6,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "PWR ON4",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "4",
+  "payloadType": "num",
+  "topic": "on",
+  "topicType": "str",
+  "x": 140,
+  "y": 260,
+  "wires": [
+   [
+    "ccr-pw-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-4-off",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-power",
+  "name": "",
+  "label": "4 关",
+  "order": 7,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "PWR OFF4",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "4",
+  "payloadType": "num",
+  "topic": "off",
+  "topicType": "str",
+  "x": 140,
+  "y": 260,
+  "wires": [
+   [
+    "ccr-pw-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-5-on",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-power",
+  "name": "",
+  "label": "5 开",
+  "order": 8,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "PWR ON5",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "5",
+  "payloadType": "num",
+  "topic": "on",
+  "topicType": "str",
+  "x": 140,
+  "y": 300,
+  "wires": [
+   [
+    "ccr-pw-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-5-off",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-power",
+  "name": "",
+  "label": "5 关",
+  "order": 9,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "PWR OFF5",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "5",
+  "payloadType": "num",
+  "topic": "off",
+  "topicType": "str",
+  "x": 140,
+  "y": 300,
+  "wires": [
+   [
+    "ccr-pw-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-6-on",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-power",
+  "name": "",
+  "label": "6 开",
+  "order": 10,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "PWR ON6",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "6",
+  "payloadType": "num",
+  "topic": "on",
+  "topicType": "str",
+  "x": 140,
+  "y": 340,
+  "wires": [
+   [
+    "ccr-pw-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-6-off",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-power",
+  "name": "",
+  "label": "6 关",
+  "order": 11,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "PWR OFF6",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "6",
+  "payloadType": "num",
+  "topic": "off",
+  "topicType": "str",
+  "x": 140,
+  "y": 340,
+  "wires": [
+   [
+    "ccr-pw-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-7-on",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-power",
+  "name": "",
+  "label": "7 开",
+  "order": 12,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "PWR ON7",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "7",
+  "payloadType": "num",
+  "topic": "on",
+  "topicType": "str",
+  "x": 140,
+  "y": 380,
+  "wires": [
+   [
+    "ccr-pw-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-7-off",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-power",
+  "name": "",
+  "label": "7 关",
+  "order": 13,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "PWR OFF7",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "7",
+  "payloadType": "num",
+  "topic": "off",
+  "topicType": "str",
+  "x": 140,
+  "y": 380,
+  "wires": [
+   [
+    "ccr-pw-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-8-on",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-power",
+  "name": "",
+  "label": "8 开",
+  "order": 14,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "PWR ON8",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "8",
+  "payloadType": "num",
+  "topic": "on",
+  "topicType": "str",
+  "x": 140,
+  "y": 420,
+  "wires": [
+   [
+    "ccr-pw-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-8-off",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-power",
+  "name": "",
+  "label": "8 关",
+  "order": 15,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "PWR OFF8",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "8",
+  "payloadType": "num",
+  "topic": "off",
+  "topicType": "str",
+  "x": 140,
+  "y": 420,
+  "wires": [
+   [
+    "ccr-pw-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-pw-frame",
+  "type": "function",
+  "z": "ccr-tab",
+  "name": "组电源帧 PWR ON/OFF<n>",
+  "func": "const n = Number(msg.payload);\nconst on = msg.topic === 'on';\nmsg.payload = `PWR ${on?'ON':'OFF'}${n}\\r`;   // 公司程序 POWER_<n>ON/OFF 真实帧\nmsg._dev = 'power';\nreturn msg;",
+  "outputs": 1,
+  "x": 420,
+  "y": 300,
+  "wires": [
+   [
+    "ccr-tcp-route"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-mx-0",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-matrix",
+  "name": "",
+  "label": "左电脑 → LED屏",
+  "order": 1,
+  "width": "3",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "CutMatrix_192.168.5.11:1_224.1.1.30:5000;",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "video-input-hdmi",
+  "iconPosition": "left",
+  "payload": "{\"src\": \"192.168.5.11\", \"mcast\": \"224.1.1.30\"}",
+  "payloadType": "json",
+  "topic": "",
+  "topicType": "str",
+  "x": 140,
+  "y": 520,
+  "wires": [
+   [
+    "ccr-mx-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-mx-1",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-matrix",
+  "name": "",
+  "label": "摄像机 → 采集卡",
+  "order": 2,
+  "width": "3",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "CutMatrix_192.168.5.17:1_224.1.1.35:5000;",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "video-input-hdmi",
+  "iconPosition": "left",
+  "payload": "{\"src\": \"192.168.5.17\", \"mcast\": \"224.1.1.35\"}",
+  "payloadType": "json",
+  "topic": "",
+  "topicType": "str",
+  "x": 140,
+  "y": 560,
+  "wires": [
+   [
+    "ccr-mx-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-mx-frame",
+  "type": "function",
+  "z": "ccr-tab",
+  "name": "组矩阵帧 CutMatrix",
+  "func": "const p = msg.payload;\nmsg.payload = `CutMatrix_${p.src}:1_${p.mcast}:5000;`;  // 公司程序真实矩阵帧\nmsg._dev = 'matrix';\nreturn msg;",
+  "outputs": 1,
+  "x": 420,
+  "y": 540,
+  "wires": [
+   [
+    "ccr-tcp-route"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-vol-1-0B",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-vol",
+  "name": "",
+  "label": "输入1 +",
+  "order": 0,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "com1 hex 000B010040",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "{\"n\": 1, \"code\": \"0B\"}",
+  "payloadType": "json",
+  "topic": "",
+  "topicType": "str",
+  "x": 140,
+  "y": 740,
+  "wires": [
+   [
+    "ccr-vol-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-vol-1-0C",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-vol",
+  "name": "",
+  "label": "输入1 −",
+  "order": 1,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "com1 hex 000C010040",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "{\"n\": 1, \"code\": \"0C\"}",
+  "payloadType": "json",
+  "topic": "",
+  "topicType": "str",
+  "x": 140,
+  "y": 740,
+  "wires": [
+   [
+    "ccr-vol-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-vol-2-0B",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-vol",
+  "name": "",
+  "label": "输入2 +",
+  "order": 2,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "com1 hex 000B020040",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "{\"n\": 2, \"code\": \"0B\"}",
+  "payloadType": "json",
+  "topic": "",
+  "topicType": "str",
+  "x": 140,
+  "y": 780,
+  "wires": [
+   [
+    "ccr-vol-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-vol-2-0C",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-vol",
+  "name": "",
+  "label": "输入2 −",
+  "order": 3,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "com1 hex 000C020040",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "{\"n\": 2, \"code\": \"0C\"}",
+  "payloadType": "json",
+  "topic": "",
+  "topicType": "str",
+  "x": 140,
+  "y": 780,
+  "wires": [
+   [
+    "ccr-vol-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-vol-3-0B",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-vol",
+  "name": "",
+  "label": "输入3 +",
+  "order": 4,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "com1 hex 000B030040",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "{\"n\": 3, \"code\": \"0B\"}",
+  "payloadType": "json",
+  "topic": "",
+  "topicType": "str",
+  "x": 140,
+  "y": 820,
+  "wires": [
+   [
+    "ccr-vol-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-vol-3-0C",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-vol",
+  "name": "",
+  "label": "输入3 −",
+  "order": 5,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "com1 hex 000C030040",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "{\"n\": 3, \"code\": \"0C\"}",
+  "payloadType": "json",
+  "topic": "",
+  "topicType": "str",
+  "x": 140,
+  "y": 820,
+  "wires": [
+   [
+    "ccr-vol-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-vol-4-0B",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-vol",
+  "name": "",
+  "label": "输入4 +",
+  "order": 6,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "com1 hex 000B040040",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "{\"n\": 4, \"code\": \"0B\"}",
+  "payloadType": "json",
+  "topic": "",
+  "topicType": "str",
+  "x": 140,
+  "y": 860,
+  "wires": [
+   [
+    "ccr-vol-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-vol-4-0C",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-vol",
+  "name": "",
+  "label": "输入4 −",
+  "order": 7,
+  "width": "1",
+  "height": "1",
+  "emulateClick": false,
+  "tooltip": "com1 hex 000C040040",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "",
+  "iconPosition": "left",
+  "payload": "{\"n\": 4, \"code\": \"0C\"}",
+  "payloadType": "json",
+  "topic": "",
+  "topicType": "str",
+  "x": 140,
+  "y": 860,
+  "wires": [
+   [
+    "ccr-vol-frame"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-vol-frame",
+  "type": "function",
+  "z": "ccr-tab",
+  "name": "组音量hex帧→字节",
+  "func": "const {n, code} = msg.payload;\n// 公司程序 SEND_COM(com,1,'0x012003001000061000A5E8000B0<n>0040'),code=0B加/0C减\nconst full = '012003001000061000A5E8' + '00' + code + '0' + n + '0040';\nmsg.payload = Buffer.from(full, 'hex');\nmsg._frameHex = full;\nnode.send([msg, {payload:`[串口 com1/ttyS3] 音量 ← ${full}`}]);\nreturn null;",
+  "outputs": 2,
+  "x": 420,
+  "y": 760,
+  "wires": [
+   [
+    "ccr-serial-out"
+   ],
+   [
+    "ccr-diag-txt",
+    "ccr-diag-dbg"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-serial-ttyS3",
+  "type": "serial-port",
+  "name": "com1→ttyS3",
+  "serialport": "/dev/ttyS3",
+  "serialbaud": "9600",
+  "databits": "8",
+  "parity": "none",
+  "stopbits": "1",
+  "waitfor": "",
+  "dtr": "none",
+  "rts": "none",
+  "cts": "none",
+  "dsr": "none",
+  "newline": "",
+  "bin": "bin",
+  "out": "interbyte",
+  "addchar": "",
+  "responsetimeout": "10000"
+ },
+ {
+  "id": "ccr-serial-out",
+  "type": "serial out",
+  "z": "ccr-tab",
+  "name": "发串口",
+  "serial": "ccr-serial-ttyS3",
+  "x": 640,
+  "y": 760,
+  "wires": []
+ },
+ {
+  "id": "ccr-btn-meeting-start",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-scene",
+  "name": "",
+  "label": "开始会议",
+  "order": 1,
+  "width": "3",
+  "height": "2",
+  "emulateClick": false,
+  "tooltip": "CutMatrix 左电脑→LED / 摄像机→采集卡 + LED电源开(公司程序 tp401)",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "play-circle",
+  "iconPosition": "left",
+  "payload": "start",
+  "payloadType": "str",
+  "topic": "",
+  "topicType": "str",
+  "x": 150,
+  "y": 100,
+  "wires": [
+   [
+    "ccr-scene-fn"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-btn-meeting-end",
+  "type": "ui-button",
+  "z": "ccr-tab",
+  "group": "ccr-g-scene",
+  "name": "",
+  "label": "结束会议",
+  "order": 2,
+  "width": "3",
+  "height": "2",
+  "emulateClick": false,
+  "tooltip": "LED电源关序列(公司程序 tp402)",
+  "color": "",
+  "bgcolor": "",
+  "className": "",
+  "icon": "stop-circle",
+  "iconPosition": "left",
+  "payload": "end",
+  "payloadType": "str",
+  "topic": "",
+  "topicType": "str",
+  "x": 150,
+  "y": 160,
+  "wires": [
+   [
+    "ccr-scene-fn"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-scene-fn",
+  "type": "function",
+  "z": "ccr-tab",
+  "name": "会议场景展开(真实时序)",
+  "func": "// 映射公司程序 tp401 开始会议 / tp402 结束会议\nconst mx = (src,mcast,d)=>setTimeout(()=>node.send({payload:`CutMatrix_${src}:1_${mcast}:5000;`,_dev:'matrix'}),d);\nconst pw = (frame,d)=>setTimeout(()=>node.send({payload:frame,_dev:'power'}),d);\nif (msg.payload==='start') {\n  mx('192.168.5.11','224.1.1.30',0);      // 左电脑→LED\n  mx('192.168.5.17','224.1.1.35',200);    // 摄像机→采集卡\n  pw('PWR ON1\\r',400);                    // LED电源开\n  pw('PWR OFF3\\r',600);\n  node.status({fill:'green',shape:'dot',text:'会议中'});\n} else {\n  pw('PWR OFF1\\r',0); pw('PWR OFF4\\r',200); pw('PWR ON3\\r',400);\n  node.status({fill:'grey',shape:'ring',text:'已结束'});\n}\nreturn null;",
+  "outputs": 1,
+  "x": 440,
+  "y": 130,
+  "wires": [
+   [
+    "ccr-tcp-route"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-scene-txt",
+  "type": "ui-text",
+  "z": "ccr-tab",
+  "group": "ccr-g-scene-fb",
+  "order": 1,
+  "width": "6",
+  "height": "1",
+  "name": "",
+  "label": "场景",
+  "format": "{{msg.payload}}",
+  "layout": "row-spread",
+  "style": false,
+  "font": "",
+  "fontSize": 16,
+  "color": "#d8dee6",
+  "wrapText": false,
+  "className": "",
+  "x": 640,
+  "y": 180,
+  "wires": []
+ },
+ {
+  "id": "ccr-echo-in",
+  "type": "tcp in",
+  "z": "ccr-tab",
+  "name": "安全echo:7101",
+  "server": "server",
+  "host": "",
+  "port": "7101",
+  "datamode": "stream",
+  "datatype": "utf8",
+  "newline": "",
+  "topic": "",
+  "trim": false,
+  "base64": false,
+  "tls": "",
+  "x": 160,
+  "y": 920,
+  "wires": [
+   [
+    "ccr-echo-fn"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-echo-fn",
+  "type": "function",
+  "z": "ccr-tab",
+  "name": "echo ACK",
+  "func": "msg.payload = 'ACK:' + String(msg.payload).trim(); return msg;",
+  "outputs": 1,
+  "x": 360,
+  "y": 920,
+  "wires": [
+   [
+    "ccr-echo-out"
+   ]
+  ]
+ },
+ {
+  "id": "ccr-echo-out",
+  "type": "tcp out",
+  "z": "ccr-tab",
+  "name": "echo回包",
+  "host": "",
+  "port": "",
+  "beserver": "reply",
+  "base64": false,
+  "end": false,
+  "tls": "",
+  "x": 540,
+  "y": 920,
+  "wires": []
+ },
+ {
+  "id": "ccr-diag-txt",
+  "type": "ui-text",
+  "z": "ccr-tab",
+  "group": "ccr-g-diag",
+  "order": 1,
+  "width": "6",
+  "height": "1",
+  "name": "",
+  "label": "最近指令",
+  "format": "{{msg.payload}}",
+  "layout": "col-center",
+  "style": false,
+  "font": "",
+  "fontSize": 13,
+  "color": "#36c78d",
+  "wrapText": true,
+  "className": "",
+  "x": 1000,
+  "y": 460,
+  "wires": []
+ },
+ {
+  "id": "ccr-diag-dbg",
+  "type": "debug",
+  "z": "ccr-tab",
+  "name": "指令帧",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": true,
+  "complete": "payload",
+  "targetType": "msg",
+  "statusVal": "",
+  "statusType": "auto",
+  "x": 1000,
+  "y": 520,
+  "wires": []
+ },
+ {
+  "id": "ccp-base",
+  "type": "ui-base",
+  "name": "演示中控",
+  "path": "/dashboard",
+  "includeClientData": true,
+  "acceptsClientConfig": [
+   "ui-notification",
+   "ui-control"
+  ],
+  "showPathInSidebar": false,
+  "showPageTitle": false,
+  "navigationStyle": "fixed"
+ },
+ {
+  "id": "ccp-theme",
+  "type": "ui-theme",
+  "name": "CC62",
+  "colors": {
+   "surface": "#0d1a2e",
+   "primary": "#35c5d8",
+   "bgPage": "#0a1220",
+   "groupBg": "#101d33",
+   "groupOutline": "#22406a",
+   "textPrimary": "#e6edf7"
+  },
+  "sizes": {
+   "density": "comfortable",
+   "pagePadding": "0px",
+   "groupGap": "0px",
+   "groupBorderRadius": "0px",
+   "widgetGap": "0px"
+  }
+ },
+ {
+  "id": "ccp-page",
+  "type": "ui-page",
+  "name": "演示中控",
+  "ui": "ccp-base",
+  "path": "/panel",
+  "icon": "",
+  "layout": "grid",
+  "theme": "ccp-theme",
+  "order": 1,
+  "className": "",
+  "visible": "true",
+  "disabled": "false"
+ },
+ {
+  "id": "ccp-group",
+  "type": "ui-group",
+  "name": "",
+  "page": "ccp-page",
+  "width": "12",
+  "height": "1",
+  "order": 1,
+  "showTitle": false,
+  "className": "",
+  "visible": "true",
+  "disabled": "false",
+  "groupType": "default"
+ },
+ {
+  "id": "ccp-tpl",
+  "type": "ui-template",
+  "z": "ccr-tab",
+  "group": "ccp-group",
+  "name": "62面板",
+  "order": 1,
+  "width": "0",
+  "height": "0",
+  "head": "",
+  "format": "\n<template>\n  <div class=\"ccp\">\n    <div class=\"ccp-head\">\n      <div class=\"ccp-brand\"><span class=\"dot\"></span>CREATOR <span class=\"sep\">·</span> 演示中控</div>\n      <div class=\"ccp-scenes\">\n        <button class=\"scene sc-start\" @click=\"scene('start')\"><span class=\"ic\">▶</span>会议开始</button>\n        <button class=\"scene sc-end\" @click=\"scene('end')\"><span class=\"ic\">■</span>会议结束</button>\n        <button class=\"scene sc-off\" @click=\"scene('alloff')\">全灯关</button>\n      </div>\n    </div>\n    <div class=\"ccp-grid\">\n      <div class=\"card\" v-for=\"a in areas\" :key=\"a.title\">\n        <div class=\"card-title\"><i></i>{{ a.title }}</div>\n        <div class=\"row\" v-for=\"d in a.items\" :key=\"d.id || d.area\">\n          <div class=\"row-name\"><span class=\"rdot\"></span>{{ d.n }}</div>\n          <div class=\"row-ctrl\">\n            <!-- 灯 toggle -->\n            <label v-if=\"d.t==='toggle'\" class=\"sw\" :class=\"{on:st[d.id]}\" @click=\"toggle(d)\">\n              <span class=\"knob\"></span>\n            </label>\n            <!-- 窗帘 开停合 -->\n            <div v-else-if=\"d.t==='curtain'\" class=\"curtain\">\n              <button class=\"cb blue\" @click=\"curtain(d,'open')\">开</button>\n              <button class=\"cb orange\" @click=\"curtain(d,'stop')\">停</button>\n              <button class=\"cb blue\" @click=\"curtain(d,'close')\">合</button>\n            </div>\n            <!-- 空调 - + toggle -->\n            <div v-else-if=\"d.t==='ac'\" class=\"ac\">\n              <button class=\"acb\" @click=\"ac(d,'tempdown')\">−</button>\n              <span class=\"actemp\">{{ acs[d.area] && acs[d.area].on ? (acs[d.area].temp+'℃') : '' }}</span>\n              <button class=\"acb\" @click=\"ac(d,'tempup')\">+</button>\n              <label class=\"sw\" :class=\"{on: acs[d.area] && acs[d.area].on}\" @click=\"ac(d, (acs[d.area]&&acs[d.area].on)?'off':'on')\">\n                <span class=\"knob\"></span>\n              </label>\n            </div>\n          </div>\n        </div>\n      </div>\n    </div>\n    <div class=\"ccp-foot\">经 RK3576 盒 · 空调走 USR-TCP232-304(192.168.5.211:82) · 指令源=公司中控程序 · {{ live?'真设备':'安全演示' }}</div>\n  </div>\n</template>\n<script>\nexport default {\n  data(){ return {\n    areas: [{\"title\": \"运营 / 指挥中心\", \"items\": [{\"n\": \"LED 大屏\", \"t\": \"toggle\", \"id\": \"led\"}, {\"n\": \"指挥中心灯带\", \"t\": \"toggle\", \"id\": \"zhzx_dd\"}, {\"n\": \"筒灯\", \"t\": \"toggle\", \"id\": \"tongdeng\"}, {\"n\": \"虚光\", \"t\": \"toggle\", \"id\": \"xuguang\"}, {\"n\": \"发光字\", \"t\": \"toggle\", \"id\": \"faguangzi\"}, {\"n\": \"鲲景观\", \"t\": \"toggle\", \"id\": \"kunjg\"}, {\"n\": \"指挥中心窗帘\", \"t\": \"curtain\", \"id\": \"zhzx_cl\"}, {\"n\": \"运营中心空调\", \"t\": \"ac\", \"area\": \"yy\"}]}, {\"title\": \"一楼公共\", \"items\": [{\"n\": \"走廊轨道灯\", \"t\": \"toggle\", \"id\": \"zl_gd\"}, {\"n\": \"走廊灯带\", \"t\": \"toggle\", \"id\": \"zl_dd\"}, {\"n\": \"走廊发光字\", \"t\": \"toggle\", \"id\": \"zl_fgz\"}, {\"n\": \"会客室轨道灯\", \"t\": \"toggle\", \"id\": \"hks_gd\"}, {\"n\": \"吧台灯带\", \"t\": \"toggle\", \"id\": \"bt_dd\"}, {\"n\": \"吧台窗帘\", \"t\": \"curtain\", \"id\": \"bt_cl\"}, {\"n\": \"洽谈室轨道灯\", \"t\": \"toggle\", \"id\": \"qts_gd\"}]}, {\"title\": \"会议区\", \"items\": [{\"n\": \"会议室1灯带\", \"t\": \"toggle\", \"id\": \"hy1_dd\"}, {\"n\": \"会议室1窗帘\", \"t\": \"curtain\", \"id\": \"hy1_cl\"}, {\"n\": \"会议室2灯带\", \"t\": \"toggle\", \"id\": \"hy2_dd\"}, {\"n\": \"会议室2窗帘\", \"t\": \"curtain\", \"id\": \"hy2_cl\"}]}, {\"title\": \"二楼办公\", \"items\": [{\"n\": \"小楼梯轨道灯\", \"t\": \"toggle\", \"id\": \"xlt_gd\"}, {\"n\": \"餐桌灯带1\", \"t\": \"toggle\", \"id\": \"cz_dd1\"}, {\"n\": \"餐桌灯带2\", \"t\": \"toggle\", \"id\": \"cz_dd2\"}, {\"n\": \"研发部轨道灯\", \"t\": \"toggle\", \"id\": \"yf_gd\"}, {\"n\": \"研发部窗帘\", \"t\": \"curtain\", \"id\": \"yf_cl\"}, {\"n\": \"研发部空调\", \"t\": \"ac\", \"area\": \"yf\"}, {\"n\": \"二楼餐桌空调\", \"t\": \"ac\", \"area\": \"cz\"}, {\"n\": \"工程部轨道灯\", \"t\": \"toggle\", \"id\": \"gc_gd\"}, {\"n\": \"会客厅轨道灯\", \"t\": \"toggle\", \"id\": \"hkt_gd\"}, {\"n\": \"财务室灯带\", \"t\": \"toggle\", \"id\": \"cw_dd\"}, {\"n\": \"机房空调\", \"t\": \"ac\", \"area\": \"jf\"}]}],\n    st: {},            // 灯开关状态\n    acs: { cz:{on:false,temp:21}, yf:{on:false,temp:16}, jf:{on:false,temp:16}, yy:{on:false,temp:16} },\n    live: false,\n  }},\n  methods:{\n    toggle(d){ this.st[d.id] = !this.st[d.id]; this.send({payload:{t:'light',id:d.id,name:d.n,on:this.st[d.id]}}); },\n    curtain(d,act){ this.send({payload:{t:'curtain',id:d.id,name:d.n,act}}); },\n    ac(d,act){\n      const s=this.acs[d.area];\n      if(act==='on'){ s.on=true; } else if(act==='off'){ s.on=false; }\n      else if(act==='tempup'){ s.temp=Math.min(32,s.temp+1); }\n      else if(act==='tempdown'){ s.temp=Math.max(16,s.temp-1); }\n      this.send({payload:{t:'ac',area:d.area,name:d.n,act,temp:s.temp}});\n    },\n    scene(s){ this.send({payload:{t:'scene',scene:s}}); }\n  },\n  watch:{ msg(m){ if(m&&m.payload&&m.payload._state){ this.live = !!m.payload._state.live; } } } // live 由 ccr-config 推入,页脚显示 安全演示/真设备\n}\n</script>\n<style>\n.ccp{ font-family:-apple-system,\"PingFang SC\",\"Microsoft YaHei\",sans-serif; color:#e6edf7;\n  background:radial-gradient(1200px 700px at 15% -10%,#12243f 0%,#0b1424 45%,#0a1018 100%); min-height:100vh; padding:22px 26px; box-sizing:border-box;}\n.ccp-head{ display:flex; align-items:center; justify-content:space-between; padding:6px 8px 18px; border-bottom:1px solid rgba(53,197,216,.18); margin-bottom:20px;}\n.ccp-brand{ font-size:26px; font-weight:800; letter-spacing:1px; display:flex; align-items:center; gap:12px;}\n.ccp-brand .dot{ width:11px;height:11px;border-radius:50%;background:#35c5d8;box-shadow:0 0 14px #35c5d8;}\n.ccp-brand .sep{ color:#35c5d8;}\n.ccp-scenes{ display:flex; gap:14px;}\n.scene{ min-width:120px; height:46px; border-radius:12px; font-size:15px; font-weight:700; cursor:pointer;\n  border:1px solid transparent; color:#e6edf7; display:flex;align-items:center;justify-content:center;gap:7px;}\n.scene .ic{ font-size:12px;}\n.sc-start{ background:linear-gradient(160deg,#1f7a4d,#186640); border-color:#2ea968;}\n.sc-end{ background:linear-gradient(160deg,#2a3446,#222b3a); border-color:#3a4658;}\n.sc-off{ background:transparent; border-color:#c0524e; color:#e79893;}\n.scene:hover{ filter:brightness(1.12);}\n.ccp-grid{ display:grid; grid-template-columns:1fr 1fr; gap:22px;}\n.card{ background:linear-gradient(165deg,#101d33,#0d1728); border:1px solid #22406a; border-radius:16px;\n  padding:20px 22px; box-shadow:0 10px 34px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.03);}\n.card-title{ font-size:16px; font-weight:700; color:#35c5d8; letter-spacing:.6px; display:flex;align-items:center;gap:10px;\n  padding-bottom:14px; margin-bottom:6px; border-bottom:1px solid rgba(53,197,216,.14);}\n.card-title i{ width:4px; height:16px; border-radius:2px; background:#35c5d8; box-shadow:0 0 8px #35c5d8;}\n.row{ display:flex; align-items:center; justify-content:space-between; padding:11px 4px; }\n.row-name{ display:flex; align-items:center; gap:12px; font-size:15px; color:#d7e0ec;}\n.row-name .rdot{ width:7px;height:7px;border-radius:50%;background:#4a5b73;}\n.row-ctrl{ display:flex; align-items:center; gap:10px;}\n/* toggle 开关 */\n.sw{ width:52px;height:28px;border-radius:16px;background:#2a3547; background:#2a3547; position:relative; cursor:pointer; transition:background .2s; display:inline-block;}\n.sw .knob{ position:absolute; top:3px; left:3px; width:22px;height:22px;border-radius:50%; background:#e6edf7; transition:left .2s; box-shadow:0 1px 3px rgba(0,0,0,.4);}\n.sw.on{ background:linear-gradient(90deg,#2c8fa8,#35c5d8);}\n.sw.on .knob{ left:27px;}\n/* 窗帘 开停合 */\n.curtain{ display:flex; gap:8px;}\n.cb{ width:40px;height:34px;border-radius:9px;background:#122138;font-size:14px;font-weight:600;cursor:pointer;color:#cdd8e6;}\n.cb.blue{ border:1px solid #2f6ba8;}\n.cb.orange{ border:1px solid #c88a2e; color:#e6b263;}\n.cb:hover{ filter:brightness(1.18);}\n/* 空调 */\n.ac{ display:flex; align-items:center; gap:9px;}\n.acb{ width:34px;height:34px;border-radius:9px;background:#122138;border:1px solid #2f6ba8;color:#cdd8e6;font-size:18px;font-weight:700;cursor:pointer;}\n.acb:hover{ filter:brightness(1.18);}\n.actemp{ min-width:38px;text-align:center;font-size:14px;color:#35c5d8;font-weight:700;}\n.ccp-foot{ text-align:center; color:#5f7691; color:#5f7691; font-size:12.5px; margin-top:26px; padding-top:16px;}\n@media(max-width:900px){ .ccp-grid{ grid-template-columns:1fr; } }\n</style>\n",
+  "storeOutMessages": true,
+  "passthru": false,
+  "resendOnRefresh": true,
+  "templateScope": "widget",
+  "className": "",
+  "x": 200,
+  "y": 1080,
+  "wires": [
+   [
+    "ccp-router"
+   ]
+  ]
+ },
+ {
+  "id": "ccp-router",
+  "type": "function",
+  "z": "ccr-tab",
+  "name": "设备路由",
+  "func": "\n// 62 面板设备路由(2026-08-20 合并版): 面板按钮 → 真实协议链\n// 出口1=ccr-tcp-route(统一 live/echo 路由) 出口2=ccr-scene-fn(会议真实时序) 出口3=诊断记录\n// CRC16 Modbus(空调走 USR-TCP232-304 透传, Modbus RTU 从机 0x32)\nfunction crc16(buf){ let c=0xFFFF; for(let i=0;i<buf.length;i++){ c^=buf[i]; for(let j=0;j<8;j++){ if(c&1){c=(c>>1)^0xA001;} else {c>>=1;} } } return c; }\nfunction modbus(regHex, valHex){ // 06 写单寄存器\n  const body=[0x32,0x06, parseInt(regHex.slice(0,2),16),parseInt(regHex.slice(2,4),16),\n              (valHex>>8)&0xff, valHex&0xff];\n  const c=crc16(body); body.push(c&0xff,(c>>8)&0xff); return Buffer.from(body);\n}\n// 4空调查询基址 → 控制寄存器 = 基址+偏移(见 docs/空调控制-协议记录.md)\nconst AC_BASE={cz:0x9C5C, yf:0x9CB7, jf:0x9D12, yy:0x9D6D};\nconst p=msg.payload||{};\n// ── 空调: 组真实 Modbus 帧,交 ccr-tcp-route 统一路由(live=false 默认走 echo,不碰 5.211:82)\nif(p.t==='ac'){\n  const base=AC_BASE[p.area]; const sw=(base+0x32).toString(16).toUpperCase().padStart(4,'0');\n  const tp=(base+0x35).toString(16).toUpperCase().padStart(4,'0');\n  let frame;\n  if(p.act==='on')  frame=modbus(sw,0x0001);\n  else if(p.act==='off') frame=modbus(sw,0x0000);\n  else { frame=modbus(tp, p.temp); } // 温度=摄氏值\n  node.send([{payload:frame, _dev:'ac', _label:`空调 ${p.name} ${p.act}`}, null, null]);\n  return;\n}\n// ── 会议场景 start/end: 走公司程序真实时序展开(CutMatrix+PWR,同受 live 开关管)\nif(p.t==='scene' && (p.scene==='start'||p.scene==='end')){\n  node.send([null, {payload:p.scene}, null]);\n  return;\n}\n// ── 灯/窗帘/全灯关: 公司程序档案无此三类协议 → 安全占位,仅记录不发任何设备(红线)\nconst diag=`[占位:${p.t}] ${p.name||p.scene||''} ${p.act||(p.on?'ON':p.on===false?'OFF':'')} (安全演示,未发真设备)`;\nnode.send([null, null, {payload:diag}]);\n",
+  "outputs": 3,
+  "x": 440,
+  "y": 1080,
+  "wires": [
+   [
+    "ccr-tcp-route"
+   ],
+   [
+    "ccr-scene-fn"
+   ],
+   [
+    "ccp-diag",
+    "ccr-diag-txt"
+   ]
+  ]
+ },
+ {
+  "id": "ccp-diag",
+  "type": "debug",
+  "z": "ccr-tab",
+  "name": "指令",
+  "active": true,
+  "tosidebar": true,
+  "console": false,
+  "tostatus": true,
+  "complete": "payload",
+  "targetType": "msg",
+  "statusVal": "",
+  "statusType": "auto",
+  "x": 700,
+  "y": 1140,
+  "wires": []
+ }
+]
