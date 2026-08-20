@@ -2135,12 +2135,18 @@
       // 跨进程通信由 audio_processor 自带 server 处理，不走 main.py web/server 中转）
       audioBtn.onclick = () => {
         const url = `${location.protocol}//${location.hostname}:5052/audio/export.wav`;
-        // 直接 navigation 触发下载（Content-Disposition 强制 attachment）
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "";  // 让浏览器用服务端 filename
-        document.body.appendChild(a); a.click();
-        setTimeout(() => document.body.removeChild(a), 100);
+        // 先探测 5052 是否有服务：纪要机形态（audio.source=net_multicast）下
+        // audio_processor 不起、组播路径的原音导出未实现，直接跳转会落到浏览器
+        // 拒绝页（2026-08-20 用户实测）。探活通过才触发下载。
+        fetch(url, { method: "HEAD", mode: "no-cors" }).then(() => {
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "";  // 让浏览器用服务端 filename
+          document.body.appendChild(a); a.click();
+          setTimeout(() => document.body.removeChild(a), 100);
+        }).catch(() => {
+          alert("当前形态暂不支持导出原音：\n会议主机组播路径（纪要机）的整场录音导出尚未实现，已立项待排期。\n转写文字请用「导出原文」。");
+        });
       };
     }
     const sumBtn = document.querySelector("[data-tx-summary]");
