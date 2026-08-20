@@ -2125,7 +2125,9 @@
           const ts = p.querySelector(".tx-ts")?.textContent || "";
           // 只导出已定稿（.finals），未定稿的 .live 不算
           const txt = p.querySelector(".finals")?.textContent || "";
-          const spk = p.dataset.speaker;
+          // 发言人取标签实时文本（改名后全局刷新过），不用 dataset.speaker
+          // 旧名快照——否则导出文件里是改名前的名字（2026-08-20 用户实测）
+          const spk = p.querySelector(".tx-spk")?.textContent || p.dataset.speaker || "";
           if (txt) lines.push(`[${ts}]${spk ? ` [${spk}]` : ""}\n${txt}\n`);
         });
         const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
@@ -2134,7 +2136,7 @@
         const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
         a.href = url; a.download = `transcript-${stamp}.txt`;
         document.body.appendChild(a); a.click();
-        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 3000);
       };
     }
     if (audioBtn) {
@@ -2168,8 +2170,10 @@
     card.querySelectorAll(".tx-para").forEach(p => {
       const t = p.querySelector(".finals")?.textContent || "";
       if (!t.trim()) return;
-      // P3：多路话筒段带发言人前缀，纪要 LLM 据此区分谁说了什么
-      const spk = p.dataset.speaker;
+      // P3：多路话筒段带发言人前缀，纪要 LLM 据此区分谁说了什么。
+      // 取标签实时文本（当前名），不用 dataset.speaker 旧名快照——纪要里
+      // 的发言人归属才与改名后界面一致
+      const spk = p.querySelector(".tx-spk")?.textContent || p.dataset.speaker || "";
       parts.push(spk ? `[${spk}] ${t}` : t);
     });
     // 用第一段时间戳估算时长（仅用于元数据，不影响 LLM 调用）
@@ -2283,9 +2287,15 @@
       const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `summary-${data.id}.md`;
+      // 文件名 = 时间 + 纪要标题（清洗文件系统非法字符），方便后期利用；
+      // revoke 延到 3s——过早回收 blob URL 会把下载中断成 .crdownload 残件
+      const d = new Date();
+      const pad = n => String(n).padStart(2, "0");
+      const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
+      const title = String(data.title || "未命名").replace(/[\\/:*?"<>|\n\r]/g, "_").slice(0, 40);
+      a.href = url; a.download = `纪要-${stamp}-${title}.md`;
       document.body.appendChild(a); a.click();
-      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 3000);
     };
     card.querySelector("[data-sm-close]").onclick = closeSummaryModal;
   }
