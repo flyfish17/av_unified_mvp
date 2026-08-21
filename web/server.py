@@ -275,6 +275,38 @@ def transcript_today():
     return {"date": store._today(), "count": len(entries), "entries": entries}
 
 
+# ── 声纹发言人改名（回流自 av_understanding_mac S6 c1147ee，3588 线简化版）──
+# S1/S2 是 speaker_diarizer 进程内编号；改名 = 当天别名表（TranscriptStore alias 行，只追加），
+# 不进 data/mic_names.json（那张表 key 是物理话筒 ID，语义不同）。SSE diarization 通道广播
+# {alias: {speaker_id, name}} 让所有已开页面同步刷新标签；纪要导出读标签文本，自动拿到真名。
+_SPK_STORE = None
+def _spk_store():
+    global _SPK_STORE
+    if _SPK_STORE is None:
+        from core.transcript_store import TranscriptStore
+        _SPK_STORE = TranscriptStore(_PROJECT_ROOT / "data" / "transcripts")
+        _SPK_STORE.load_today()  # 重放恢复当天 aliases
+    return _SPK_STORE
+
+
+@_app.get("/api/speaker/aliases")
+def speaker_aliases():
+    return {"ok": True, "aliases": dict(_spk_store().aliases)}
+
+
+@_app.post("/api/speaker/alias")
+def speaker_alias():
+    """body: {"speaker_id": "S2", "name": "张三"}；name 空串 = 撤销改名回落 S2。"""
+    body = _flask.request.get_json(force=True, silent=True) or {}
+    spk = str(body.get("speaker_id") or "").strip()
+    name = str(body.get("name") or "").strip()[:16]
+    if not spk.startswith("S") or not spk[1:].isdigit():
+        return {"ok": False, "error": "speaker_id 须为 S<n>"}, 400
+    _spk_store().append_alias(spk, name)
+    push("diarization", {"alias": {"speaker_id": spk, "name": name}})
+    return {"ok": True, "aliases": dict(_spk_store().aliases)}
+
+
 @_app.get("/api/mic/names")
 def mic_names_get():
     """当前话筒命名表（合并层）。前端按此统一渲染显示名——SSE 重放的历史事件

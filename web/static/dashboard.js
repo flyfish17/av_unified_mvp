@@ -1140,7 +1140,16 @@
   // 发言人则把该 span 及其后的 span 切出成新段、本地麦段指针跟过去。最终效果与会议主机
   // 话筒号分段同构：.tx-spk 标签 + para.dataset.speaker，纪要归属零改动。
   // 本地麦键 ""（无 mic_id）才会收到 diarization；话筒号路径不发 segment。
+  window.__spkAliases = window.__spkAliases || {};   // S<n> → 真名（当天）
+  const spkLabel = (spk) => (window.__spkAliases[spk] || spk);
   function applyDiarization(ev) {
+    if (ev.alias) {  // 改名广播：刷新所有该发言人的标签（纪要导出读标签文本，自动用真名）
+      const { speaker_id: sid, name } = ev.alias;
+      if (name) window.__spkAliases[sid] = name; else delete window.__spkAliases[sid];
+      document.querySelectorAll(`.tx-spk[data-spk-id="${CSS.escape(sid)}"]`)
+        .forEach(el => { if (!el.querySelector("input")) el.textContent = spkLabel(sid); });
+      return;
+    }
     const spk = ev.speaker_id, segId = ev.segment_id;
     if (!spk || !segId) return;  // 短段/嵌入失败 speaker_id=null：不猜
     const card = document.querySelector('[data-overview="transcript"] .strip-card-body');
@@ -1157,7 +1166,7 @@
       const meta = para.querySelector(".tx-meta");
       if (meta && !meta.querySelector(".tx-spk")) {
         meta.insertAdjacentHTML("afterbegin",
-          `<span class="tx-spk" data-voice="1" style="color:${color};font-weight:600">${escHtml(spk)}</span> · `);
+          `<span class="tx-spk" data-voice="1" data-spk-id="${escHtml(spk)}" title="点击改名" style="color:${color};font-weight:600;cursor:pointer">${escHtml(spkLabel(spk))}</span> · `);
       }
       return;
     }
@@ -1170,7 +1179,7 @@
     np.className = "tx-para";
     np.dataset.speaker = spk;
     np.innerHTML =
-      `<div class="tx-meta"><span class="tx-spk" data-voice="1" style="color:${color};font-weight:600">${escHtml(spk)}</span> · ` +
+      `<div class="tx-meta"><span class="tx-spk" data-voice="1" data-spk-id="${escHtml(spk)}" title="点击改名" style="color:${color};font-weight:600;cursor:pointer">${escHtml(spkLabel(spk))}</span> · ` +
       `<span class="tx-ts">${fmtClock(ev.ts)}</span></div>` +
       `<div class="tx-text"><span class="finals"></span><span class="live"></span></div>`;
     const nf = np.querySelector(".finals");
@@ -1599,11 +1608,17 @@
     fetch("/api/mic/names").then(r => r.json())
       .then(res => { if (res && res.ok) window.__micNames = res.mic_names || {}; })
       .catch(() => {});
+    fetch("/api/speaker/aliases").then(r => r.json())
+      .then(res => { if (res && res.ok) window.__spkAliases = res.aliases || {}; })
+      .catch(() => {});
     card.addEventListener("click", (e) => {
       const spkEl = e.target.closest(".tx-spk");
-      // 只有带物理话筒 ID 的标签可改名（身份跟话筒实体走）
-      if (!spkEl || !spkEl.dataset.physId || spkEl.querySelector("input")) return;
-      const physId = parseInt(spkEl.dataset.physId, 10);
+      if (!spkEl || spkEl.querySelector("input")) return;
+      // 两种可改名标签：物理话筒 ID（会议主机）/ 声纹编号 S<n>（本机麦）
+      const isVoice = !!spkEl.dataset.spkId;
+      if (!isVoice && !spkEl.dataset.physId) return;
+      const physId = isVoice ? null : parseInt(spkEl.dataset.physId, 10);
+      const spkId = isVoice ? spkEl.dataset.spkId : null;
       const old = spkEl.textContent;
       const input = document.createElement("input");
       input.value = old;
@@ -1621,6 +1636,14 @@
         const name = input.value.trim();
         spkEl.textContent = old;  // 先复原旧名，提交成功后统一刷新
         if (!commit || name === old) return;
+        if (isVoice) {
+          // 声纹发言人：落当天别名表 + SSE 广播，applyDiarization 收到 alias 统一刷新
+          fetch("/api/speaker/alias", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ speaker_id: spkId, name: name === spkId ? "" : name }),
+          }).catch(() => {});
+          return;
+        }
         fetch("/api/mic/rename", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
