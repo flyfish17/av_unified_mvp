@@ -216,7 +216,7 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 | P1.4 | 纪要 UI 提示 + 触发体验优化 | ⏳ |
 | P1.5 | 销售部署 README（`git checkout tag` 后 1 命令启动指南）| ⏳ |
 | P1.6 | Jetson CUDA 语音验证报告（独立窗口完成）| ⏳ |
-| P2.1a | video_processor YOLO 搬 NPU（`yolov8n_rknn_model`，config 一行切换）| ⚠️ 8/21 导出+隔离基准 OK（11×），**实况摄像头帧 NaN 零检出，62 已回退 .pt**；待查 fp16→int8 量化/输入预处理 |
+| P2.1a | video_processor YOLO 搬 NPU（`yolov8n_rknn_model`，config 一行切换）| ✅ 8/21 下午修复落地：DFL softmax fp16 溢出根因 → `scripts/export_yolo_rknn.py`；62 实况 15min 零异常、检出与 .pt 一致 |
 | P2.1b | video_processor 捕获侧减压：5 路软解 + 逐帧 JPEG 预编码疑为 CPU 大头（62 瞬时 ~600%，.pt/rknn 无明显差别）— RTSP 走子码流 / JPEG 只在有 MJPEG 客户端时编 / rkmpp 硬解 | ⏳ 先量化三者占比再动 |
 | P2.2 | 控制指令"离线"误判修复（dashboard.js 多 client_id 状态合并）| 接受 or 修 |
 
@@ -322,7 +322,10 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 - **⚠️ 实况验证失败（13:10 发现，已回退）**：rknn 模型常驻 80 分钟内 781 次 `推理异常: cannot convert float NaN to integer`（本机摄像头 505 / 财务监控 194 / 分布式 73），**零有效检出**；bus.jpg 基准正常说明运行时链路通，问题在真实帧上 fp16 输出 NaN（疑点：USB 摄像头/RTSP 帧尺寸与 640 letterbox、fp16 溢出；下一步试 `int8=True` 量化导出 + 用真实帧做校准集、或固定 imgsz 预处理后再喂）。62 已回退 `yolov8n.pt`，异常归零。
 - **数字更正**：前面"441%→370%"是 `ps` 生命周期均值，不是瞬时值；回退 .pt 后 `top` 瞬时同样 ~610%，**整进程 CPU 在 .pt/rknn 间无可比数据**。可靠的只有隔离基准（106 vs 1167 ms/帧）。模型入库 `yolov8n_rknn_model/` 保留作 POC 产物，**未过验收，别部署到 5.6**。
 - **切换脚本补丁（用户实切暴露）**：切 full 后 `audio.source` 仍是 `net_multicast` → supervisor 去掉 audio_processor，全功能演示没有 C920 拾音。修：语音输入跟形态走（full=mic / meeting_asr=net_multicast），形态相同但 source 不符也执行，`--status` 显示语音输入与 USB 麦（commit b346df5）。**用户 8/21 在 5.6 实切验证完成**。
-- **未完成项**：① ollama url 读 config（外放 Mac Studio 前置）；② rknn 实况 NaN 排查（int8 量化/真实帧校准）；③ P2.1b 量化（先做 ② 之前别动）。
+- **NaN 根因与修复（14:00-15:00，半天量内）**：离线用真实 RTSP 帧复现——推理不崩但原始输出 box 宽高通道含 **inf**（fp16 上限 65504，已见 45600），cls 通道干净 → 定位到 DFL 头 softmax 在 RKNN fp16 上不减 max、背景 anchor 的 exp 溢出 → NMS 出 NaN → `plot()` 崩。**修**：导出时 monkey-patch `DFL.forward` 在 softmax 前减每组 max（数学等价）+ `opset=17`（torch 2.2 ReduceMax 兼容）→ `scripts/export_yolo_rknn.py`。验证：3 张真实帧 inf=0、与 .pt 检出/类别一致；RTSP 300 帧 plot 零异常；同过滤条件（conf 0.5，person/phone/laptop）80 帧 .pt 与 rknn 各命中 40 person 完全一致；**62 实况 15min 零异常，NPU Core0 30%**。62 现常驻 rknn 模型，新模型 md5 e99a493f… 已入库覆盖。
+- **int8 路线否决**：32 张现场帧校准量化后 inf 消失但零检出——box(0-640)/分数(0-1) 同张量 8-bit 把分数压 0；要走 int8 得拆头（rknn_model_zoo 做法），收益不值，记 README 不再试。
+- **顺带发现（待查，与本次无关）**：生产日志全天 `[detect]` 全是 `(0 目标)`（.pt 与 rknn 相同），且 .pt 时段 75min 刷 26987 条心跳——`idle_detect_interval_s` 15s 节流疑似失效 + conf 0.5 下门口/财务几路是否真无人，下次看。
+- **未完成项**：① ollama url 读 config（外放 Mac Studio 前置）；② 上条 detect 心跳洪泛/零目标排查；③ P2.1b 捕获侧减压量化；④ 5.6 full 形态若要用 NPU YOLO：生产 venv `pip install rknn-toolkit-lite2==2.3.2` + config `model: yolov8n_rknn_model`。
 - **下次接手所需上下文**：62 导出 venv `~/rknn-export-venv`、产物 `~/yolo-rknn/`；pgrep 自匹配坑又踩一次（等待循环的 pgrep 模式匹配到自身、永不退出），见 memory `ssh-pkill-self-match-trap`。
 
 
