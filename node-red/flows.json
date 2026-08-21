@@ -26,7 +26,7 @@
     {
         "id": "ui_group_main",
         "type": "ui_group",
-        "name": "CREATOR AI 演示中控",
+        "name": "Husion湖森 AI 演示中控",
         "tab": "ui_tab_main",
         "order": 1,
         "disp": true,
@@ -1009,7 +1009,7 @@
         "order": 1,
         "width": "12",
         "height": "8",
-        "format": "<template>\n  <div class=\"cyber-container\">\n    <svg viewBox=\"0 0 900 500\" xmlns=\"http://www.w3.org/2000/svg\" style=\"width: 100%; height: auto;\">\n      <defs>\n        <pattern id=\"cyber_grid\" width=\"40\" height=\"40\" patternUnits=\"userSpaceOnUse\">\n          <rect width=\"40\" height=\"40\" fill=\"none\" stroke=\"rgba(56, 189, 248, 0.1)\" stroke-width=\"1\" />\n        </pattern>\n        <filter id=\"glow\" x=\"-25%\" y=\"-25%\" width=\"150%\" height=\"150%\">\n          <feGaussianBlur stdDeviation=\"6\" result=\"blur\" />\n          <feComposite in=\"SourceGraphic\" in2=\"blur\" operator=\"over\" />\n        </filter>\n        <linearGradient id=\"grad_bg\" x1=\"0%\" y1=\"0%\" x2=\"100%\" y2=\"100%\">\n          <stop offset=\"0%\" style=\"stop-color:#0b101e;stop-opacity:1\" />\n          <stop offset=\"100%\" style=\"stop-color:#162238;stop-opacity:1\" />\n        </linearGradient>\n      </defs>\n\n      <rect x=\"20\" y=\"20\" width=\"860\" height=\"460\" rx=\"15\" fill=\"url(#grad_bg)\" stroke=\"#1e3a8a\" stroke-width=\"2.5\" />\n      <rect x=\"20\" y=\"20\" width=\"860\" height=\"460\" rx=\"15\" fill=\"url(#cyber_grid)\" />\n\n      <text x=\"50\" y=\"75\" fill=\"#f8fafc\" font-size=\"26\" font-weight=\"bold\" font-family=\"sans-serif\">CREATOR AI\n        分布式调度大脑</text>\n      <text x=\"50\" y=\"105\" fill=\"#64748b\" font-size=\"14\" font-family=\"monospace\">SYSTEM: MAC_STUDIO_M3 // LOCAL_AGENT:\n        ACTIVE</text>\n\n      <text x=\"50\" y=\"150\" fill=\"#94a3b8\" font-size=\"12\" font-weight=\"bold\">>> 01. PERCEPTION (多模态感知)</text>\n      <text x=\"380\" y=\"150\" fill=\"#94a3b8\" font-size=\"12\" font-weight=\"bold\">>> 02. BRAIN (思考判断)</text>\n      <text x=\"680\" y=\"150\" fill=\"#94a3b8\" font-size=\"12\" font-weight=\"bold\">>> 03. DISPATCH (调度执行)</text>\n\n      <g id=\"zone_vision\">\n        <rect x=\"50\" y=\"170\" width=\"220\" height=\"130\" rx=\"10\"\n          :fill=\"msg?.payload?.vision?.detected ? 'rgba(56, 189, 248, 0.2)' : 'rgba(30, 41, 59, 0.8)'\"\n          :stroke=\"msg?.payload?.vision?.detected ? '#38bdf8' : '#334155'\" stroke-width=\"2\"\n          style=\"transition: all 0.5s ease;\" />\n        <text x=\"70\" y=\"210\" :fill=\"msg?.payload?.vision?.detected ? '#f8fafc' : '#cbd5e1'\" font-size=\"18\"\n          font-weight=\"bold\">视觉感知眼睛</text>\n        <text x=\"70\" y=\"235\" fill=\"#94a3b8\" font-size=\"12\">CodeProject.AI Camera</text>\n        <circle cx=\"80\" cy=\"275\" r=\"8\" :fill=\"msg?.payload?.vision?.detected ? '#38bdf8' : '#475569'\"\n          :filter=\"msg?.payload?.vision?.detected ? 'url(#glow)' : ''\" />\n        <text x=\"100\" y=\"280\" font-size=\"16\" font-weight=\"bold\"\n          :fill=\"msg?.payload?.vision?.detected ? '#38bdf8' : '#64748b'\">\n          状态: {{ msg?.payload?.vision?.detected ? '目标活动' : '区域待机中' }}\n        </text>\n      </g>\n\n      <g id=\"zone_auditory\">\n        <rect x=\"50\" y=\"320\" width=\"220\" height=\"130\" rx=\"10\"\n          :fill=\"msg?.payload?.audio?.detected ? 'rgba(74, 222, 128, 0.15)' : 'rgba(30, 41, 59, 0.8)'\"\n          :stroke=\"msg?.payload?.audio?.detected ? '#4ade80' : '#334155'\" stroke-width=\"2\"\n          style=\"transition: all 0.5s ease;\" />\n        <text x=\"70\" y=\"360\" :fill=\"msg?.payload?.audio?.detected ? '#f8fafc' : '#cbd5e1'\" font-size=\"18\"\n          font-weight=\"bold\">听觉感知耳朵</text>\n        <text x=\"70\" y=\"385\" fill=\"#94a3b8\" font-size=\"12\">FunASR Python Voice</text>\n        <circle cx=\"80\" cy=\"425\" r=\"8\" :fill=\"msg?.payload?.audio?.detected ? '#4ade80' : '#475569'\"\n          :filter=\"msg?.payload?.audio?.detected ? 'url(#glow)' : ''\" />\n        <text x=\"100\" y=\"430\" font-size=\"16\" font-weight=\"bold\"\n          :fill=\"msg?.payload?.audio?.detected ? '#4ade80' : '#64748b'\">\n          状态: {{ msg?.payload?.audio?.detected ? '指令处理' : '网络空闲' }}\n        </text>\n      </g>\n\n      <path d=\"M 270 235 C 325 235, 325 310, 380 310\" stroke=\"#1e293b\" stroke-width=\"6\" fill=\"none\" />\n      <path d=\"M 270 385 C 325 385, 325 310, 380 310\" stroke=\"#1e293b\" stroke-width=\"6\" fill=\"none\" />\n      <path d=\"M 560 310 L 680 310\" stroke=\"#1e293b\" stroke-width=\"6\" fill=\"none\" />\n\n\n      <path d=\"M 270 235 C 325 235, 325 310, 380 310\" stroke=\"#38bdf8\" stroke-width=\"3\" fill=\"none\"\n        :class=\"{'flow-fast': msg?.payload?.vision?.detected}\" />\n\n      <path d=\"M 270 385 C 325 385, 325 310, 380 310\" stroke=\"#4ade80\" stroke-width=\"3\" fill=\"none\"\n        :class=\"{'flow-fast': msg?.payload?.audio?.detected}\" />\n\n      <path d=\"M 560 310 L 680 310\" stroke=\"#a855f7\" stroke-width=\"3\" fill=\"none\"\n        :class=\"{'flow-fast': msg?.payload?.equipment?.fsp_active}\" />\n\n      <g id=\"creator_brain\">\n        <rect x=\"380\" y=\"220\" width=\"180\" height=\"180\" rx=\"10\"\n          :fill=\"(msg?.payload?.vision?.detected || msg?.payload?.audio?.detected) ? 'rgba(168, 85, 247, 0.2)' : 'rgba(15, 23, 42, 0.9)'\"\n          :stroke=\"(msg?.payload?.vision?.detected || msg?.payload?.audio?.detected) ? '#a855f7' : '#1e3a8a'\"\n          stroke-width=\"3\" style=\"transition: all 0.3s ease;\" />\n        <text x=\"405\" y=\"280\" fill=\"#f8fafc\" font-size=\"22\" font-weight=\"bold\" font-family=\"sans-serif\">AI大脑</text>\n        <text x=\"405\" y=\"310\" fill=\"#94a3b8\" font-size=\"12\">Ollama / Qwen Inference</text>\n        <text x=\"405\" y=\"370\" font-size=\"16\" font-weight=\"bold\"\n          :fill=\"(msg?.payload?.vision?.detected || msg?.payload?.audio?.detected) ? '#a855f7' : '#64748b'\">\n          {{ (msg?.payload?.vision?.detected || msg?.payload?.audio?.detected) ? '思考中...' : '网络待命' }}\n        </text>\n      </g>\n\n\n      <g id=\"creator_matrix\">\n        <rect x=\"680\" y=\"220\" width=\"160\" height=\"180\" rx=\"10\"\n          :fill=\"msg?.payload?.equipment?.fsp_active ? 'rgba(239, 68, 68, 0.15)' : 'rgba(15, 23, 42, 0.9)'\"\n          :stroke=\"msg?.payload?.equipment?.fsp_active ? '#ef4444' : '#1e3a8a'\" stroke-width=\"3\"\n          style=\"transition: all 0.3s ease;\" />\n        <text x=\"700\" y=\"280\" fill=\"#f8fafc\" font-size=\"22\" font-weight=\"bold\" font-family=\"sans-serif\">动作执行</text>\n        <text x=\"700\" y=\"310\" fill=\"#94a3b8\" font-size=\"12\">核心硬件受控</text>\n\n        <circle cx=\"710\" cy=\"365\" r=\"8\" :fill=\"msg?.payload?.equipment?.fsp_active ? '#ef4444' : '#334155'\"\n          :filter=\"msg?.payload?.equipment?.fsp_active ? 'url(#glow)' : ''\" />\n        <text x=\"730\" y=\"370\" fill=\"cbd5e1\" font-size=\"14\">\n          {{ msg?.payload?.equipment?.fsp_active ? '指令下发中' : 'TCP_READY' }}\n        </text>\n      </g>\n    </svg>\n  </div>\n</template>\n\n<style>\n  .cyber-container {\n    background: transparent;\n    width: 100%;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n  }\n\n  .flow-fast {\n    stroke-dasharray: 10 6;\n    animation: creatorFlow 0.5s linear infinite;\n    filter: drop-shadow(0 0 10px currentColor);\n  }\n\n  @keyframes creatorFlow {\n    from {\n      stroke-dashoffset: 20;\n    }\n\n    to {\n      stroke-dashoffset: 0;\n    }\n  }\n</style>",
+        "format": "<template>\n  <div class=\"cyber-container\">\n    <svg viewBox=\"0 0 900 500\" xmlns=\"http://www.w3.org/2000/svg\" style=\"width: 100%; height: auto;\">\n      <defs>\n        <pattern id=\"cyber_grid\" width=\"40\" height=\"40\" patternUnits=\"userSpaceOnUse\">\n          <rect width=\"40\" height=\"40\" fill=\"none\" stroke=\"rgba(56, 189, 248, 0.1)\" stroke-width=\"1\" />\n        </pattern>\n        <filter id=\"glow\" x=\"-25%\" y=\"-25%\" width=\"150%\" height=\"150%\">\n          <feGaussianBlur stdDeviation=\"6\" result=\"blur\" />\n          <feComposite in=\"SourceGraphic\" in2=\"blur\" operator=\"over\" />\n        </filter>\n        <linearGradient id=\"grad_bg\" x1=\"0%\" y1=\"0%\" x2=\"100%\" y2=\"100%\">\n          <stop offset=\"0%\" style=\"stop-color:#0b101e;stop-opacity:1\" />\n          <stop offset=\"100%\" style=\"stop-color:#162238;stop-opacity:1\" />\n        </linearGradient>\n      </defs>\n\n      <rect x=\"20\" y=\"20\" width=\"860\" height=\"460\" rx=\"15\" fill=\"url(#grad_bg)\" stroke=\"#1e3a8a\" stroke-width=\"2.5\" />\n      <rect x=\"20\" y=\"20\" width=\"860\" height=\"460\" rx=\"15\" fill=\"url(#cyber_grid)\" />\n\n      <text x=\"50\" y=\"75\" fill=\"#f8fafc\" font-size=\"26\" font-weight=\"bold\" font-family=\"sans-serif\">Husion湖森 AI\n        分布式调度大脑</text>\n      <text x=\"50\" y=\"105\" fill=\"#64748b\" font-size=\"14\" font-family=\"monospace\">SYSTEM: MAC_STUDIO_M3 // LOCAL_AGENT:\n        ACTIVE</text>\n\n      <text x=\"50\" y=\"150\" fill=\"#94a3b8\" font-size=\"12\" font-weight=\"bold\">>> 01. PERCEPTION (多模态感知)</text>\n      <text x=\"380\" y=\"150\" fill=\"#94a3b8\" font-size=\"12\" font-weight=\"bold\">>> 02. BRAIN (思考判断)</text>\n      <text x=\"680\" y=\"150\" fill=\"#94a3b8\" font-size=\"12\" font-weight=\"bold\">>> 03. DISPATCH (调度执行)</text>\n\n      <g id=\"zone_vision\">\n        <rect x=\"50\" y=\"170\" width=\"220\" height=\"130\" rx=\"10\"\n          :fill=\"msg?.payload?.vision?.detected ? 'rgba(56, 189, 248, 0.2)' : 'rgba(30, 41, 59, 0.8)'\"\n          :stroke=\"msg?.payload?.vision?.detected ? '#38bdf8' : '#334155'\" stroke-width=\"2\"\n          style=\"transition: all 0.5s ease;\" />\n        <text x=\"70\" y=\"210\" :fill=\"msg?.payload?.vision?.detected ? '#f8fafc' : '#cbd5e1'\" font-size=\"18\"\n          font-weight=\"bold\">视觉感知眼睛</text>\n        <text x=\"70\" y=\"235\" fill=\"#94a3b8\" font-size=\"12\">CodeProject.AI Camera</text>\n        <circle cx=\"80\" cy=\"275\" r=\"8\" :fill=\"msg?.payload?.vision?.detected ? '#38bdf8' : '#475569'\"\n          :filter=\"msg?.payload?.vision?.detected ? 'url(#glow)' : ''\" />\n        <text x=\"100\" y=\"280\" font-size=\"16\" font-weight=\"bold\"\n          :fill=\"msg?.payload?.vision?.detected ? '#38bdf8' : '#64748b'\">\n          状态: {{ msg?.payload?.vision?.detected ? '目标活动' : '区域待机中' }}\n        </text>\n      </g>\n\n      <g id=\"zone_auditory\">\n        <rect x=\"50\" y=\"320\" width=\"220\" height=\"130\" rx=\"10\"\n          :fill=\"msg?.payload?.audio?.detected ? 'rgba(74, 222, 128, 0.15)' : 'rgba(30, 41, 59, 0.8)'\"\n          :stroke=\"msg?.payload?.audio?.detected ? '#4ade80' : '#334155'\" stroke-width=\"2\"\n          style=\"transition: all 0.5s ease;\" />\n        <text x=\"70\" y=\"360\" :fill=\"msg?.payload?.audio?.detected ? '#f8fafc' : '#cbd5e1'\" font-size=\"18\"\n          font-weight=\"bold\">听觉感知耳朵</text>\n        <text x=\"70\" y=\"385\" fill=\"#94a3b8\" font-size=\"12\">FunASR Python Voice</text>\n        <circle cx=\"80\" cy=\"425\" r=\"8\" :fill=\"msg?.payload?.audio?.detected ? '#4ade80' : '#475569'\"\n          :filter=\"msg?.payload?.audio?.detected ? 'url(#glow)' : ''\" />\n        <text x=\"100\" y=\"430\" font-size=\"16\" font-weight=\"bold\"\n          :fill=\"msg?.payload?.audio?.detected ? '#4ade80' : '#64748b'\">\n          状态: {{ msg?.payload?.audio?.detected ? '指令处理' : '网络空闲' }}\n        </text>\n      </g>\n\n      <path d=\"M 270 235 C 325 235, 325 310, 380 310\" stroke=\"#1e293b\" stroke-width=\"6\" fill=\"none\" />\n      <path d=\"M 270 385 C 325 385, 325 310, 380 310\" stroke=\"#1e293b\" stroke-width=\"6\" fill=\"none\" />\n      <path d=\"M 560 310 L 680 310\" stroke=\"#1e293b\" stroke-width=\"6\" fill=\"none\" />\n\n\n      <path d=\"M 270 235 C 325 235, 325 310, 380 310\" stroke=\"#38bdf8\" stroke-width=\"3\" fill=\"none\"\n        :class=\"{'flow-fast': msg?.payload?.vision?.detected}\" />\n\n      <path d=\"M 270 385 C 325 385, 325 310, 380 310\" stroke=\"#4ade80\" stroke-width=\"3\" fill=\"none\"\n        :class=\"{'flow-fast': msg?.payload?.audio?.detected}\" />\n\n      <path d=\"M 560 310 L 680 310\" stroke=\"#a855f7\" stroke-width=\"3\" fill=\"none\"\n        :class=\"{'flow-fast': msg?.payload?.equipment?.fsp_active}\" />\n\n      <g id=\"creator_brain\">\n        <rect x=\"380\" y=\"220\" width=\"180\" height=\"180\" rx=\"10\"\n          :fill=\"(msg?.payload?.vision?.detected || msg?.payload?.audio?.detected) ? 'rgba(168, 85, 247, 0.2)' : 'rgba(15, 23, 42, 0.9)'\"\n          :stroke=\"(msg?.payload?.vision?.detected || msg?.payload?.audio?.detected) ? '#a855f7' : '#1e3a8a'\"\n          stroke-width=\"3\" style=\"transition: all 0.3s ease;\" />\n        <text x=\"405\" y=\"280\" fill=\"#f8fafc\" font-size=\"22\" font-weight=\"bold\" font-family=\"sans-serif\">AI大脑</text>\n        <text x=\"405\" y=\"310\" fill=\"#94a3b8\" font-size=\"12\">Ollama / Qwen Inference</text>\n        <text x=\"405\" y=\"370\" font-size=\"16\" font-weight=\"bold\"\n          :fill=\"(msg?.payload?.vision?.detected || msg?.payload?.audio?.detected) ? '#a855f7' : '#64748b'\">\n          {{ (msg?.payload?.vision?.detected || msg?.payload?.audio?.detected) ? '思考中...' : '网络待命' }}\n        </text>\n      </g>\n\n\n      <g id=\"creator_matrix\">\n        <rect x=\"680\" y=\"220\" width=\"160\" height=\"180\" rx=\"10\"\n          :fill=\"msg?.payload?.equipment?.fsp_active ? 'rgba(239, 68, 68, 0.15)' : 'rgba(15, 23, 42, 0.9)'\"\n          :stroke=\"msg?.payload?.equipment?.fsp_active ? '#ef4444' : '#1e3a8a'\" stroke-width=\"3\"\n          style=\"transition: all 0.3s ease;\" />\n        <text x=\"700\" y=\"280\" fill=\"#f8fafc\" font-size=\"22\" font-weight=\"bold\" font-family=\"sans-serif\">动作执行</text>\n        <text x=\"700\" y=\"310\" fill=\"#94a3b8\" font-size=\"12\">核心硬件受控</text>\n\n        <circle cx=\"710\" cy=\"365\" r=\"8\" :fill=\"msg?.payload?.equipment?.fsp_active ? '#ef4444' : '#334155'\"\n          :filter=\"msg?.payload?.equipment?.fsp_active ? 'url(#glow)' : ''\" />\n        <text x=\"730\" y=\"370\" fill=\"cbd5e1\" font-size=\"14\">\n          {{ msg?.payload?.equipment?.fsp_active ? '指令下发中' : 'TCP_READY' }}\n        </text>\n      </g>\n    </svg>\n  </div>\n</template>\n\n<style>\n  .cyber-container {\n    background: transparent;\n    width: 100%;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n  }\n\n  .flow-fast {\n    stroke-dasharray: 10 6;\n    animation: creatorFlow 0.5s linear infinite;\n    filter: drop-shadow(0 0 10px currentColor);\n  }\n\n  @keyframes creatorFlow {\n    from {\n      stroke-dashoffset: 20;\n    }\n\n    to {\n      stroke-dashoffset: 0;\n    }\n  }\n</style>",
         "storeOutMessages": true,
         "passthru": true,
         "templateScope": "local",
@@ -1243,6 +1243,139 @@
         "broker": "2b41081ef4cf12c5",
         "x": 870,
         "y": 420,
+        "wires": []
+    },
+    {
+        "id": "6381f8389711479e",
+        "type": "tab",
+        "label": "演示中控(全功能)",
+        "disabled": false,
+        "info": "经.20:8932明文口tcp out短连接;LED走PDU"
+    },
+    {
+        "id": "61ca670fe920492f",
+        "type": "ui-page",
+        "name": "演示中控",
+        "ui": "11692f75b65a4c92",
+        "path": "/control",
+        "icon": "remote",
+        "layout": "notebook",
+        "theme": "cd3302c01d38a9e1",
+        "order": 8,
+        "className": "",
+        "visible": true,
+        "disabled": false
+    },
+    {
+        "id": "449d2800e80b465b",
+        "type": "ui-group",
+        "name": "",
+        "page": "61ca670fe920492f",
+        "width": "24",
+        "height": "1",
+        "order": 1,
+        "showTitle": false,
+        "className": "",
+        "visible": true,
+        "disabled": false
+    },
+    {
+        "id": "ecbb87e4dbf64ff4",
+        "type": "ui-template",
+        "z": "6381f8389711479e",
+        "group": "449d2800e80b465b",
+        "page": "",
+        "ui": "",
+        "name": "中控面板",
+        "order": 1,
+        "width": "24",
+        "height": "24",
+        "head": "",
+        "format": "<template>\n<div class=\"cc\">\n  <div class=\"top\">\n    <div class=\"brand\"><span class=\"dotpulse\"></span>CREATOR · 演示中控</div>\n    <div class=\"scn\">\n      <button v-for=\"s in scenes\" :key=\"s.cmd\" :class=\"['sbtn',s.cls]\" @click=\"fire('m',s.cmd)\">{{s.label}}</button>\n      <button class=\"sbtn alloff\" @click=\"allLightsOff\">全灯关</button>\n    </div>\n  </div>\n  <div class=\"zwrap\">\n    <section class=\"zone\" v-for=\"z in zones\" :key=\"z.name\">\n      <div class=\"ztitle\"><span class=\"bar\"></span>{{z.name}}</div>\n      <div class=\"dev\" v-for=\"d in z.devs\" :key=\"d.label\" :class=\"{lit:st[d.label]}\">\n        <span class=\"ico\" :class=\"d.k\"></span>\n        <span class=\"dlab\">{{d.label}}</span>\n        <label v-if=\"d.k==='light'||d.k==='led'\" class=\"sw\" @click.prevent=\"toggle(d)\">\n          <span class=\"track\"><span class=\"knob\"></span></span>\n        </label>\n        <span v-else-if=\"d.k==='curtain'\" class=\"cur\">\n          <button @click=\"fire('m',d.p+'_Open')\">开</button>\n          <button class=\"stop\" @click=\"fire('m',d.p+'_Stop')\">停</button>\n          <button @click=\"fire('m',d.p+'_Close')\">合</button>\n        </span>\n        <span v-else-if=\"d.k==='ac'\" class=\"acx\">\n          <button class=\"tmp\" @click=\"fire('m',d.p+'_TempDown')\">−</button>\n          <button class=\"tmp\" @click=\"fire('m',d.p+'_TempUp')\">＋</button>\n          <label class=\"sw\" @click.prevent=\"toggle(d)\"><span class=\"track\"><span class=\"knob\"></span></span></label>\n        </span>\n      </div>\n    </section>\n  </div>\n  <div class=\"foot\">经主机 192.168.5.20:8932 明文口 · LED 走 PDU · 状态本地记忆 · 指令源=公司中控程序</div>\n</div>\n</template>\n<script>\nexport default {\n  data(){ return { zones: [{\"name\": \"运营 / 指挥中心\", \"devs\": [{\"k\": \"led\", \"label\": \"LED 大屏\", \"on\": [\"p\", \"192.168.5.21\", \"PWR ON1\\r\"], \"off\": [\"p\", \"192.168.5.21\", \"PWR OFF1\\r\"]}, {\"k\": \"light\", \"label\": \"指挥中心灯带\", \"p\": \"OperateCentre_Light\"}, {\"k\": \"light\", \"label\": \"筒灯\", \"p\": \"OperateCentre_Downlight\"}, {\"k\": \"light\", \"label\": \"虚光\", \"p\": \"OperateCentre_VirtualLight\"}, {\"k\": \"light\", \"label\": \"发光字\", \"p\": \"LuminousWord\"}, {\"k\": \"light\", \"label\": \"鲲景观\", \"p\": \"KunScenery\"}, {\"k\": \"curtain\", \"label\": \"指挥中心窗帘\", \"p\": \"OperateCentre_Curtain\"}, {\"k\": \"ac\", \"label\": \"运营中心空调\", \"p\": \"OperateCentre_AirConditioner\"}]}, {\"name\": \"一楼公共\", \"devs\": [{\"k\": \"light\", \"label\": \"走廊轨道灯\", \"p\": \"Corridor_TrackLight\"}, {\"k\": \"light\", \"label\": \"走廊灯带\", \"p\": \"Corridor_Light\"}, {\"k\": \"light\", \"label\": \"走廊发光字\", \"p\": \"Corridor_LuminousWordLight\"}, {\"k\": \"light\", \"label\": \"会客室轨道灯\", \"p\": \"ReceptionRoom_TrackLight\"}, {\"k\": \"light\", \"label\": \"吧台灯带\", \"p\": \"BarCounter_Light\"}, {\"k\": \"curtain\", \"label\": \"吧台窗帘\", \"p\": \"BarCounter_Curtain\"}, {\"k\": \"light\", \"label\": \"洽谈室轨道灯\", \"p\": \"NegotiationRoom_TrackLight\"}]}, {\"name\": \"会议区\", \"devs\": [{\"k\": \"light\", \"label\": \"会议室1灯带\", \"p\": \"MeetingRoom1_Light\"}, {\"k\": \"curtain\", \"label\": \"会议室1窗帘\", \"p\": \"MeetingRoom1_Curtain\"}, {\"k\": \"light\", \"label\": \"会议室2灯带\", \"p\": \"MeetingRoom2_Light\"}, {\"k\": \"curtain\", \"label\": \"会议室2窗帘\", \"p\": \"MeetingRoom2_Curtain\"}]}, {\"name\": \"二楼办公\", \"devs\": [{\"k\": \"light\", \"label\": \"小楼梯轨道灯\", \"p\": \"SmallStairs_TrackLight\"}, {\"k\": \"light\", \"label\": \"餐桌灯带1\", \"p\": \"DiningTable_Light1\"}, {\"k\": \"light\", \"label\": \"餐桌灯带2\", \"p\": \"DiningTable_Light2\"}, {\"k\": \"light\", \"label\": \"研发部轨道灯\", \"p\": \"RDDepartment_TrackLight\"}, {\"k\": \"curtain\", \"label\": \"研发部窗帘\", \"p\": \"RDDepartment_Curtain\"}, {\"k\": \"ac\", \"label\": \"研发部空调\", \"p\": \"RDDepartment_AirConditioner\"}, {\"k\": \"ac\", \"label\": \"二楼餐桌空调\", \"p\": \"2FDiningTable_AirConditioner\"}, {\"k\": \"light\", \"label\": \"工程部轨道灯\", \"p\": \"EngineeringDepartment_TrackLight\"}, {\"k\": \"light\", \"label\": \"会客厅轨道灯\", \"p\": \"ReceptionRoom_Light\"}, {\"k\": \"light\", \"label\": \"财务室灯带\", \"p\": \"FinanceOffice_Light\"}, {\"k\": \"ac\", \"label\": \"机房空调\", \"p\": \"EngineRoom_AirConditioner\"}]}], scenes: [{\"label\": \"▶ 会议开始\", \"cmd\": \"OperateCentre_Meeting_Begin\", \"cls\": \"on\"}, {\"label\": \"■ 会议结束\", \"cmd\": \"OperateCentre_Meeting_End\", \"cls\": \"off\"}], st:{} } },\n  methods:{\n    fire(t,c,h){ this.send({payload:{t,c,h}}) },\n    toggle(d){ const v=!this.st[d.label]; this.st={...this.st,[d.label]:v};\n      if(d.k==='led'){ const o=v?d.on:d.off; this.fire(o[0],o[2],o[1]); }\n      else this.fire('m', d.p+(v?'_On':'_Off')); },\n    allLightsOff(){ const ds=[]; this.zones.forEach(z=>z.devs.forEach(d=>{ if(d.k==='light'||d.k==='led') ds.push(d); }));\n      const ns={...this.st}; ds.forEach((d,i)=>{ ns[d.label]=false; setTimeout(()=>{\n        if(d.k==='led') this.fire(d.off[0],d.off[2],d.off[1]); else this.fire('m',d.p+'_Off'); }, i*130); });\n      this.st=ns; }\n  }\n}\n</script>\n<style>\n.cc{padding:16px 20px;font-family:-apple-system,'PingFang SC',sans-serif;color:#cfe4f5;\n background:linear-gradient(135deg,#061321 0%,#0a1f38 55%,#08192c 100%);min-height:100vh}\n.top{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;\n padding-bottom:14px;margin-bottom:16px;border-bottom:1px solid rgba(0,200,255,.18)}\n.brand{font-size:22px;font-weight:700;letter-spacing:2px;color:#e6f6ff;display:flex;align-items:center;gap:10px;\n text-shadow:0 0 16px rgba(0,200,255,.5)}\n.dotpulse{width:10px;height:10px;border-radius:50%;background:#00e0ff;box-shadow:0 0 12px #00e0ff;animation:pl 1.6s infinite}\n@keyframes pl{0%,100%{opacity:1}50%{opacity:.3}}\n.scn{display:flex;gap:10px;flex-wrap:wrap}\n.sbtn{border:1px solid rgba(0,200,255,.35);background:rgba(0,120,180,.15);color:#bfe9ff;\n padding:9px 18px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:.15s;\n clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px)}\n.sbtn:hover{background:rgba(0,180,255,.3);box-shadow:0 0 14px rgba(0,200,255,.4)}\n.sbtn.on{background:linear-gradient(135deg,#0a8a4a,#0d6b3a);border-color:#1ec878;color:#eafff3}\n.sbtn.off{background:linear-gradient(135deg,#3a4a5a,#2a3742);border-color:#5a6b7a}\n.sbtn.alloff{border-color:rgba(255,120,120,.5);color:#ffcaca}\n.zwrap{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}\n.zone{background:rgba(9,26,46,.55);border:1px solid rgba(0,180,255,.2);border-radius:12px;padding:14px 16px;\n box-shadow:inset 0 0 30px rgba(0,120,200,.06),0 4px 20px rgba(0,0,0,.3);backdrop-filter:blur(6px)}\n.ztitle{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:700;letter-spacing:1.5px;\n color:#4fd6ff;text-transform:uppercase;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid rgba(0,180,255,.12)}\n.bar{width:4px;height:16px;background:linear-gradient(#00e0ff,#0088cc);border-radius:2px;box-shadow:0 0 8px #00e0ff}\n.dev{display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:8px;transition:.15s}\n.dev:hover{background:rgba(0,150,255,.06)}\n.dev.lit{background:rgba(0,200,255,.08)}\n.ico{width:7px;height:7px;border-radius:50%;background:#33465a;flex-shrink:0;transition:.2s}\n.dev.lit .ico{background:#00e6ff;box-shadow:0 0 10px #00e6ff}\n.dlab{flex:1;font-size:14px;color:#b8d0e2}\n.dev.lit .dlab{color:#fff}\n.sw{cursor:pointer;flex-shrink:0}\n.track{display:block;width:44px;height:24px;border-radius:12px;background:#26384a;position:relative;transition:.2s;border:1px solid rgba(255,255,255,.08)}\n.dev.lit .track{background:linear-gradient(135deg,#0090cc,#00d0a0);box-shadow:0 0 12px rgba(0,210,180,.5)}\n.knob{position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#dfeefc;transition:.2s}\n.dev.lit .knob{left:23px}\n.cur{display:flex;gap:5px}\n.cur button{border:1px solid rgba(0,180,255,.3);background:rgba(0,120,180,.12);color:#bfe9ff;\n width:34px;height:30px;border-radius:6px;cursor:pointer;font-size:13px;transition:.15s}\n.cur button:hover{background:rgba(0,180,255,.28);box-shadow:0 0 10px rgba(0,200,255,.35)}\n.cur button.stop{border-color:rgba(255,180,80,.4);color:#ffd9a0}\n.acx{display:flex;gap:6px;align-items:center}\n.acx .tmp{border:1px solid rgba(0,180,255,.3);background:rgba(0,120,180,.12);color:#bfe9ff;\n width:30px;height:30px;border-radius:6px;cursor:pointer;font-size:16px;line-height:1;transition:.15s}\n.acx .tmp:hover{background:rgba(0,180,255,.28)}\n.foot{margin-top:18px;font-size:11px;color:#556f85;text-align:center;letter-spacing:.5px}\n</style>",
+        "storeOutMessages": false,
+        "passthru": false,
+        "resendOnRefresh": false,
+        "templateScope": "local",
+        "className": "",
+        "x": 250,
+        "y": 120,
+        "wires": [
+            [
+                "4fb3207ffc1c4e9d"
+            ]
+        ]
+    },
+    {
+        "id": "4fb3207ffc1c4e9d",
+        "type": "function",
+        "z": "6381f8389711479e",
+        "name": "路由(明文→.20:8932 / PDU→msg.host:38388)",
+        "func": "const p=msg.payload||{};\nif(p.t==='p'){ msg.host=p.h; msg.port=38388; msg.payload=p.c; return [null,msg]; }\nmsg.payload=p.c; return [msg,null];",
+        "outputs": 2,
+        "noerr": 0,
+        "x": 530,
+        "y": 120,
+        "wires": [
+            [
+                "4061810dba2f4cae",
+                "ccm-diag"
+            ],
+            [
+                "ccm-tcpreq-p",
+                "ccm-diag"
+            ]
+        ]
+    },
+    {
+        "id": "4061810dba2f4cae",
+        "type": "tcp out",
+        "z": "6381f8389711479e",
+        "name": "→中控主机 .20:8932(短连接)",
+        "host": "192.168.5.20",
+        "port": "8932",
+        "beserver": "client",
+        "base64": false,
+        "end": true,
+        "tls": "",
+        "x": 800,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "ccm-tcpreq-p",
+        "type": "tcp request",
+        "z": "6381f8389711479e",
+        "name": "→PDU msg.host:38388",
+        "server": "",
+        "port": "",
+        "out": "time",
+        "splitc": "300",
+        "newline": "",
+        "trim": false,
+        "tls": "",
+        "x": 830,
+        "y": 180,
+        "wires": [
+            [
+                "ccm-diag"
+            ]
+        ]
+    },
+    {
+        "id": "ccm-diag",
+        "type": "debug",
+        "z": "6381f8389711479e",
+        "name": "发出/回包",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload",
+        "statusType": "auto",
+        "x": 830,
+        "y": 240,
         "wires": []
     }
 ]
