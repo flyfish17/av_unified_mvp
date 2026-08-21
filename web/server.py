@@ -139,9 +139,23 @@ def _app_profile() -> str:
     return "full"
 
 
+def _meeting_camera() -> str:
+    """config video.meeting_camera：视频墙"单路"模式只保留的那一路（会议室摄像头，
+    给转写做发言人区分用）。缺省空串 → 前端退回第一路。"""
+    import yaml
+    p = _PROJECT_ROOT / "config" / "system_config.yaml"
+    if p.exists():
+        with open(p, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        return str((cfg.get("video") or {}).get("meeting_camera") or "")
+    return ""
+
+
 @_app.get("/")
 def index():
-    return _flask.render_template("dashboard.html", app_profile=_app_profile())
+    return _flask.render_template(
+        "dashboard.html", app_profile=_app_profile(), meeting_camera=_meeting_camera()
+    )
 
 
 @_app.get("/config/device_catalog")

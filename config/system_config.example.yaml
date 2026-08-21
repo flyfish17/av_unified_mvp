@@ -94,6 +94,10 @@ video:
   - enabled: true
     name: 财务监控
     url: rtsp://admin:${IPC_PWD}@192.168.5.181:554/Streaming/Channels/1101
+  # 视频墙"单路"模式（dashboard 默认）只保留这一路：会议室摄像头，给转写做发言人区分。
+  # 其余路在单路模式下被前端 disable（停解码/停 JPEG，CPU 让给 FunASR）；点"四分屏"才全开（会提示停转写）。
+  # 不填 = 第一路。
+  meeting_camera: 本机摄像头
   yolo:
     confidence: 0.5
     inference_fps: 2

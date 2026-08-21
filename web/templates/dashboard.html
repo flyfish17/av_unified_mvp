@@ -505,6 +505,9 @@
       background: #000;
       padding: 3px;
     }
+    /* 单路模式（默认）：只留画格 1，其余路停用省 CPU 给转写；四分屏需显式切换 */
+    .video-wall.single { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+    .video-wall.single .tile:not([data-slot="0"]) { display: none; }
     /* 全屏放大单格：临时切换 grid */
     .video-wall.zoomed { grid-template-columns: 1fr; grid-template-rows: 1fr; }
     .video-wall.zoomed .tile:not(.zoomed) { display: none; }
@@ -972,7 +975,7 @@
     }
   </style>
 </head>
-<body data-app-profile="{{ app_profile|default('full') }}">
+<body data-app-profile="{{ app_profile|default('full') }}" data-meeting-camera="{{ meeting_camera|default('') }}">
   <!-- 启动 splash：首次加载短暂全屏 LOGO；?nosplash 跳过 -->
   <div id="splash">
     <div class="splash-logo">CREATOR AI 视听理解平台<span class="badge">CREATOR</span></div>
@@ -1087,7 +1090,7 @@
                   <span class="module-sub">discovery 自动接入 · 点格放大</span>
                 </span>
                 <span class="module-badge" id="overview-video-badge">等待</span>
-                <div class="module-actions"></div>
+                <div class="module-actions"><button data-wall-mode title="单路 ⇄ 四分屏">⊞ 四分屏</button></div>
               </div>
               <div class="module-body">
                 <div class="video-wall" id="video-wall">

@@ -325,7 +325,9 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 - **NaN 根因与修复（14:00-15:00，半天量内）**：离线用真实 RTSP 帧复现——推理不崩但原始输出 box 宽高通道含 **inf**（fp16 上限 65504，已见 45600），cls 通道干净 → 定位到 DFL 头 softmax 在 RKNN fp16 上不减 max、背景 anchor 的 exp 溢出 → NMS 出 NaN → `plot()` 崩。**修**：导出时 monkey-patch `DFL.forward` 在 softmax 前减每组 max（数学等价）+ `opset=17`（torch 2.2 ReduceMax 兼容）→ `scripts/export_yolo_rknn.py`。验证：3 张真实帧 inf=0、与 .pt 检出/类别一致；RTSP 300 帧 plot 零异常；同过滤条件（conf 0.5，person/phone/laptop）80 帧 .pt 与 rknn 各命中 40 person 完全一致；**62 实况 15min 零异常，NPU Core0 30%**。62 现常驻 rknn 模型，新模型 md5 e99a493f… 已入库覆盖。
 - **int8 路线否决**：32 张现场帧校准量化后 inf 消失但零检出——box(0-640)/分数(0-1) 同张量 8-bit 把分数压 0；要走 int8 得拆头（rknn_model_zoo 做法），收益不值，记 README 不再试。
 - **顺带发现（待查，与本次无关）**：生产日志全天 `[detect]` 全是 `(0 目标)`（.pt 与 rknn 相同），且 .pt 时段 75min 刷 26987 条心跳——`idle_detect_interval_s` 15s 节流疑似失效 + conf 0.5 下门口/财务几路是否真无人，下次看。
-- **未完成项**：① ollama url 读 config（外放 Mac Studio 前置）；② 上条 detect 心跳洪泛/零目标排查；③ P2.1b 捕获侧减压量化；④ 5.6 full 形态若要用 NPU YOLO：生产 venv `pip install rknn-toolkit-lite2==2.3.2` + config `model: yolov8n_rknn_model`。
+- **视频墙单路/四分屏互斥（15:00，用户拍板"默认一路，四屏与转写互斥"）**：纯前端 + config，后端零逻辑改动（复用 `/camera/<名>/enable|disable` 与 `av/audio/cmd`）。默认 `single`：只开 `video.meeting_camera`（缺省第一路），其余路 disable、画格收成 1 格（CSS `.video-wall.single`）；视频卡头部"⊞ 四分屏"按钮 → 转写在跑则确认框"将停止转写"→ audio disable → 前 4 路 enable；转写"启动"在四分屏下 → 确认框"切回单路"→ 先收单路再 audio enable。刷新回 single（不持久化，多路=显式动作）。会议摄像头名由 `web/server.py` 注入 `<body data-meeting-camera>`。
+- **校验（Playwright 对 62 真机三步）**：初始 single/仅画格 1=本机摄像头；点四分屏 → 弹确认 → 请求序列 `av/audio/cmd disable` + 3 路 enable，按钮变"▭ 单路"；点转写启动 → 弹确认 → 3 路 disable + `audio enable`，回 single。in-flight 5s 去重后无重复请求。**负载：单路下 video_processor 48.7% CPU、整机 90% idle（5 路时 ~530-610%）**——"一路辅助转写 + 纪要并行"在一台 3588 上成立。
+- **未完成项**：① ollama url 读 config（外放 Mac Studio 前置）；② detect 心跳洪泛/零目标排查；③ P2.1b 捕获侧减压（单路化后优先级降低）；④ 5.6 full 形态：生产 venv 装 lite2 + config `model: yolov8n_rknn_model` + `meeting_camera: 本机摄像头`。
 - **下次接手所需上下文**：62 导出 venv `~/rknn-export-venv`、产物 `~/yolo-rknn/`；pgrep 自匹配坑又踩一次（等待循环的 pgrep 模式匹配到自身、永不退出），见 memory `ssh-pkill-self-match-trap`。
 
 

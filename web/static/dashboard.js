@@ -463,8 +463,7 @@
       videoEndpointsCache = (endpoints || []).filter(
         e => e.kind === "mjpeg" || e.kind === "husion_stream"
       );
-      assignWallSlots();
-      renderWall();
+      applyWallMode();  // 含 enforceSingleMode + assignWallSlots + renderWall
       refreshSceneWatchPicker();
     }
   }
@@ -491,7 +490,71 @@
 
   // ── 视频墙逻辑 ───────────────────────────────────────────────────────
   // 默认把前 4 路源依次分到 4 个画格；用户切源会覆盖默认
+  // ── 视频墙模式：single(默认,只开会议室一路,CPU 让给转写) / quad(四分屏,需停转写) ──
+  // 规则只在前端 + config(video.meeting_camera)，后端零改动：复用 /camera/<名>/enable|disable 与 av/audio/cmd。
+  // 刷新页面回到 single（保守：多路是显式动作，不持久化）。
+  let wallMode = "single";
+  function meetingCameraName() {
+    const cfg = document.body.dataset.meetingCamera || "";
+    if (cfg && videoEndpointsCache.find(e => e.name === cfg)) return cfg;
+    return videoEndpointsCache[0]?.name || null;
+  }
+  // in-flight 去重：endpoints 公告是异步回放的，enforceSingleMode 会在状态落定前被触发多次，
+  // 同一路同一动作 5s 内只发一次（后端本身幂等，这里只是别刷日志）。
+  const _cameraCmdSent = new Map();
+  async function cameraCmd(name, action) {
+    const k = `${name}:${action}`, now = Date.now();
+    if ((_cameraCmdSent.get(k) || 0) > now - 5000) return;
+    _cameraCmdSent.set(k, now);
+    try { await fetch(`/camera/${encodeURIComponent(name)}/${action}`, { method: "POST" }); }
+    catch (e) { console.warn(`camera ${action} 失败`, name, e); }
+  }
+  // single：除会议摄像头外全部 disable；会议摄像头若停用则 enable。幂等，endpoints 每次更新都会再跑一遍。
+  function enforceSingleMode() {
+    if (wallMode !== "single") return;
+    const keep = meetingCameraName();
+    videoEndpointsCache.forEach(ep => {
+      if (ep.name === keep) { if (!ep.enabled) cameraCmd(ep.name, "enable"); }
+      else if (ep.enabled) cameraCmd(ep.name, "disable");
+    });
+  }
+  function applyWallMode() {
+    const wall = document.getElementById("video-wall");
+    const btn  = document.querySelector("[data-wall-mode]");
+    if (wall) wall.classList.toggle("single", wallMode === "single");
+    if (btn)  btn.textContent = wallMode === "single" ? "⊞ 四分屏" : "▭ 单路";
+    enforceSingleMode();
+    assignWallSlots();
+    renderWall();
+  }
+  async function setWallMode(mode) {
+    if (mode === wallMode) return;
+    if (mode === "quad" && _txRunning) {
+      if (!confirm("切到四分屏会停止实时转写（多路解码会抢走 FunASR 的 CPU）。\n继续？")) return;
+      await publishAudioCmd("disable");
+    }
+    wallMode = mode;
+    if (mode === "quad") {
+      // 四分屏 = 前 4 路全开（用户再按需 ⏸ 单路）
+      videoEndpointsCache.slice(0, 4).forEach(ep => { if (!ep.enabled) cameraCmd(ep.name, "enable"); });
+    }
+    applyWallMode();
+  }
+  async function publishAudioCmd(action) {
+    try {
+      await fetch("/mqtt/publish", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: "av/audio/cmd", payload: { action } }),
+      });
+    } catch (e) { console.warn("audio cmd 失败", e); }
+  }
+
   function assignWallSlots() {
+    if (wallMode === "single") {
+      wallSlots[0].sourceName = meetingCameraName();
+      wallSlots[0].userPicked = false;
+      return;
+    }
     wallSlots.forEach((slot, i) => {
       // 用户没明确指定时，自动分配前 4 路
       if (!slot.userPicked) {
@@ -2122,6 +2185,10 @@
   setupSystemExit();
   setupIntentToggle();
   setupTranscriptActions();
+  (() => {
+    const b = document.querySelector("[data-wall-mode]");
+    if (b) b.onclick = () => setWallMode(wallMode === "single" ? "quad" : "single");
+  })();
 
   // ── 转写卡按钮（A3 导出原文 + A4 停止/启动） ────────────────────────
   function setupTranscriptActions() {
@@ -2132,17 +2199,13 @@
       stopBtn.onclick = async () => {
         // 当前态显示"停止" → 发 disable；显示"启动" → 发 enable
         const willDisable = stopBtn.textContent.includes("停止");
+        if (!willDisable && wallMode === "quad") {
+          if (!confirm("启动转写会把视频墙切回单路（只保留会议室摄像头，其余路停用释放 CPU）。\n继续？")) return;
+          wallMode = "single";
+          applyWallMode();
+        }
         stopBtn.disabled = true;
-        try {
-          await fetch("/mqtt/publish", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              topic: "av/audio/cmd",
-              payload: { action: willDisable ? "disable" : "enable" }
-            })
-          });
-        } catch (e) { console.warn("audio toggle 失败", e); }
+        try { await publishAudioCmd(willDisable ? "disable" : "enable"); }
         finally { stopBtn.disabled = false; }
       };
     }
