@@ -62,6 +62,7 @@ CUR="$(current_profile)"; CUR="${CUR:-full}"
 case "$TARGET" in
   --status|"")
     printf "  当前形态     : ${CYAN}%s${OFF}\n" "$CUR"
+    printf "  语音输入     : %s  (USB 麦: %s)\n" "$(sed -nE 's/^  source:[[:space:]]*([A-Za-z_]+).*/\1/p' "$CONFIG" | head -1)" "$(arecord -l 2>/dev/null | grep -iE 'C920|USB Audio' | sed -E 's/^card ([0-9]+): ([^ ]+).*/card\1 \2/' | head -1)"
     printf "  模块子进程   : %s / %s\n" "$(module_count)" "$(expected_modules)"
     printf "  dashboard    : HTTP %s  (http://%s:%s)\n" "$(http_code)" "$(hostname -I | awk '{print $1}')" "$DASHBOARD_PORT"
     printf "  funasr 容器  : %s\n" "$(docker inspect -f '{{.State.Status}}' funasr 2>/dev/null || echo 无)"
@@ -72,8 +73,13 @@ case "$TARGET" in
   *) fail "未知形态 '$TARGET',可选 full | meeting_asr | --status"; exit 1 ;;
 esac
 
-if [ "$TARGET" = "$CUR" ]; then
-  ok "已经是 $CUR,不动。要强制重启: sudo systemctl restart av-demo"
+case "$TARGET" in
+  full)        SRC=mic ;;
+  meeting_asr) SRC=net_multicast ;;
+esac
+CUR_SRC="$(sed -nE 's/^  source:[[:space:]]*([A-Za-z_]+).*/\1/p' "$CONFIG" | head -1)"
+if [ "$TARGET" = "$CUR" ] && [ "$CUR_SRC" = "$SRC" ]; then
+  ok "已经是 $CUR(audio.source=$SRC),不动。要强制重启: sudo systemctl restart av-demo"
   exit 0
 fi
 
@@ -86,6 +92,20 @@ else
   printf '\napp_profile: %s\n' "$TARGET" >> "$CONFIG"
 fi
 ok "config app_profile: $CUR → $TARGET"
+
+# 语音输入跟着形态走(3588 纪要机现场约定):
+#   full        → mic           USB 麦 C920 本机拾音,audio_processor 跑;启动脚本 §0.5 会把 ALSA default 指到 C920
+#   meeting_asr → net_multicast 会议主机 8 路组播,net_audio_capture 跑(话筒号=发言人)
+# 不切的话 full 下 audio.source 还是 net_multicast → supervisor 按 main.py 去掉 audio_processor,演示没麦克风。
+if grep -qE '^  source:' "$CONFIG"; then
+  sed -i -E "0,/^  source:.*/s//  source: $SRC/" "$CONFIG"
+  ok "config audio.source: ${CUR_SRC:-?} → $SRC"
+else
+  fail "config 里没找到 audio.source(两空格缩进 'source:'),不敢猜,停"; exit 1
+fi
+if [ "$SRC" = "mic" ] && ! arecord -l 2>/dev/null | grep -qiE 'C920|USB Audio'; then
+  warn "没探到 USB 麦克风(C920)——full 形态语音输入会是空,插上麦后重跑本脚本或 systemctl restart av-demo"
+fi
 EXPECTED="$(expected_modules)" || { fail "按 config 算期望模块数失败(config 语法?)"; exit 1; }
 
 # 2. SIGKILL 老进程(顺序:先 supervisor 防它重拉,再 module,再 rkllm daemon)
