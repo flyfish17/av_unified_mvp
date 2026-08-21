@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Ai 视听信息理解【CREATOR】</title>
+  <title>{{ brand.product }}【{{ brand.name }}】</title>
   <style>
     :root {
       --bg:        #0a0e14;
@@ -74,6 +74,7 @@
       font-size: 14px; font-weight: 700; color: var(--text);
       letter-spacing: 0.05em;
     }
+    .brand .logo-img { height: 16px; align-self: center; margin-right: 8px; }
     .brand .tag {
       font-size: 10px; color: var(--accent-2);
       padding: 1px 6px; border: 1px solid var(--accent-2); border-radius: 3px;
@@ -913,6 +914,7 @@
       color: var(--text); letter-spacing: 0.12em;
       text-shadow: 0 0 20px rgba(88,166,255,0.4);
     }
+    #splash .splash-logo img { height: 26px; vertical-align: middle; margin: -4px 16px 0 0; }
     #splash .splash-logo .badge {
       font-size: 14px; vertical-align: middle;
       padding: 3px 10px; margin-left: 10px;
@@ -936,7 +938,7 @@
 <body data-app-profile="{{ app_profile|default('full') }}" data-meeting-camera="{{ meeting_camera|default('') }}">
   <!-- 启动 splash：首次加载短暂全屏 LOGO；?nosplash 跳过 -->
   <div id="splash">
-    <div class="splash-logo">CREATOR AI 视听理解平台<span class="badge">CREATOR</span></div>
+    <div class="splash-logo">{% if brand.logo %}<img src="/static/brand/{{ brand.logo }}" alt="{{ brand.name }}">{{ brand.product }}{% else %}{{ brand.name }} {{ brand.product }}<span class="badge">{{ brand.name }}</span>{% endif %}</div>
     <div class="splash-sub">端侧视频 + 语音 + 意图统一中控 · 国产化解决方案</div>
     <div class="splash-bar"></div>
   </div>
@@ -957,8 +959,8 @@
 
   <header>
     <div class="brand">
-      <span class="logo">CREATOR AI 视听理解平台</span>
-      <span class="tag">CREATOR</span>
+      {% if brand.logo %}<img class="logo-img" src="/static/brand/{{ brand.logo }}" alt="{{ brand.name }}"><span class="logo">{{ brand.product }}</span>{% else %}<span class="logo">{{ brand.name }} {{ brand.product }}</span>
+      <span class="tag">{{ brand.name }}</span>{% endif %}
       <span class="sub" id="brand-sub" style="display:none">v1.x</span>
     </div>
     <span class="spacer"></span>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CREATOR AI 实时转写</title>
+  <title>{{ brand.name }} AI 实时转写</title>
   <!--
     公司演示环境 P0 · 全屏转写大屏（底座线 R1c，2026-08-20）
     场景：研发中心百寸电视全屏打开 http://<板>:5050/bigscreen，3-5 米可读，纯展示无任何操作面。
@@ -107,7 +107,7 @@
 </head>
 <body class="standby">
   <header>
-    <div class="brand"><span class="conn-dot" id="conn"></span>CREATOR AI 实时转写</div>
+    <div class="brand"><span class="conn-dot" id="conn"></span>{{ brand.name }} AI 实时转写</div>
     <div class="clock"><span class="date" id="date"></span><span class="time" id="time"></span></div>
   </header>
   <div id="flow"></div>

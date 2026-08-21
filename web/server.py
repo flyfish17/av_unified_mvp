@@ -151,10 +151,31 @@ def _meeting_camera() -> str:
     return ""
 
 
+_BRAND_DEFAULT = {"name": "CREATOR", "product": "AI 视听理解平台", "logo": ""}
+
+
+def _brand() -> dict:
+    """品牌 = 配置 + 素材，不是分支（2026-08-21 拍板）。config 顶层 brand:
+        name:    品牌名（顶栏 tag / 页面 <title> / bigscreen 前缀）
+        product: 产品名（顶栏主标题 / splash）
+        logo:    web/static/brand/ 下的文件名；空 = 纯文字品牌（CREATOR 默认态）
+    缺省 CREATOR。湖森 DNC：name: Husion湖森 / logo: husion.png。"""
+    import yaml
+    p = _PROJECT_ROOT / "config" / "system_config.yaml"
+    b = dict(_BRAND_DEFAULT)
+    if p.exists():
+        with open(p, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        for k, v in (cfg.get("brand") or {}).items():
+            if k in b and v is not None:
+                b[k] = str(v)
+    return b
+
+
 @_app.get("/")
 def index():
     return _flask.render_template(
-        "dashboard.html", app_profile=_app_profile(), meeting_camera=_meeting_camera()
+        "dashboard.html", app_profile=_app_profile(), meeting_camera=_meeting_camera(), brand=_brand()
     )
 
 
@@ -358,7 +379,7 @@ def index_bigscreen():
     """全屏转写大屏（底座线 R1c，公司演示环境 P0）：百寸电视纯展示面。
     数据复用 /events/transcript SSE + /api/mic/names 命名表，零新增后端逻辑；
     页面自包含（样式/JS 内联），不依赖 dashboard.js。"""
-    return _flask.render_template("bigscreen.html")
+    return _flask.render_template("bigscreen.html", brand=_brand())
 
 
 def _make_sse(channel: str):

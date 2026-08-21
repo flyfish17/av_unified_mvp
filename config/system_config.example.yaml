@@ -151,3 +151,12 @@ speaker_diarizer:
 #     segments:
 #       dir: runtime/audio_segments
 #       max_files: 300
+
+# ── 品牌（配置 + 素材，不是分支；2026-08-21 拍板）──
+# name: 顶栏 tag / 页面标题 / bigscreen 前缀；product: 顶栏主标题 / splash；
+# logo: web/static/brand/ 下文件名，空 = 纯文字（CREATOR 默认态）。
+# 湖森 DNC（62）：name: Husion湖森 / product: AI 视听理解平台 / logo: husion.png
+brand:
+  name: CREATOR
+  product: AI 视听理解平台
+  logo: ""
