@@ -95,12 +95,12 @@ from modules.audio_processor.processor import AudioProcessor  # noqa: E402
 # 只构造，不 start()，不碰麦克风/websocket
 proc = AudioProcessor({"funasr": {"mode": "websocket_2pass", "hotwords": ""}})
 hw = json.loads(proc.hotwords) if proc.hotwords else {}
-check("glossary 人名进 hotwords", "韩苏宁" in hw and "李冰" in hw, True)
+check("glossary 人名进 hotwords", "余绍峰" in hw and "李玉琪" in hw, True)
 check("hotwords 是 JSON dict 串（非空格串）", isinstance(hw, dict), True)
 check("postproc 规则已编译加载", len(proc._postproc_rules) > 0, True)
 # 模拟 websocket 初始化 payload 的 hotwords 字段（对照 processor.py:_ws_session）
 payload_hotwords = proc.hotwords
-check("init payload hotwords 含 glossary 词", "韩苏宁" in payload_hotwords, True)
+check("init payload hotwords 含 glossary 词", "郭敏" in payload_hotwords, True)
 
 print(f"\n结果：{_PASS} passed, {_FAIL} failed")
 sys.exit(1 if _FAIL else 0)
