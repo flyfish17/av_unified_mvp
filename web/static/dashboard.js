@@ -326,9 +326,36 @@
     if (name === "llm_engine" && typeof ev.enabled === "boolean") {
       setIntentToggleState(ev.enabled);
     }
-    if (name === "audio_processor" && typeof ev.running === "boolean") {
-      setTxStopButtonState(ev.running);
+    if ((name === "audio_processor" || name === "net_audio_capture") && typeof ev.running === "boolean") {
+      _srcRunning[name === "audio_processor" ? "mic" : "net_multicast"] = ev.running;
+      refreshTxSource();
     }
+  }
+  // ── 声源（本机麦 / 会议主机）：两模块都在线时转写卡出下拉；停止按钮按当前声源发命令 ──
+  const _srcRunning = { mic: null, net_multicast: null };   // null=模块不在
+  const SRC_TOPIC = { mic: "av/audio/cmd", net_multicast: "av/audio/net_cmd" };
+  function activeSource() {
+    if (_srcRunning.mic) return "mic";
+    if (_srcRunning.net_multicast) return "net_multicast";
+    // 都没在跑：按"在线的那个"给停止按钮一个目标
+    return _srcRunning.mic !== null ? "mic" : (_srcRunning.net_multicast !== null ? "net_multicast" : "mic");
+  }
+  function refreshTxSource() {
+    const sel = document.querySelector("[data-tx-source]");
+    const both = _srcRunning.mic !== null && _srcRunning.net_multicast !== null;
+    if (sel) {
+      sel.hidden = !both;
+      if (both && document.activeElement !== sel) sel.value = activeSource();
+    }
+    setTxStopButtonState(!!(_srcRunning.mic || _srcRunning.net_multicast));
+  }
+  async function publishSourceCmd(src, action) {
+    try {
+      await fetch("/mqtt/publish", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: SRC_TOPIC[src], payload: { action } }),
+      });
+    } catch (e) { console.warn("source cmd 失败", src, action, e); }
   }
   function setTxStopButtonState(running) {
     _txRunning = running;
@@ -531,7 +558,7 @@
     if (mode === wallMode) return;
     if (mode === "quad" && _txRunning) {
       if (!confirm("切到四分屏会停止实时转写（多路解码会抢走 FunASR 的 CPU）。\n继续？")) return;
-      await publishAudioCmd("disable");
+      await publishSourceCmd(activeSource(), "disable");
     }
     wallMode = mode;
     if (mode === "quad") {
@@ -539,14 +566,6 @@
       videoEndpointsCache.slice(0, 4).forEach(ep => { if (!ep.enabled) cameraCmd(ep.name, "enable"); });
     }
     applyWallMode();
-  }
-  async function publishAudioCmd(action) {
-    try {
-      await fetch("/mqtt/publish", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: "av/audio/cmd", payload: { action } }),
-      });
-    } catch (e) { console.warn("audio cmd 失败", e); }
   }
 
   function assignWallSlots() {
@@ -1094,6 +1113,7 @@
         const span = document.createElement("span");
         span.className = "tx-final-flash";
         span.textContent = chunk;
+        if (ev.segment_id) span.dataset.segmentId = ev.segment_id;  // 声纹 diarization 晚到按此回填
         finalsEl.appendChild(span);
       }
       st.finalsText += chunk;
@@ -1115,6 +1135,56 @@
     }
     if (atBottom) card.scrollTop = card.scrollHeight;
   }
+  // ── 声纹发言人回填（speaker_diarizer，回流自 av_understanding_mac S3-S5）──
+  // 结果比 final 晚几秒到：按 segment_id 找到 span → 段还没发言人就给段打标；段已是别的
+  // 发言人则把该 span 及其后的 span 切出成新段、本地麦段指针跟过去。最终效果与会议主机
+  // 话筒号分段同构：.tx-spk 标签 + para.dataset.speaker，纪要归属零改动。
+  // 本地麦键 ""（无 mic_id）才会收到 diarization；话筒号路径不发 segment。
+  function applyDiarization(ev) {
+    const spk = ev.speaker_id, segId = ev.segment_id;
+    if (!spk || !segId) return;  // 短段/嵌入失败 speaker_id=null：不猜
+    const card = document.querySelector('[data-overview="transcript"] .strip-card-body');
+    const span = card && card.querySelector(`.tx-final-flash[data-segment-id="${CSS.escape(segId)}"]`);
+    if (!span) return;
+    const para = span.closest(".tx-para");
+    if (!para) return;
+    const n = parseInt(String(spk).replace(/^S/, ""), 10);
+    const color = MIC_COLORS[(Number.isFinite(n) ? n - 1 : 0) % MIC_COLORS.length];
+    const cur = para.dataset.speaker || "";
+    if (!cur) {
+      // 整段尚无发言人：打标（段内之前的句子视为同一人——近似，首句前无更早信息）
+      para.dataset.speaker = spk;
+      const meta = para.querySelector(".tx-meta");
+      if (meta && !meta.querySelector(".tx-spk")) {
+        meta.insertAdjacentHTML("afterbegin",
+          `<span class="tx-spk" data-voice="1" style="color:${color};font-weight:600">${escHtml(spk)}</span> · `);
+      }
+      return;
+    }
+    if (cur === spk) return;
+    // 段已属别人：从该 span 起切出新段
+    const finalsEl = span.parentElement;
+    const moving = [];
+    for (let el = span; el; el = el.nextSibling) moving.push(el);
+    const np = document.createElement("div");
+    np.className = "tx-para";
+    np.dataset.speaker = spk;
+    np.innerHTML =
+      `<div class="tx-meta"><span class="tx-spk" data-voice="1" style="color:${color};font-weight:600">${escHtml(spk)}</span> · ` +
+      `<span class="tx-ts">${fmtClock(ev.ts)}</span></div>` +
+      `<div class="tx-text"><span class="finals"></span><span class="live"></span></div>`;
+    const nf = np.querySelector(".finals");
+    moving.forEach(el => nf.appendChild(el));
+    // 正在输入的 partial 也跟过去（它属于最新发言）
+    const oldLive = para.querySelector(".live"), newLive = np.querySelector(".live");
+    if (oldLive && newLive) { while (oldLive.firstChild) newLive.appendChild(oldLive.firstChild); }
+    para.after(np);
+    const st = _txStates.get("");
+    if (st && st.para === para) { st.para = np; st.finalsText = nf.textContent; }
+    if (finalsEl && !finalsEl.textContent && !para.querySelector(".live")?.textContent) para.remove();
+  }
+  subscribeChannel("diarization", applyDiarization);
+
   function pushOverviewIntent(body) {
     const card = document.querySelector('[data-overview="intent"] .strip-card-body');
     if (!card) return;
@@ -2188,6 +2258,32 @@
   (() => {
     const b = document.querySelector("[data-wall-mode]");
     if (b) b.onclick = () => setWallMode(wallMode === "single" ? "quad" : "single");
+    // 声源下拉：选谁就 enable 谁、disable 另一个（两路同转写会把文本混在一起）
+    const sel = document.querySelector("[data-tx-source]");
+    if (sel) sel.onchange = async () => {
+      const want = sel.value, other = want === "mic" ? "net_multicast" : "mic";
+      sel.disabled = true;
+      try {
+        if (_srcRunning[other]) await publishSourceCmd(other, "disable");
+        if (!_srcRunning[want]) await publishSourceCmd(want, "enable");
+      } finally { sel.disabled = false; }
+    };
+    // 左侧导航 ☰：meeting_asr 默认收起、full 默认展开；用户切换记 localStorage
+    const nt = document.getElementById("nav-toggle");
+    const prof = document.body.dataset.appProfile || "full";
+    let navHidden;
+    try { navHidden = localStorage.getItem("nav_hidden"); } catch (_) { navHidden = null; }
+    const hidden = navHidden === null ? prof === "meeting_asr" : navHidden === "1";
+    document.body.classList.toggle("nav-hidden", hidden);
+    if (nt) {
+      nt.classList.toggle("on", !hidden);
+      nt.onclick = () => {
+        const h = !document.body.classList.contains("nav-hidden");
+        document.body.classList.toggle("nav-hidden", h);
+        nt.classList.toggle("on", !h);
+        try { localStorage.setItem("nav_hidden", h ? "1" : "0"); } catch (_) {}
+      };
+    }
   })();
 
   // ── 转写卡按钮（A3 导出原文 + A4 停止/启动） ────────────────────────
@@ -2205,7 +2301,7 @@
           applyWallMode();
         }
         stopBtn.disabled = true;
-        try { await publishAudioCmd(willDisable ? "disable" : "enable"); }
+        try { await publishSourceCmd(activeSource(), willDisable ? "disable" : "enable"); }
         finally { stopBtn.disabled = false; }
       };
     }

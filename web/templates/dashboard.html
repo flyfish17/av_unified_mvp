@@ -39,14 +39,16 @@
     }
     /* CR-DIG7201 第7条延伸：纯纪要产品是单页（只总览转写卡），左侧多视图导航整栏隐藏，
        主区占满 —— 去掉 nav 列/区域，否则 grid 第一列会留 --nav-w 空白。full 不受影响。 */
-    body[data-app-profile="meeting_asr"] {
+    /* 2026-08-21：改为 body.nav-hidden 开关（顶栏 ☰）；meeting_asr 默认收起、full 默认展开，
+       用户切换记 localStorage["nav_hidden"]。界面差异全部变成开关，profile 只管起哪些模块。 */
+    body.nav-hidden {
       grid-template-columns: 1fr;
       grid-template-areas:
         "header"
         "stage"
         "ticker";
     }
-    body[data-app-profile="meeting_asr"] nav { display: none; }
+    body.nav-hidden nav { display: none; }
     a { color: var(--accent); text-decoration: none; }
     code { color: var(--accent-2); font-family: ui-monospace, SFMono-Regular, monospace; }
 
@@ -1016,6 +1018,7 @@
     <span style="font-size:11px;color:var(--dim);margin-left:8px">
       <a href="/transcript" target="_blank">旧页 ↗</a>
     </span>
+    <button id="nav-toggle" class="cv-toggle" title="显示/隐藏左侧导航栏">☰ 导航</button>
     <!-- 客户视图开关（默认关；localStorage["customer_view"]=="1" 时启用） -->
     <button id="cv-toggle" class="cv-toggle" title="切换客户演示视图：隐藏开发面板 / 放大 LOGO">
       <span class="cv-dot"></span><span id="cv-toggle-label">客户视图</span>
@@ -1121,6 +1124,10 @@
                   <div class="strip-empty">等待麦克风输入…</div>
                 </div>
                 <div class="tx-actions">
+                  <select data-tx-source title="声源：两路都配置时可切换" hidden>
+                    <option value="mic">🎤 本机麦克</option>
+                    <option value="net_multicast">📡 会议主机</option>
+                  </select>
                   <button data-tx-stop class="stop">⏸ 停止</button>
                   <button data-tx-export-text>📄 导出原文</button>
                   <button data-tx-export-audio title="导出最近 5 分钟原音 WAV">🎵 导出原音</button>

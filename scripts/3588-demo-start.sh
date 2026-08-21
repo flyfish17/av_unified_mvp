@@ -40,6 +40,7 @@ src = cfg.get("audio", {}).get("source", "mic"); src = src if isinstance(src, li
 if "mic" not in src: mods = [m for m in mods if m != "modules.audio_processor.main"]
 if "net_multicast" in src: mods.append("modules.net_audio_capture.main")
 if cfg.get("door_access", {}).get("enabled"): mods.append("modules.door_access.main")
+if cfg.get("speaker_diarizer", {}).get("enabled"): mods.append("modules.speaker_diarizer.main")
 print(len(mods))
 PY
     ) 2>/dev/null

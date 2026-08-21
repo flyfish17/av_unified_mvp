@@ -127,6 +127,12 @@ class AVSupervisor:
         if self.cfg.get("door_access", {}).get("enabled"):
             self._managed_modules.append("modules.door_access.main")
 
+        # 发言人区分（声纹，回流自 av_understanding_mac S1-S5）：CAM++ 逐句嵌入 + 在线聚类，
+        # 订 av/audio/segment → 发 av/audio/diarization。配置 speaker_diarizer.enabled 才拉起；
+        # 只对本机麦路径有意义（会议主机路径用话筒号硬分离），两者在前端统一成"发言人"。
+        if self.cfg.get("speaker_diarizer", {}).get("enabled"):
+            self._managed_modules.append("modules.speaker_diarizer.main")
+
         self.mqtt = MQTTBridge(self.cfg.get("mqtt", {}))
         self._web_push = lambda *_: None
 
@@ -386,11 +392,17 @@ class AVSupervisor:
         # 门禁联动：访客弹窗 + 开门结果 → door SSE channel（payload.event 区分 visitor/result）
         self.mqtt.subscribe("av/door/visitor", self._on_door)
         self.mqtt.subscribe("av/door/result", self._on_door)
+        # 发言人区分结果 → diarization SSE（前端按 segment_id 回填到转写段）
+        self.mqtt.subscribe("av/audio/diarization", self._on_audio_diarization)
 
     def _on_audio_partial(self, topic: str, payload: dict):
         """BaseModule 双层载荷 → 提取内层推到 transcript SSE"""
         inner = payload.get("payload", payload)
         self._web_push("transcript", inner)
+
+    def _on_audio_diarization(self, topic: str, payload: dict):
+        inner = payload.get("payload", payload)
+        self._web_push("diarization", inner)
 
     def _on_audio_command(self, topic: str, payload: dict):
         """final 转写 → transcript SSE（与 partial 复用同 seq_id 气泡）"""

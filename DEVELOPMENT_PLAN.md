@@ -327,7 +327,14 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 - **顺带发现（待查，与本次无关）**：生产日志全天 `[detect]` 全是 `(0 目标)`（.pt 与 rknn 相同），且 .pt 时段 75min 刷 26987 条心跳——`idle_detect_interval_s` 15s 节流疑似失效 + conf 0.5 下门口/财务几路是否真无人，下次看。
 - **视频墙单路/四分屏互斥（15:00，用户拍板"默认一路，四屏与转写互斥"）**：纯前端 + config，后端零逻辑改动（复用 `/camera/<名>/enable|disable` 与 `av/audio/cmd`）。默认 `single`：只开 `video.meeting_camera`（缺省第一路），其余路 disable、画格收成 1 格（CSS `.video-wall.single`）；视频卡头部"⊞ 四分屏"按钮 → 转写在跑则确认框"将停止转写"→ audio disable → 前 4 路 enable；转写"启动"在四分屏下 → 确认框"切回单路"→ 先收单路再 audio enable。刷新回 single（不持久化，多路=显式动作）。会议摄像头名由 `web/server.py` 注入 `<body data-meeting-camera>`。
 - **校验（Playwright 对 62 真机三步）**：初始 single/仅画格 1=本机摄像头；点四分屏 → 弹确认 → 请求序列 `av/audio/cmd disable` + 3 路 enable，按钮变"▭ 单路"；点转写启动 → 弹确认 → 3 路 disable + `audio enable`，回 single。in-flight 5s 去重后无重复请求。**负载：单路下 video_processor 48.7% CPU、整机 90% idle（5 路时 ~530-610%）**——"一路辅助转写 + 纪要并行"在一台 3588 上成立。
-- **未完成项**：① ollama url 读 config（外放 Mac Studio 前置）；② detect 心跳洪泛/零目标排查；③ P2.1b 捕获侧减压（单路化后优先级降低）；④ 5.6 full 形态：生产 venv 装 lite2 + config `model: yolov8n_rknn_model` + `meeting_camera: 本机摄像头`。
+- **发言人区分（声纹）回流 + 声源选择 + 侧栏开关（16:00-16:15）**：
+  - 背景：单麦发言人区分早在 `av_understanding_mac` 7/29-7/30 S1-S6 完成（CAM++ 逐句嵌入+在线聚类），但 **Mac Studio 本地 checkout 落后 GitHub 20 commit、且从未回流本仓**。今日 ff 本地并手工移植（两仓 processor.py 分叉 260 行，不能 cherry-pick）。
+  - 移植内容：`modules/speaker_diarizer/`（原样）+ `modules/audio_processor/segments.py`（原样）+ processor.py 段 PCM 缓冲/`TranscriptEvent` 加 segment_id 等默认字段 + audio_processor main 接 SegmentSink（`speaker_diarizer.enabled` 才起）+ supervisor 按 config 拉起模块、订 `av/audio/diarization` 推 SSE + 前端 `applyDiarization`：final span 带 `data-segment-id`，结果晚到按 segment_id 回填；段无人→打标，段属别人→**从该 span 起切新段**、本地麦段指针跟过去，与话筒号分段同构（`.tx-spk` + `para.dataset.speaker`），纪要归属零改动。config example 加 `speaker_diarizer` 段。
+  - 声源选择：`audio.active_source: mic|net_multicast`（两路同配时开机只一路转写），`net_audio_capture` 补 `av/audio/net_cmd {action: enable|disable}` + `running` 公告；转写卡 `<select data-tx-source>` 两模块都在线才显示，选谁 enable 谁 disable 另一个；停止按钮/四分屏停转写按当前声源发命令。
+  - 侧栏：`body[data-app-profile=meeting_asr]` CSS 改为 `body.nav-hidden` 开关，顶栏"☰ 导航"，meeting_asr 默认收起、full 默认展开、localStorage 记忆。**至此界面差异全是开关，profile 只管起哪些模块。**
+  - **62 验证**：venv 补装 funasr 1.3.1、CAM++ 模型（28MB）从 Mac 下载拷入；13 模块上线，CAM++ 就绪 8s。注入 8/20 会议录音 14 段（/mock/transcript + av/audio/segment）→ diarizer → SSE → 前端段标 S1，链路全通；mock S1/S2 晚到事件验证切段正确（S1 段句1-3 / S2 段句4-7，后到句接 S2）。☰ 开关正常；声源下拉在 62 单声源下正确隐藏。
+  - **诚实边界**：① 14 段全归 S1——该录音是 8 路混音+远场，两两余弦全 ≥0.53，**不能判定分离好坏**；Mac 标定（异人 ≤0.28）是近讲样本，C920 近讲两人实测待做；② `net_audio_capture` enable/disable 代码走读、未实机（5.6 是总部测试机）；③ 声纹发言人（S1/S2）暂不支持点标签改名（话筒号路径支持），Mac S6 的改名广播未移植。
+- **未完成项**：① ollama url 读 config；② detect 心跳洪泛/零目标排查；③ P2.1b；④ 5.6 full 形态（lite2 + rknn 模型 + meeting_camera + speaker_diarizer 模型）；⑤ C920 两人实测声纹分离；⑥ 声纹发言人改名。
 - **下次接手所需上下文**：62 导出 venv `~/rknn-export-venv`、产物 `~/yolo-rknn/`；pgrep 自匹配坑又踩一次（等待循环的 pgrep 模式匹配到自身、永不退出），见 memory `ssh-pkill-self-match-trap`。
 
 

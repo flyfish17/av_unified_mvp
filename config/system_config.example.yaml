@@ -133,3 +133,20 @@ husion:
   - - 5001
     - 5009
   poll_interval: 30
+
+# ── 发言人区分（声纹，本机麦路径）── 回流自 av_understanding_mac 2026-07-29 S1-S5
+# CAM++ 逐句嵌入 + 在线余弦质心聚类；订 av/audio/segment（audio_processor 落盘的 final 段）→ 发 av/audio/diarization。
+# 前端按 segment_id 回填 S1/S2… 标签并切段；纪要按段归属。会议主机路径（net_multicast）用话筒号，不走这里。
+# 模型需离线预置：~/.cache/modelscope/hub/models/iic/speech_campplus_sv_zh-cn_16k-common（有网机 snapshot_download 后拷）。
+# 准确度边界：<1s 短段不开新簇只归已有簇；远场同人短段余弦 p25≈0.30 逼近异人上限 0.28，近讲可上调 threshold。
+speaker_diarizer:
+  enabled: false
+  mode: campp_embed
+  allow_download: false
+  spk_model: iic/speech_campplus_sv_zh-cn_16k-common
+  threshold: 0.35
+# audio.segments（enabled 时 audio_processor 落盘 final 段）：
+#   audio:
+#     segments:
+#       dir: runtime/audio_segments
+#       max_files: 300

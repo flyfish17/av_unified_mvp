@@ -34,6 +34,13 @@ class TranscriptEvent:
     seq_id: int
     ts: float
     raw_mode: str
+    # 发言人区分（回流自 av_understanding_mac S3）：final 段的近似 PCM + 段 ID，
+    # 由 main.py SegmentSink 落盘并发 av/audio/segment 给 speaker_diarizer。
+    # 默认值保证其它构造点（mic_warning / local_offline）不用改。
+    segment_id: str = ""
+    start_ms: int = 0
+    end_ms: int = 0
+    pcm_bytes: bytes | None = None
 
 
 def _clean_tags(text: str) -> str:
@@ -86,6 +93,11 @@ class AudioProcessor:
         self._stop_event = threading.Event()
         self._callback: Optional[Callable[[TranscriptEvent], None]] = None
         self._seq = 0
+        # 段 PCM 缓冲：上一条 final → 本条 final 之间的 PCM 作为该 final 的近似音频段
+        # （FunASR 2pass 不回传原始音频边界；近似段对声纹嵌入够用，见 mac 仓 S2 标定）
+        self._segment_pcm_chunks: list[bytes] = []
+        self._segment_start_ts = time.time()
+        self._segment_lock = threading.Lock()
         self._last_partial = ""
         # 诊断：PCM 帧计数（macOS 静默拒绝麦克风时 sd.InputStream 假成功但 callback 永不触发）
         self._pcm_frames_received = 0
@@ -264,6 +276,8 @@ class AudioProcessor:
         with self._session_lock:
             if self._session_file is not None:
                 self._session_file.write(pcm)
+        with self._segment_lock:
+            self._segment_pcm_chunks.append(pcm)
         try:
             self._send_q.put_nowait(pcm)
         except queue.Full:
@@ -283,6 +297,7 @@ class AudioProcessor:
             stamp = time.strftime("%Y%m%d-%H%M%S")
             self._session_path = self._audio_dir / f"session-{stamp}.pcm"
             self._session_file = open(self._session_path, "wb")
+            self._session_t0 = time.time()  # 段事件 start_ms/end_ms 的零点
             logger.info(f"音频落盘会话开始: {self._session_path}")
 
     def _close_session_file(self):
@@ -397,6 +412,17 @@ class AudioProcessor:
                 return
             await ws.send(pcm)
 
+    def _close_pcm_segment(self) -> tuple[bytes, int, int]:
+        """取出当前 utterance 的近似 PCM 段并重置缓冲；返回 (pcm, start_ms, end_ms)（相对本次 start）。"""
+        now = time.time()
+        with self._segment_lock:
+            pcm = b"".join(self._segment_pcm_chunks)
+            start_ts = self._segment_start_ts
+            self._segment_pcm_chunks = []
+            self._segment_start_ts = now
+        t0 = getattr(self, "_session_t0", None) or start_ts
+        return pcm, max(0, int((start_ts - t0) * 1000)), max(0, int((now - t0) * 1000))
+
     async def _recv_loop(self, ws):
         async for raw in ws:
             if isinstance(raw, (bytes, bytearray)):
@@ -418,12 +444,18 @@ class AudioProcessor:
                     continue
                 self._last_partial = text
 
+            segment_id = f"aud-{self._seq:06d}"
+            pcm_bytes, start_ms, end_ms = self._close_pcm_segment() if is_final else (None, 0, 0)
             ev = TranscriptEvent(
                 text=text,
                 is_final=is_final,
                 seq_id=self._seq,
                 ts=time.time(),
                 raw_mode=raw_mode or ("final" if is_final else "partial"),
+                segment_id=segment_id,
+                start_ms=start_ms,
+                end_ms=end_ms,
+                pcm_bytes=pcm_bytes,
             )
 
             if is_final:

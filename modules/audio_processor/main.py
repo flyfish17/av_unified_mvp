@@ -187,12 +187,27 @@ class AudioModule(BaseModule):
         # 默认 ON（开机后立即转写）。disable 时 processor.stop() 释放 mic + WS；enable 重启。
         # 必须在 super().__init__ 之前设：BaseModule.__init__ 构造 LWT 时立即调
         # self._discovery_payload("offline")，子类重写版会引用 self.running。
-        self.running = True
+        # audio.active_source（mic | net_multicast）：两路声源同时配置时，开机只让一路在转写；
+        # 另一路起进程但不采集，dashboard 转写卡"声源"下拉可随时切（av/audio/cmd enable/disable）。
+        # 不配 = 本模块照常开机即转写。
+        active = (cfg.get("audio") or {}).get("active_source")
+        self.running = active in (None, "", "mic")
 
         super().__init__("audio_processor", cfg, streams=streams)
         self._topics = topics
         self.processor = AudioProcessor(cfg.get("audio", {}))
         self.subscribe("av/audio/cmd")
+        # 发言人区分旁路（config speaker_diarizer.enabled 才起）：final 段 PCM 落盘 + av/audio/segment
+        self._segment_sink = None
+        if (cfg.get("speaker_diarizer") or {}).get("enabled"):
+            from modules.audio_processor.segments import SegmentSink
+            self._segment_sink = SegmentSink(
+                cfg.get("audio", {}),
+                Path(config_path).resolve().parent.parent,
+                self.processor.sample_rate,
+                self.publish,
+                topics.get("audio_segment", "av/audio/segment"),
+            )
 
         signal.signal(signal.SIGINT, lambda s, f: self.stop())
         signal.signal(signal.SIGTERM, lambda s, f: self.stop())
@@ -234,10 +249,13 @@ class AudioModule(BaseModule):
         super().start()
         # D 仿 partial UX：注入 listening_callback 让 processor 在 VAD speaking/silence
         # 状态转换时 publish av/audio/listening 心跳，dashboard 显示"正在听 X.Xs"
-        self.processor.start(
-            callback=self._on_transcript,
-            listening_callback=self._on_listening,
-        )
+        if self.running:
+            self.processor.start(
+                callback=self._on_transcript,
+                listening_callback=self._on_listening,
+            )
+        else:
+            self.logger.info("audio.active_source 非 mic：本机麦待命（转写卡声源下拉可切回）")
         # 启嵌入式 HTTP（5052）— 前端"导出原音"按钮直连此端口
         # 与 video_processor 5051 同样思路；start() 时启避免 __init__ 阶段还没装好 processor
         _AudioExportHandler.processor_ref = self.processor
@@ -277,10 +295,15 @@ class AudioModule(BaseModule):
                 "is_final": ev.is_final,
                 "raw_mode": ev.raw_mode,
                 "ts": ev.ts,
+                "segment_id": ev.segment_id or None,
             },
         }
         if ev.is_final:
             self.logger.info(f"[final] {ev.text}")
+            # 发言人区分旁路：final 段 PCM 落盘 + 发 av/audio/segment（speaker_diarizer 订阅）。
+            # 转写不等分离——这里只发事件，speaker_id 由前端按 segment_id 异步回填。
+            if self._segment_sink is not None:
+                self._segment_sink.handle_final(ev)
             if _ASR_BACKEND == "funasr_2pass":
                 # funasr 2pass offline 段已带 ITN 标点，绕过 punctuator 防双标点。
                 # 发兼容 punctuator schema 的 payload 到 av/audio/command_punctuated。
@@ -295,6 +318,7 @@ class AudioModule(BaseModule):
                         "raw_mode": ev.raw_mode,
                         "ts": ev.ts,
                         "punct_latency_ms": 0.0,
+                        "segment_id": ev.segment_id or None,
                     },
                 }
                 self.publish("av/audio/command_punctuated", punctuated_payload)

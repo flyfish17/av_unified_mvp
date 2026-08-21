@@ -72,6 +72,9 @@ class NetAudioCaptureModule(BaseModule):
         # 必须在 super().__init__ 之前设：BaseModule.__init__ 构造 LWT 时立即调
         # _discovery_payload，重写版会引用 self._channels（audio_processor 同款坑）
         self._channels: list[UdpMicChannel] = []
+        # audio.active_source（mic | net_multicast）：两路声源同配时开机只让一路转写，见 audio_processor 同款
+        active = (cfg.get("audio") or {}).get("active_source")
+        self.running = active in (None, "", "net_multicast")
         super().__init__("net_audio_capture", cfg, streams=streams)
         self._topics = topics
 
@@ -98,18 +101,40 @@ class NetAudioCaptureModule(BaseModule):
         if topic == "av/audio/net_cmd" and payload.get("cmd") == "set_mic_names":
             self._mic_names = self._merged_mic_names(payload.get("mic_names"))
             self.logger.info(f"话筒命名热更新: {self._mic_names or '（全部默认）'}")
+            return
+        # 声源切换（与 audio_processor 的 av/audio/cmd 同语义）：disable 停 8 路收包/转写，enable 重建
+        if topic == "av/audio/net_cmd":
+            inner = payload.get("payload", payload) if isinstance(payload, dict) else {}
+            action = inner.get("action") or payload.get("action")
+            if action == "disable" and self.running:
+                self.logger.info("收到 disable，停止会议主机组播接入")
+                self._stop_channels()
+                self.running = False
+                self._publish_discovery("online")
+            elif action == "enable" and not self.running:
+                self.logger.info("收到 enable，恢复会议主机组播接入")
+                self._start_channels()
+                self.running = True
+                self._publish_discovery("online")
 
     def _discovery_payload(self, event: str) -> dict:
         payload = super()._discovery_payload(event)
         payload["channels"] = [ch.stats() for ch in self._channels]
+        payload["running"] = self.running
         return payload
 
     def start(self) -> None:
         super().start()
-        self.subscribe("av/audio/net_cmd")  # 就地改名热更新入口
+        self.subscribe("av/audio/net_cmd")  # 改名热更新 + 声源 enable/disable
         if self._recorder is not None:
             self._recorder.start()
             self._export_http = start_export_http(self._recorder)
+        if self.running:
+            self._start_channels()
+        else:
+            self.logger.info("audio.active_source 非 net_multicast：会议主机接入待命（转写卡声源下拉可切）")
+
+    def _start_channels(self) -> None:
         for i in range(self._num_channels):
             ch = UdpMicChannel(
                 mic_id=i,
@@ -128,12 +153,16 @@ class NetAudioCaptureModule(BaseModule):
             f"{self._group}:{self._base_port}-{self._base_port + self._num_channels - 1}"
         )
 
-    def stop(self) -> None:
+    def _stop_channels(self) -> None:
         for ch in self._channels:
             try:
                 ch.stop()
             except Exception as e:
                 self.logger.warning(f"mic{ch.mic_id} stop 异常: {e}")
+        self._channels = []
+
+    def stop(self) -> None:
+        self._stop_channels()
         # 关导出 HTTP（防 supervisor 重拉时 5052 残留 EADDRINUSE）与录制器
         if self._export_http is not None:
             try:
