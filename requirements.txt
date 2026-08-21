@@ -5,6 +5,7 @@
 # 视频处理
 opencv-python==4.13.0.92
 ultralytics==8.4.35
+# RK3588 NPU 跑 YOLO(yolo.model: yolov8n_rknn_model)时板上另装: rknn-toolkit-lite2==2.3.2(aarch64 专用,Mac 装不上)
 
 # 音频 / 语音识别
 sounddevice==0.5.5

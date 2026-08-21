@@ -97,6 +97,9 @@ video:
   yolo:
     confidence: 0.5
     inference_fps: 2
+    # yolov8n.pt = ultralytics CPU 推理(3588 上 ~250ms/帧,吃 2-3 核);
+    # yolov8n_rknn_model = 同模型 NPU 版(仓库自带,62 实测 106ms/帧、进程 CPU 减半,检出一致;
+    # 需 venv 装 rknn-toolkit-lite2==2.3.2)。RK3588 板子一律用 rknn 版,Mac/Jetson 用 .pt。
     model: yolov8n.pt
     target_classes:
     - 0

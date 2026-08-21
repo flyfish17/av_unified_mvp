@@ -216,7 +216,8 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 | P1.4 | 纪要 UI 提示 + 触发体验优化 | ⏳ |
 | P1.5 | 销售部署 README（`git checkout tag` 后 1 命令启动指南）| ⏳ |
 | P1.6 | Jetson CUDA 语音验证报告（独立窗口完成）| ⏳ |
-| P2.1 | video_processor CPU 减压（config 调 inference_fps / jpeg_quality / 单路 ⏸）| 看是否影响语音 |
+| P2.1a | video_processor YOLO 搬 NPU（`yolov8n_rknn_model`，config 一行切换）| ✅ 8/21 62 落地，推理 11× |
+| P2.1b | video_processor 捕获侧减压：5 路软解 + 逐帧 JPEG 预编码是剩余 CPU 大头（62 实测 NPU 后仍 ~370%）— RTSP 走子码流 / JPEG 只在有 MJPEG 客户端时编 / rkmpp 硬解 | ⏳ 先量化三者占比再动 |
 | P2.2 | 控制指令"离线"误判修复（dashboard.js 多 client_id 状态合并）| 接受 or 修 |
 
 **不做 / 仅技术储备**：双工对讲（持续 GitHub 关注） · 知识库 + 问答（另立项目）
@@ -312,6 +313,15 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 - **验证**：5.6 实跑帧输出正确（eth1 192.168.5.6 DHCP 自动获取 / eth0 静态 .245 插线即活 / 网关 .1 / 运行中 http://192.168.5.6:5050）；未截屏（板上无 scrot/xwd），字号 `-fs 26` 需人眼目检
 - **未完成项**：未并入 DECISIONS 第 9 条（布局弹窗灰置 + 客户视图按钮隐藏）的部署窗口——那两处前端小改仍待做
 - **下次接手所需上下文**：5.6 安全重启手法见 memory `cr-dig7201-3588-meeting-asr`；信息屏立即重开命令见 `deploy/hdmi-info/README.md`
+
+### 2026-08-21（下午）— 形态切换脚本 + YOLO 搬 NPU（62 实测）
+- **背景判断**（用户探讨后定）：一台 3588 全功能、按重启切 meeting_asr/full 形态——机制早已具备，缺一条命令；两形态在 3588 上**互斥**（YOLO 占 CPU / NPU IOVA 4G），不做热切、不给前端按钮（防客户误切）。纪要外放：rkllm backend `llm.summary.url` 可配且热读（指向另一台 3588 NPU 零代码）；ollama 路径 `web/server.py:556` 硬编码 127.0.0.1，要外放 Mac Studio 需改读 config（未做）。外部进展：rkllm 1.3.0 支持 Qwen3.5（0.8B/2B/4B），IOVA 4G 无解（IOMMU v1 GFP_DMA32）。
+- **切换脚本**：`scripts/switch-profile.sh full|meeting_asr|--status`（commit 3a9699f）。SIGKILL 老 supervisor/模块/rkllm daemon → `systemctl restart av-demo` → 等 :5050 200 + 模块数。`3588-demo-start.sh` EXPECTED_MODULES 改为按 config 推导（meeting_asr+net_multicast=6 / full=10）。5.6 上 `--status` 已验证；**full↔meeting_asr 实切未跑**（远程重启被权限拦，留用户执行）。
+- **YOLO 搬 NPU（62）**：62 板上独立 venv 装 rknn-toolkit2 2.3.2（aarch64 wheel 可得；onnxoptimizer 无 wheel、源码编译失败，`--no-deps` 跳过不影响导出）→ `YOLO("yolov8n.pt").export(format="rknn", name="rk3588")` 32s 出 `yolov8n_rknn_model/`（7.9MB fp16）。**代码零改动**：`processor.py:103` `YOLO(path)` 走 ultralytics AutoBackend 识别 rknn 目录，运行时只需生产 venv 装 `rknn-toolkit-lite2==2.3.2`（ultralytics AutoUpdate 自动装了，已记入 requirements 注释）。
+- **实测数字（62，1280×720，50 帧均值）**：CPU .pt 1167ms/帧·进程 CPU 246% → NPU **106ms/帧·112%**，检出 6 目标/类别一致；NPU Core0 33%。**但 video_processor 整进程稳态 441% → ~370%**，剩余大头 = 5 路 RTSP 软解 + 捕获线程逐帧 JPEG 预编码（`processor.py:53`），不是推理 → 立 P2.1b。
+- **62 现状**：已切 `yolo.model: yolov8n_rknn_model` 常驻运行（config 备份 `.bak-pre-rknn-20260821`），模型入库 `yolov8n_rknn_model/`（含 README 导出命令）。
+- **未完成项**：① 5.6 实切来回验证；② ollama url 读 config（外放 Mac Studio 前置）；③ P2.1b 量化；④ 3588(.6) full 形态下装 lite2 + 切 rknn 模型（等用户切换窗口）。
+- **下次接手所需上下文**：62 导出 venv `~/rknn-export-venv`、产物 `~/yolo-rknn/`；pgrep 自匹配坑又踩一次（等待循环的 pgrep 模式匹配到自身、永不退出），见 memory `ssh-pkill-self-match-trap`。
 
 
 - 战略定位写入第一行："AI 技术底座 + A/B/C 三层次（架构 = 形态对应）"
