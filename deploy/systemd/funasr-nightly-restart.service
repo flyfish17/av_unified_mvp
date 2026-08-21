@@ -1,0 +1,10 @@
+[Unit]
+Description=funasr 每日凌晨重启(防长跑卡死) + audio_processor 重连
+Documentation=file:/home/firefly/av_unified_mvp/scripts/3588-funasr-nightly-restart.sh
+
+[Service]
+Type=oneshot
+User=firefly
+ExecStart=/bin/bash /home/firefly/av_unified_mvp/scripts/3588-funasr-nightly-restart.sh
+StandardOutput=append:/tmp/funasr-nightly-restart.log
+StandardError=append:/tmp/funasr-nightly-restart.log

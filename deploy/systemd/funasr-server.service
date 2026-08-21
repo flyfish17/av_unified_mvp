@@ -1,0 +1,40 @@
+[Unit]
+Description=FunASR 2pass server（脱 docker 化 rootfs — 供无 CONFIG_CGROUP_BPF 内核的 DNC 机型）
+# 背景：DNC（RK3588 EVB，内核 5.10.110-dirty 未编 CONFIG_BPF_SYSCALL）上 docker/runc
+# 在 cgroup v2 设 device 规则必须走 eBPF → 一律 "bpf_prog_query failed" 起不来。
+# 解法：docker export 镜像 rootfs 到 /opt/funasr-rootfs，systemd RootDirectory 直跑
+# server 二进制。引擎与 3588 的 docker 版逐字节相同。安装见 docs/deploy/dnc-replicate-install.md
+# ⚠️ 本单元禁止添加 DevicePolicy/DeviceAllow —— 会触发同一个内核 BPF 缺失报错。
+Documentation=file:/home/proembed/av_unified_mvp/docs/deploy/dnc-replicate-install.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+RootDirectory=/opt/funasr-rootfs
+MountAPIVFS=yes
+# 模型在宿主机 ~/funasr-models（与 3588 的 docker -v 挂载同布局），首跑自动下载
+BindPaths=/home/proembed/funasr-models:/workspace/models
+WorkingDirectory=/workspace/FunASR/runtime
+# 参数照抄镜像内 run_server_2pass.sh（--certfile 0 形态）；绕过脚本直跑前台，
+# 因为脚本会把 server 后台化后退出（docker 里靠 tee 撑活，systemd 下会误判退出）。
+# 线程数按 8 核算：decoder=8, io=(8+15)/16=1, model=1 —— 与 3588（同 8 核）一致。
+ExecStart=/workspace/FunASR/runtime/websocket/build/bin/funasr-wss-server-2pass \
+  --download-model-dir /workspace/models \
+  --model-dir damo/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-onnx \
+  --online-model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx \
+  --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx \
+  --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx \
+  --itn-dir thuduj12/fst_itn_zh \
+  --lm-dir damo/speech_ngram_lm_zh-cn-ai-wesp-fst \
+  --decoder-thread-num 8 --model-thread-num 1 --io-thread-num 1 \
+  --port 10095 --certfile "" --keyfile "" \
+  --hotword /workspace/FunASR/runtime/websocket/hotwords.txt
+Restart=always
+RestartSec=10
+# 3588 实测长跑 RSS 可涨到 7.4G（nightly 重启就是为这个）；6G 上限防失控吃死整机
+MemoryMax=6G
+OOMPolicy=kill
+
+[Install]
+WantedBy=multi-user.target

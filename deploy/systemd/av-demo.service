@@ -1,0 +1,23 @@
+[Unit]
+Description=AV Unified MVP 演示应用层 (supervisor + 模块 + node-red) — 客户演示开机自启
+Documentation=file:/home/firefly/av_unified_mvp/scripts/3588-demo-start.sh
+After=network-online.target mosquitto.service docker.service ollama.service
+Wants=network-online.target mosquitto.service docker.service ollama.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=firefly
+Group=firefly
+WorkingDirectory=/home/firefly/av_unified_mvp
+Environment=HOME=/home/firefly
+Environment=PATH=/home/firefly/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# 3588-demo-start.sh: exit 0=全就绪, 2=部分就绪(慢启动也算成功,绝不让 systemd 误判失败去杀刚拉起的子进程)
+SuccessExitStatus=0 2
+ExecStart=/usr/bin/bash /home/firefly/av_unified_mvp/scripts/3588-demo-start.sh
+TimeoutStartSec=180
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
