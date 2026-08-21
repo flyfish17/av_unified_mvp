@@ -307,6 +307,12 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 - **未完成项**：① 门口摄像头尚未接入（camera_name=门口 待配真实源）；② 开门按钮无操作权限控制（内网任何人可开大门，上线前必须加）；③ 云眸消息通道 open_event_access 可替代轮询（注意 7 天不用自动停用）
 - **下次接手所需上下文**：账号/秘钥/设备/事件码见 memory `door-access-hik-cloud`；测试配置样例 `config/system_config.example.yaml` door_access 段；协议原文 iCloud `设备协议/门禁开门协议.docx`
 
+### 2026-08-21 — 纪要机 HDMI 开机信息屏（总部测试/演示环境 P0）
+- **本次推进**：从 creator_om `deploy/hdmi-info/` 移植到本仓 `deploy/hdmi-info/`（`creator-asr-hdmi-info.sh` + `.desktop` + README），commit `95c8959`。文案改"CREATOR 转写纪要机 · 开机信息"；每个网口标注 DHCP/静态（nmcli ipv4.method）；服务判定三态（:5050 回 200=运行中 / 仅 av-demo active=启动中 / 未运行）；过滤 can0。**已装 5.6**（`/usr/local/bin` + `/etc/xdg/autostart`，autologin firefly 开机自动全屏），当前 HDMI-1 1080p 已在显示
+- **验证**：5.6 实跑帧输出正确（eth1 192.168.5.6 DHCP 自动获取 / eth0 静态 .245 插线即活 / 网关 .1 / 运行中 http://192.168.5.6:5050）；未截屏（板上无 scrot/xwd），字号 `-fs 26` 需人眼目检
+- **未完成项**：未并入 DECISIONS 第 9 条（布局弹窗灰置 + 客户视图按钮隐藏）的部署窗口——那两处前端小改仍待做
+- **下次接手所需上下文**：5.6 安全重启手法见 memory `cr-dig7201-3588-meeting-asr`；信息屏立即重开命令见 `deploy/hdmi-info/README.md`
+
 
 - 战略定位写入第一行："AI 技术底座 + A/B/C 三层次（架构 = 形态对应）"
 - §1.6 三步框架升级为 §3 两阶段框架
