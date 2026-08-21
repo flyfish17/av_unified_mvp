@@ -1680,12 +1680,6 @@
     const prof = document.body.dataset.appProfile || "full";
     const keep = PROFILE_KEEP[prof];
     if (!keep) return;  // full 或未知 profile 不动
-    // 纪要机形态下顶栏"旧页"链接与"客户视图"开关无意义（客户视图是 full demo 的
-    // 演示脸切换，此形态卡已被 profile 移除，点了只会乱版）——2026-08-20 用户拍板去掉
-    const cvBtn = document.getElementById("cv-toggle");
-    if (cvBtn) cvBtn.style.display = "none";
-    const legacy = document.querySelector('a[href="/transcript"]');
-    if (legacy && legacy.parentElement) legacy.parentElement.style.display = "none";
     const grid = window.__overviewGrid;
     MODULES_META.forEach(m => {
       if (keep.has(m.id)) return;
@@ -1697,69 +1691,7 @@
     });
   }
 
-  // ── 客户视图开关（顶栏 toggle · 默认关）──────────────────────────
-  // 进入客户视图：备份当前可见性偏好，仅显示 CUSTOMER_VIEW_MODULES 列出的模块
-  // 退出客户视图：把备份的可见性偏好写回，并按其重新 apply
-  const CUSTOMER_VIEW_KEY = "customer_view";
-  const CV_VISIBILITY_BACKUP_KEY = "av_overview_visibility__cv_backup";
-  // 任务定义的客户视图保留集（husion / openvocab 若 future 加入 MODULES_META 也会自动尊重）
-  const CUSTOMER_VIEW_MODULES = new Set([
-    "overview-video",
-    "overview-intent",
-    "overview-quick-control",
-    "overview-online-stream",
-    "overview-husion",
-    "overview-openvocab",
-  ]);
-
-  function setCustomerView(on) {
-    document.body.classList.toggle("customer-view", on);
-    const btn = document.getElementById("cv-toggle");
-    const lbl = document.getElementById("cv-toggle-label");
-    if (btn) btn.classList.toggle("on", !!on);
-    if (lbl) lbl.textContent = on ? "客户视图 · 开" : "客户视图";
-
-    if (on) {
-      // 备份用户原可见性偏好（仅在尚未备份时；防止反复 toggle 把 CV 强制态当成原始）
-      if (localStorage.getItem(CV_VISIBILITY_BACKUP_KEY) === null) {
-        localStorage.setItem(
-          CV_VISIBILITY_BACKUP_KEY,
-          localStorage.getItem(VISIBILITY_KEY) || "{}"
-        );
-      }
-      MODULES_META.forEach(m => {
-        if (CUSTOMER_VIEW_MODULES.has(m.id)) showModule(m.id);
-        else hideModule(m.id);
-      });
-    } else {
-      // 还原：先把备份写回 VISIBILITY_KEY，再 showAll 清干净 + applyVisibility 重放
-      const backup = localStorage.getItem(CV_VISIBILITY_BACKUP_KEY);
-      if (backup !== null) {
-        try { localStorage.setItem(VISIBILITY_KEY, backup); } catch (_) {}
-        localStorage.removeItem(CV_VISIBILITY_BACKUP_KEY);
-      }
-      MODULES_META.forEach(m => showModule(m.id));  // 重置为全显
-      applyVisibility();                             // 然后按用户偏好再隐藏
-    }
-    localStorage.setItem(CUSTOMER_VIEW_KEY, on ? "1" : "0");
-    // 刷新布局 popup（如果开着）
-    buildLayoutPopupBody();
-  }
-
-  function setupCustomerViewToggle() {
-    const btn = document.getElementById("cv-toggle");
-    if (!btn) return;
-    btn.addEventListener("click", () => {
-      const on = !document.body.classList.contains("customer-view");
-      setCustomerView(on);
-    });
-    // 首次加载：按 localStorage 还原
-    const saved = localStorage.getItem(CUSTOMER_VIEW_KEY);
-    if (saved === "1") setCustomerView(true);
-  }
-
-  // 给页面 / 调试暴露
-  window.setCustomerView = setCustomerView;
+  // 2026-08-21：客户视图（一键演示脸）已整体移除，被 ☰ 导航 / 布局弹窗 / 单路视频等细粒度开关覆盖。
 
   // ── P1.3 添加 / 修改 / 删除视频源 ─────────────────────────────────
   // url 反推：rtsp://user:pwd@ip:port/Streaming/Channels/N → IPC；rtsp://ip:port/path → 分布式；纯数字 → 本机
@@ -2268,7 +2200,6 @@
   setupLayoutPopup();
   applyVisibility();
   applyProfileVisibility();  // CR-DIG7201 第7条：按 app_profile 隐藏无关卡（meeting_asr 只留纪要）
-  setupCustomerViewToggle();
   setupAddSourceForm();
   setupLanScan();
   setupQuickControl();

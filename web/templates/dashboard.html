@@ -883,8 +883,8 @@
       opacity: 0.85; z-index: 100;
     }
 
-    /* ── 客户视图开关（顶栏右上 toggle）────────────────────────────── */
-    .cv-toggle {
+    /* ── 顶栏圆角开关按钮（☰ 导航）────────────────────────────── */
+    .hdr-toggle {
       display: inline-flex; align-items: center; gap: 6px;
       margin-left: 8px; padding: 3px 10px;
       border: 1px solid var(--line); border-radius: 999px;
@@ -893,52 +893,8 @@
       cursor: pointer; user-select: none;
       letter-spacing: 0.05em;
     }
-    .cv-toggle:hover { color: var(--text); border-color: var(--accent-2); }
-    .cv-toggle .cv-dot {
-      width: 6px; height: 6px; border-radius: 50%;
-      background: var(--dim);
-    }
-    .cv-toggle.on {
-      color: var(--accent-2); border-color: var(--accent-2);
-      background: rgba(126, 232, 232, 0.08);
-    }
-    .cv-toggle.on .cv-dot {
-      background: var(--accent-2); box-shadow: 0 0 6px var(--accent-2);
-    }
-
-    /* ── 客户视图态：放大 LOGO、隐藏开发元素、隐藏 nav ─────────────── */
-    body.customer-view {
-      /* nav 折叠：留 0，把 stage 拉满 */
-      grid-template-columns: 0 1fr;
-    }
-    body.customer-view nav { display: none; }
-    body.customer-view header { padding: 0 24px; }
-    body.customer-view .brand .logo {
-      font-size: 18px; font-weight: 800;
-      color: var(--text);
-      letter-spacing: 0.08em;
-    }
-    body.customer-view .brand .tag {
-      font-size: 11px; padding: 2px 8px;
-    }
-    body.customer-view .brand .cv-subtitle {
-      display: inline-flex !important;
-      align-items: center; gap: 6px;
-      margin-left: 10px;
-    }
-    .brand .cv-subtitle { display: none; }
-    .brand .cv-subtitle .chip {
-      font-size: 10px; padding: 2px 7px;
-      border: 1px solid var(--accent-2); color: var(--accent-2);
-      border-radius: 999px; letter-spacing: 0.1em;
-      background: rgba(126, 232, 232, 0.06);
-    }
-    /* 客户视图：隐藏开发态提示文字 / 旧页跳链 / 退出按钮（保留 ⚙ 布局给 demo 时调整） */
-    body.customer-view .view-head .topic { display: none; }
-    body.customer-view #brand-sub,
-    body.customer-view header > span[style*="margin-left:8px"],
-    body.customer-view #btn-system-exit { display: none !important; }
-    body.customer-view .module-card .drag-handle { display: none; }
+    .hdr-toggle:hover { color: var(--text); border-color: var(--accent-2); }
+    .hdr-toggle.on { color: var(--accent-2); border-color: var(--accent-2); }
     /* 客户视图保留 modules-pill / header-status / clock — 现场展示状态用 */
 
     /* ── 启动 splash（首次加载 1.5s fade-out）─────────────────────── */
@@ -1004,25 +960,14 @@
       <span class="logo">CREATOR AI 视听理解平台</span>
       <span class="tag">CREATOR</span>
       <span class="sub" id="brand-sub" style="display:none">v1.x</span>
-      <!-- 客户视图：副标语 chip（默认隐藏，body.customer-view 时显示） -->
-      <span class="cv-subtitle">
-        <span class="chip">端侧</span>
-        <span class="chip">多模态</span>
-        <span class="chip">跨品牌</span>
-      </span>
     </div>
     <span class="spacer"></span>
     <span class="pill" id="modules-pill">模块 0/0</span>
     <span class="pill" id="header-status">连接中…</span>
     <span class="clock" id="clock">--:--:--</span>
-    <span style="font-size:11px;color:var(--dim);margin-left:8px">
-      <a href="/transcript" target="_blank">旧页 ↗</a>
-    </span>
-    <button id="nav-toggle" class="cv-toggle" title="显示/隐藏左侧导航栏">☰ 导航</button>
-    <!-- 客户视图开关（默认关；localStorage["customer_view"]=="1" 时启用） -->
-    <button id="cv-toggle" class="cv-toggle" title="切换客户演示视图：隐藏开发面板 / 放大 LOGO">
-      <span class="cv-dot"></span><span id="cv-toggle-label">客户视图</span>
-    </button>
+    <!-- 2026-08-21 去掉"旧页 ↗"（/transcript 老单页，功能已被转写卡 + /bigscreen 覆盖）
+         与"客户视图"（一键演示脸，已被 ☰ 导航 / 布局弹窗 / 单路视频等细粒度开关覆盖） -->
+    <button id="nav-toggle" class="hdr-toggle" title="显示/隐藏左侧导航栏">☰ 导航</button>
     <button id="btn-system-exit" title="停止 supervisor + 关闭后台 mosquitto / Node-RED / FunASR"
             style="margin-left:10px;font-size:11px;padding:3px 10px;border-radius:4px;
                    background:transparent;color:var(--warn);border:1px solid var(--warn);
