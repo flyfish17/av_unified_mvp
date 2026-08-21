@@ -28,9 +28,24 @@ VENV_PY="${AV_VENV_PY:-$HOME/creator_ai_demo/venv/bin/python}"
 LOG_FILE="${AV_LOG_FILE:-/tmp/main_supervisor.log}"
 DASHBOARD_PORT="${AV_DASHBOARD_PORT:-5050}"
 MJPEG_PORT="${AV_MJPEG_PORT:-5051}"
-# CR-DIG7201：3588 常驻 meeting_asr 纪要机 = 6 模块（audio system network scanner husion
-# control_dispatch）；不起 video/keyframe/openvocab/llm_engine。可用 AV_EXPECTED_MODULES 覆盖。
-EXPECTED_MODULES="${AV_EXPECTED_MODULES:-6}"
+# 期望模块数按 config 自动算（app_profile / audio.source / door_access，与 supervisor 同一套逻辑；
+# 见 scripts/switch-profile.sh expected_modules）。meeting_asr+net_multicast=6，full=10。
+# 算不出（venv/config 异常）退回 6；可用 AV_EXPECTED_MODULES 覆盖。
+_calc_expected() {
+    (cd "$PROJECT_DIR" && "$VENV_PY" - <<'PY'
+import yaml, main
+cfg = yaml.safe_load(open("config/system_config.yaml")) or {}
+mods = list(main.APP_PROFILES[cfg.get("app_profile") or "full"])
+src = cfg.get("audio", {}).get("source", "mic"); src = src if isinstance(src, list) else [src]
+if "mic" not in src: mods = [m for m in mods if m != "modules.audio_processor.main"]
+if "net_multicast" in src: mods.append("modules.net_audio_capture.main")
+if cfg.get("door_access", {}).get("enabled"): mods.append("modules.door_access.main")
+print(len(mods))
+PY
+    ) 2>/dev/null
+}
+EXPECTED_MODULES="${AV_EXPECTED_MODULES:-$(_calc_expected)}"
+EXPECTED_MODULES="${EXPECTED_MODULES:-6}"
 WAIT_SECONDS="${AV_WAIT_SECONDS:-45}"
 
 # ── 颜色 ──────────────────────────────────────────────────────────────
