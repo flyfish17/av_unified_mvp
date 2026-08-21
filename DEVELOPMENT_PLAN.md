@@ -216,8 +216,8 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 | P1.4 | 纪要 UI 提示 + 触发体验优化 | ⏳ |
 | P1.5 | 销售部署 README（`git checkout tag` 后 1 命令启动指南）| ⏳ |
 | P1.6 | Jetson CUDA 语音验证报告（独立窗口完成）| ⏳ |
-| P2.1a | video_processor YOLO 搬 NPU（`yolov8n_rknn_model`，config 一行切换）| ✅ 8/21 62 落地，推理 11× |
-| P2.1b | video_processor 捕获侧减压：5 路软解 + 逐帧 JPEG 预编码是剩余 CPU 大头（62 实测 NPU 后仍 ~370%）— RTSP 走子码流 / JPEG 只在有 MJPEG 客户端时编 / rkmpp 硬解 | ⏳ 先量化三者占比再动 |
+| P2.1a | video_processor YOLO 搬 NPU（`yolov8n_rknn_model`，config 一行切换）| ⚠️ 8/21 导出+隔离基准 OK（11×），**实况摄像头帧 NaN 零检出，62 已回退 .pt**；待查 fp16→int8 量化/输入预处理 |
+| P2.1b | video_processor 捕获侧减压：5 路软解 + 逐帧 JPEG 预编码疑为 CPU 大头（62 瞬时 ~600%，.pt/rknn 无明显差别）— RTSP 走子码流 / JPEG 只在有 MJPEG 客户端时编 / rkmpp 硬解 | ⏳ 先量化三者占比再动 |
 | P2.2 | 控制指令"离线"误判修复（dashboard.js 多 client_id 状态合并）| 接受 or 修 |
 
 **不做 / 仅技术储备**：双工对讲（持续 GitHub 关注） · 知识库 + 问答（另立项目）
@@ -319,8 +319,9 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 - **切换脚本**：`scripts/switch-profile.sh full|meeting_asr|--status`（commit 3a9699f）。SIGKILL 老 supervisor/模块/rkllm daemon → `systemctl restart av-demo` → 等 :5050 200 + 模块数。`3588-demo-start.sh` EXPECTED_MODULES 改为按 config 推导（meeting_asr+net_multicast=6 / full=10）。5.6 上 `--status` 已验证；**full↔meeting_asr 实切未跑**（远程重启被权限拦，留用户执行）。
 - **YOLO 搬 NPU（62）**：62 板上独立 venv 装 rknn-toolkit2 2.3.2（aarch64 wheel 可得；onnxoptimizer 无 wheel、源码编译失败，`--no-deps` 跳过不影响导出）→ `YOLO("yolov8n.pt").export(format="rknn", name="rk3588")` 32s 出 `yolov8n_rknn_model/`（7.9MB fp16）。**代码零改动**：`processor.py:103` `YOLO(path)` 走 ultralytics AutoBackend 识别 rknn 目录，运行时只需生产 venv 装 `rknn-toolkit-lite2==2.3.2`（ultralytics AutoUpdate 自动装了，已记入 requirements 注释）。
 - **实测数字（62，1280×720，50 帧均值）**：CPU .pt 1167ms/帧·进程 CPU 246% → NPU **106ms/帧·112%**，检出 6 目标/类别一致；NPU Core0 33%。**但 video_processor 整进程稳态 441% → ~370%**，剩余大头 = 5 路 RTSP 软解 + 捕获线程逐帧 JPEG 预编码（`processor.py:53`），不是推理 → 立 P2.1b。
-- **62 现状**：已切 `yolo.model: yolov8n_rknn_model` 常驻运行（config 备份 `.bak-pre-rknn-20260821`），模型入库 `yolov8n_rknn_model/`（含 README 导出命令）。
-- **未完成项**：① 5.6 实切来回验证；② ollama url 读 config（外放 Mac Studio 前置）；③ P2.1b 量化；④ 3588(.6) full 形态下装 lite2 + 切 rknn 模型（等用户切换窗口）。
+- **⚠️ 实况验证失败（13:10 发现，已回退）**：rknn 模型常驻 80 分钟内 781 次 `推理异常: cannot convert float NaN to integer`（本机摄像头 505 / 财务监控 194 / 分布式 73），**零有效检出**；bus.jpg 基准正常说明运行时链路通，问题在真实帧上 fp16 输出 NaN（疑点：USB 摄像头/RTSP 帧尺寸与 640 letterbox、fp16 溢出；下一步试 `int8=True` 量化导出 + 用真实帧做校准集、或固定 imgsz 预处理后再喂）。62 已回退 `yolov8n.pt`，异常归零。
+- **数字更正**：前面"441%→370%"是 `ps` 生命周期均值，不是瞬时值；回退 .pt 后 `top` 瞬时同样 ~610%，**整进程 CPU 在 .pt/rknn 间无可比数据**。可靠的只有隔离基准（106 vs 1167 ms/帧）。模型入库 `yolov8n_rknn_model/` 保留作 POC 产物，**未过验收，别部署到 5.6**。
+- **未完成项**：① 5.6 实切来回验证；② ollama url 读 config（外放 Mac Studio 前置）；③ rknn 实况 NaN 排查（int8 量化/真实帧校准）；④ P2.1b 量化（先做 ③ 之前别动）。
 - **下次接手所需上下文**：62 导出 venv `~/rknn-export-venv`、产物 `~/yolo-rknn/`；pgrep 自匹配坑又踩一次（等待循环的 pgrep 模式匹配到自身、永不退出），见 memory `ssh-pkill-self-match-trap`。
 
 
