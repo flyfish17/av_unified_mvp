@@ -321,7 +321,8 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 - **实测数字（62，1280×720，50 帧均值）**：CPU .pt 1167ms/帧·进程 CPU 246% → NPU **106ms/帧·112%**，检出 6 目标/类别一致；NPU Core0 33%。**但 video_processor 整进程稳态 441% → ~370%**，剩余大头 = 5 路 RTSP 软解 + 捕获线程逐帧 JPEG 预编码（`processor.py:53`），不是推理 → 立 P2.1b。
 - **⚠️ 实况验证失败（13:10 发现，已回退）**：rknn 模型常驻 80 分钟内 781 次 `推理异常: cannot convert float NaN to integer`（本机摄像头 505 / 财务监控 194 / 分布式 73），**零有效检出**；bus.jpg 基准正常说明运行时链路通，问题在真实帧上 fp16 输出 NaN（疑点：USB 摄像头/RTSP 帧尺寸与 640 letterbox、fp16 溢出；下一步试 `int8=True` 量化导出 + 用真实帧做校准集、或固定 imgsz 预处理后再喂）。62 已回退 `yolov8n.pt`，异常归零。
 - **数字更正**：前面"441%→370%"是 `ps` 生命周期均值，不是瞬时值；回退 .pt 后 `top` 瞬时同样 ~610%，**整进程 CPU 在 .pt/rknn 间无可比数据**。可靠的只有隔离基准（106 vs 1167 ms/帧）。模型入库 `yolov8n_rknn_model/` 保留作 POC 产物，**未过验收，别部署到 5.6**。
-- **未完成项**：① 5.6 实切来回验证；② ollama url 读 config（外放 Mac Studio 前置）；③ rknn 实况 NaN 排查（int8 量化/真实帧校准）；④ P2.1b 量化（先做 ③ 之前别动）。
+- **切换脚本补丁（用户实切暴露）**：切 full 后 `audio.source` 仍是 `net_multicast` → supervisor 去掉 audio_processor，全功能演示没有 C920 拾音。修：语音输入跟形态走（full=mic / meeting_asr=net_multicast），形态相同但 source 不符也执行，`--status` 显示语音输入与 USB 麦（commit b346df5）。**用户 8/21 在 5.6 实切验证完成**。
+- **未完成项**：① ollama url 读 config（外放 Mac Studio 前置）；② rknn 实况 NaN 排查（int8 量化/真实帧校准）；③ P2.1b 量化（先做 ② 之前别动）。
 - **下次接手所需上下文**：62 导出 venv `~/rknn-export-venv`、产物 `~/yolo-rknn/`；pgrep 自匹配坑又踩一次（等待循环的 pgrep 模式匹配到自身、永不退出），见 memory `ssh-pkill-self-match-trap`。
 
 
