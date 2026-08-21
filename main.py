@@ -35,6 +35,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent))
 
 from core.mqtt_bridge import MQTTBridge
+from core.transcript_store import TranscriptStore
 from core.profile import PROFILES, announce, recommend_profile, total_ram_gb
 
 logging.basicConfig(
@@ -135,6 +136,10 @@ class AVSupervisor:
 
         self.mqtt = MQTTBridge(self.cfg.get("mqtt", {}))
         self._web_push = lambda *_: None
+        # 转写留档（回流自 av_understanding_mac ab7e771）：final 逐条追加到 data/transcripts/<日期>.jsonl，
+        # 只追加不回改、逐条 flush；声纹结果到了按 segment_id 追加 update 行。崩溃/重启不丢当天转写。
+        self._tx_store = TranscriptStore(self._project_root / "data" / "transcripts")
+        self._tx_seg2id: dict = {}   # segment_id → store 事件 id（供 diarization 回填）
 
         # module → {proc, fail_count, retry_delay, next_retry, spawn_time}
         self._procs: dict = {}
@@ -403,11 +408,33 @@ class AVSupervisor:
     def _on_audio_diarization(self, topic: str, payload: dict):
         inner = payload.get("payload", payload)
         self._web_push("diarization", inner)
+        eid = self._tx_seg2id.get(inner.get("segment_id"))
+        if eid is not None and inner.get("speaker_id"):
+            self._tx_store.append_update(eid, {
+                "speaker_id": inner.get("speaker_id"),
+                "speaker_confidence": inner.get("speaker_confidence") or inner.get("confidence"),
+            })
 
     def _on_audio_command(self, topic: str, payload: dict):
-        """final 转写 → transcript SSE（与 partial 复用同 seq_id 气泡）"""
+        """final 转写 → transcript SSE（与 partial 复用同 seq_id 气泡）+ 留档"""
         inner = payload.get("payload", payload)
         self._web_push("transcript", inner)
+        if inner.get("is_final", True) and inner.get("text"):
+            ts = inner.get("ts")
+            eid = self._tx_store.append_text({
+                "time": time.strftime("%H:%M:%S", time.localtime(ts)) if ts else time.strftime("%H:%M:%S"),
+                "text": inner.get("text", ""),
+                "segment_id": inner.get("segment_id") or "",
+                # 会议主机路径：话筒身份随句落盘（physical_id/speaker）；本机麦路径由 diarization update 回填
+                "speaker_id": inner.get("speaker"),
+                "mic_id": inner.get("mic_id"),
+                "physical_id": inner.get("physical_id"),
+            })
+            if inner.get("segment_id"):
+                self._tx_seg2id[inner["segment_id"]] = eid
+                if len(self._tx_seg2id) > 2000:  # 只留最近的映射
+                    for k in list(self._tx_seg2id)[:1000]:
+                        self._tx_seg2id.pop(k, None)
 
     def _on_video_detect(self, topic: str, payload: dict):
         """BaseModule publish 后字段在顶层（header + camera/time/detections）"""

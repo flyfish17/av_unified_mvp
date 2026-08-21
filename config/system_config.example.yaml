@@ -27,7 +27,8 @@ audio:
     - 5
     chunk_interval: 10
     chunk_interval_ms: 60
-    hotwords: ''
+    hotwords: ''            # 额外热词 json {词:权重}；人名/术语请改 config/glossary.yaml（自动合并，config 优先）
+    ws_giveup_after_s: 120  # FunASR WS 连续断联多久才降级 local_offline（服务端崩溃自愈约 20s，别设太短）
     use_itn: true
     silence_duration_ms: 600
     silence_threshold: 0.012

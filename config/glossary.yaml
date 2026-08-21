@@ -1,0 +1,30 @@
+# 客户站点专有名词词表 —— 部署时由销售/实施工程师维护
+#
+# 用途：注入 FunASR runtime 的 hotwords（热词）接口，提升人名/产品名/术语的识别稳定性。
+#   现状硬伤：办公室实测人名归零（韩苏宁→韩淑宁/韩金鹏；李冰→李兵/李斌）。
+#   原理：hotwords 走 FunASR 内置 FST 加权，不改模型，重启即生效。
+#
+# 格式：每段下一行一个词，按重要性从上到下排（FST 词表不宜过长，重要的放前面）。
+#   权重统一用 default_weight（见 processor._GLOSSARY_DEFAULT_WEIGHT，当前 20），
+#   与官方 funasr_wss_client 示例「阿里巴巴 20」一致；无需在此写权重。
+#
+# 协议证据（重要）：hotwords 最终格式是 json.dumps({词: 权重}) 的 JSON 字符串，
+#   不是空格分隔串 —— 来源 funasr-2pass 容器内 funasr_wss_client.py:99。
+#
+# 客户隔离：一次部署对应一个客户，每客户单独维护本文件副本，不做多套切换。
+# 文件不存在 → 退回 system_config.yaml 里的 funasr.hotwords，行为不变（向后兼容）。
+
+people:        # 人名（最高优，硬伤集中区）
+  - 韩苏宁
+  - 李冰
+  - 张新文
+  - 杨明智
+
+products:      # 产品名 / 品牌
+  - Husion
+  - CREATOR
+
+terms:         # 行业术语
+  - 中控
+  - 分布式
+  - KVM

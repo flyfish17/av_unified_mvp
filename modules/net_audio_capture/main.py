@@ -19,6 +19,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from core.asr_glossary import apply_postprocess_rules, load_postproc_rules
 from core.base_module import BaseModule
 from modules.net_audio_capture.receiver import MicTranscriptEvent, UdpMicChannel
 from modules.net_audio_capture.recorder import SessionRecorder, start_export_http
@@ -72,6 +73,7 @@ class NetAudioCaptureModule(BaseModule):
         # 必须在 super().__init__ 之前设：BaseModule.__init__ 构造 LWT 时立即调
         # _discovery_payload，重写版会引用 self._channels（audio_processor 同款坑）
         self._channels: list[UdpMicChannel] = []
+        self._postproc_rules = load_postproc_rules()  # final 英文缩写还原（与 audio_processor 同一套规则）
         # audio.active_source（mic | net_multicast）：两路声源同配时开机只让一路转写，见 audio_processor 同款
         active = (cfg.get("audio") or {}).get("active_source")
         self.running = active in (None, "", "net_multicast")
@@ -177,6 +179,8 @@ class NetAudioCaptureModule(BaseModule):
     # ── transcript → MQTT（对齐 audio_processor funasr_2pass 路径的 topic 契约）──
 
     def _on_transcript(self, ev: MicTranscriptEvent) -> None:
+        if ev.is_final and self._postproc_rules:
+            ev.text = apply_postprocess_rules(ev.text, self._postproc_rules)
         # 发言人身份 = 包头物理话筒 ID（跟话筒实体走）。会议主机会动态重分配
         # "话筒→端口"（2026-08-20 实锤两话筒对调），端口路号 mic_id 只作传输
         # 通道，不再作命名 key；ID 未知（-1）才回退端口路号。

@@ -21,6 +21,8 @@ import numpy as np
 import scipy.signal as signal
 import sounddevice as sd
 
+from core.asr_glossary import apply_postprocess_rules, load_hotwords, load_postproc_rules
+
 logger = logging.getLogger(__name__)
 
 _TAG_RE = re.compile(r"<\|[^|]+\|>")
@@ -68,7 +70,9 @@ class AudioProcessor:
         self.chunk_size = list(funasr.get("chunk_size", [5, 10, 5]))
         self.chunk_interval = int(funasr.get("chunk_interval", 10))
         self.chunk_ms = int(funasr.get("chunk_interval_ms", 60))
-        self.hotwords = str(funasr.get("hotwords", ""))
+        self.hotwords = load_hotwords(str(funasr.get("hotwords", "")))  # + config/glossary.yaml 人名/术语热词
+        self.ws_giveup_after_s = float(funasr.get("ws_giveup_after_s", 120.0))  # WS 连续断联多久才降级 local_offline
+        self._postproc_rules = load_postproc_rules()                     # final 英文缩写还原规则
         self.use_itn = bool(funasr.get("use_itn", True))
         self._frame_samples = int(self.sample_rate * self.chunk_ms / 1000)
         self._send_q: "queue.Queue[Optional[bytes]]" = queue.Queue(maxsize=64)
@@ -342,22 +346,28 @@ class AudioProcessor:
             logger.error(f"FunASR asyncio 线程退出: {e}")
 
     async def _supervise_ws(self):
+        # 回流自 av_understanding_mac 1bfddfb：按"连续断联时长"而非次数决定放弃。
+        # FunASR 服务端 SIGSEGV 后容器/单元自动重启到就绪约 20s（Mac 7/06 core dump 定位），
+        # 原"5 次≈30s 放弃→永久降级 local_offline"必然错过恢复窗口（3588 启动脚本为此要"等 426"兜底）。
+        # 现在 ws_giveup_after_s（默认 120s）内无限重连，连上即重置计时。
         backoff = 1.0
-        attempts = 0
+        down_since: Optional[float] = None
         while not self._stop_event.is_set():
             try:
                 await self._ws_session()
                 backoff = 1.0
-                attempts = 0
+                down_since = None
             except Exception as e:
                 if self._stop_event.is_set():
                     return
-                attempts += 1
-                # 连续 5 次都连不上（≈30s），降级到本地离线，避免一直空转。
-                if attempts >= 5:
-                    self._fallback_to_local_offline(f"连续 {attempts} 次重连失败：{e}")
+                now = time.time()
+                if down_since is None:
+                    down_since = now
+                outage = now - down_since
+                if outage >= self.ws_giveup_after_s:
+                    self._fallback_to_local_offline(f"WS 持续 {int(outage)}s 不可用（最后错误：{e}）")
                     return
-                logger.warning(f"FunASR WS 异常: {e}，{backoff:.1f}s 后重连")
+                logger.warning(f"FunASR WS 异常: {e}，{backoff:.1f}s 后重连（已断联 {int(outage)}s / 放弃阈值 {int(self.ws_giveup_after_s)}s）")
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 10.0)
 
@@ -572,6 +582,8 @@ class AudioProcessor:
             logger.error(f"识别异常: {e}")
 
     def _emit(self, ev: TranscriptEvent):
+        if ev.is_final and self._postproc_rules:
+            ev.text = apply_postprocess_rules(ev.text, self._postproc_rules)
         if self._callback is None:
             return
         try:

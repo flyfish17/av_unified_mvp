@@ -259,6 +259,22 @@ def _mic_names_merged() -> dict:
     return base
 
 
+@_app.get("/api/transcript/today")
+def transcript_today():
+    """当天转写留档（data/transcripts/<日期>.jsonl 重放，含 diarization 回填）。
+    ?format=txt 给纯文本（一行一句，带时间与发言人），默认 JSON 列表。"""
+    from core.transcript_store import TranscriptStore
+    store = TranscriptStore(_PROJECT_ROOT / "data" / "transcripts")
+    entries = store.load_today()
+    if _flask.request.args.get("format") == "txt":
+        lines = []
+        for e in entries:
+            spk = e.get("speaker_id") or ""
+            lines.append(f"[{e.get('time','')}]{(' ' + spk + '：') if spk else ' '}{e.get('text','')}")
+        return _flask.Response("\n".join(lines) + "\n", mimetype="text/plain; charset=utf-8")
+    return {"date": store._today(), "count": len(entries), "entries": entries}
+
+
 @_app.get("/api/mic/names")
 def mic_names_get():
     """当前话筒命名表（合并层）。前端按此统一渲染显示名——SSE 重放的历史事件

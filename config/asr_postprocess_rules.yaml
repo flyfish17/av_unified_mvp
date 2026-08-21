@@ -1,0 +1,19 @@
+# 转写 final 输出前的规则替换表 —— 还原被 ASR 拆成字母的英文缩写
+#
+# 硬伤来源：办公室实测英文缩写全被拆字母
+#   iPad→「派ad / a pp」；HDMI→「hh的 mi」；USB→「u sb」；AI→「a i」；RAG→「r eg」
+#
+# 生效点：processor._emit() 内，仅当 is_final=True 时执行（partial 不替换，避免闪屏）。
+# 顺序敏感：先长后短（避免短词吃掉长词的子串，如 mini 先于 mi）。大小写敏感。
+# 只白名单高频缩写，不做通用英文识别。
+
+abbrev_restore:
+  # pattern 是 Python re 正则；replace 是目标写法。\s? 容忍 ASR 拆字母时的空格。
+  - { pattern: '[Hh]\s?[Dd]\s?[Mm]\s?[Ii]', replace: 'HDMI' }   # 先于单字母短词
+  - { pattern: 'hh?\s?的\s?[Mm][Ii]',         replace: 'HDMI' }   # 「hh的mi」变体
+  - { pattern: '派\s?[Aa]d',                  replace: 'iPad' }
+  - { pattern: '[Uu]\s?[Ss]\s?[Bb]',          replace: 'USB' }
+  - { pattern: '[Mm]\s?[Ii]\s?[Nn]\s?[Ii]',   replace: 'mini' }   # 先于 mi/AI
+  - { pattern: '[Rr]\s?[Aa]?\s?[Ee]?\s?[Gg]', replace: 'RAG' }    # r eg / r a g
+  - { pattern: '[Aa]\s?[Pp]\s?[Pp]',          replace: 'app' }
+  - { pattern: '[Aa]\s?[Ii](?![A-Za-z])',     replace: 'AI' }     # 末尾负向断言，别吃 air 等

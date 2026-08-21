@@ -25,6 +25,7 @@ from typing import Callable, Optional
 
 import numpy as np
 import scipy.signal as signal
+from core.asr_glossary import load_hotwords
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ class FunASRSession:
         self.url = funasr_cfg.get("url", "ws://127.0.0.1:10095")
         self.chunk_size = list(funasr_cfg.get("chunk_size", [5, 10, 5]))
         self.chunk_interval = int(funasr_cfg.get("chunk_interval", 10))
-        self.hotwords = str(funasr_cfg.get("hotwords", ""))
+        self.hotwords = load_hotwords(str(funasr_cfg.get("hotwords", "")))  # + config/glossary.yaml
         self.use_itn = bool(funasr_cfg.get("use_itn", True))
         self._callback = callback
         self._send_q: "queue.Queue[Optional[bytes]]" = queue.Queue(maxsize=128)
