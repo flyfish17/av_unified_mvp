@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=CREATOR-ASR Boot Info
+Comment=HDMI 显示纪要机本机 IP 与服务状态
+Exec=xterm -fa Monospace -fs 26 -bg black -fg green -fullscreen -e /usr/local/bin/creator-asr-hdmi-info.sh
+X-GNOME-Autostart-enabled=true
