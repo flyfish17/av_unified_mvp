@@ -154,8 +154,8 @@
 | ① | **246 HA 上总线**：HA MQTT Statestream → 我方 broker；反向 HA REST 控制节点 | 需 246 HA 登录（李楠）；**62 broker 现只监听回环**，开网段监听需你执行（命令见 §9 8/22）| 1.5h | ⏳ 两个外部前置：HA 登录 + broker 开监听 |
 | ② | **面板在线/离线** | 事实源改为 `creator/device/discovery/+`（retain，含 ip/online）；面板设备无独立 IP，粒度=主机 .20 / PDU .21 | 半天 | ✅ 8/22 |
 | ③ | **真状态回读** `modules/device_state`：空调 Modbus 03 只读 → `av/device/state/<key>` retain；面板 ac 行按真状态亮/显温度模式，读不到显"状态未知" | 代码+协议单测+面板联动 ✅；**真机待 211 网关恢复可达**（8/22 62/Mac 均 ping 不通）；继电器查询帧待抓样本 | 1–2 天 | 🟡 8/22 软件侧完成，等 211 |
-| ④ | **OBS 字幕路**：`/bigscreen?overlay=1` + OBS 浏览器源 → HDMI 进分布式 TX | 随演示环境 P0 上屏 | 1 天 | ⏳ |
-| ⑤ | **湖森 `/api/wall/subtitle` 抓样本** → 通则 husion_distributed 加辅模式 | 62 现场抓包 | 1 天 | ⏳ |
+| ④ | **OBS 字幕路**：`/bigscreen?overlay=1&lines=N` 透明底/无顶栏/最近 N 段贴底（62 已部署，截图 alpha=0 验证）；OBS 端配置随演示环境 P0 上屏时做 | 页面侧 ✅ 8/22 | 1 天 | 🟡 页面完成，OBS 待上屏 |
+| ⑤ | **湖森字幕接口** | 8/22 核实：主机已迁 **.64**（62 config 原 .253 已改）；当前固件 web bundle **无字幕页面**（i18n 有 `subtitle_*` 文案、零组件引用、无 API 调用），5/14 索引的 `/api/wall/subtitle` 不在此版前端。剩余路径：hscmd TCP 字幕指令（PDF）或问湖森 | 1 天 | ⛔ REST 路不通，转 hscmd/厂家 |
 | ⑥ | **Light-ASD POC**：62 跑 demo 验帧率 → yolov8n-face rknn → `av/audio/visual_speaker` → 前端与声纹合并 | 等会议室机位；先验算力 | 2–3 天 | ⏳ |
 | 可选 | DeepFilterNet 降噪 A/B（C920 远场） | 62 录音 | 半天 | ⏳ |
 
@@ -200,6 +200,8 @@
 - **阶段三核实文档** `docs/探讨-跨模块跨系统信息共享-20260822.md`：246 = Debian + Home Assistant（:8123，李楠经 HA 接绿米）；62/5.6 broker 上 `creator/telemetry/*` 已与 `av/*` 同总线；空调 Modbus 03 查询帧、继电器 CR-POWER8-SPM 查询帧均已在 creator_cc 实测；Light-ASD（1.0M 参数）为视频辅助发言人候选。
 - **① 前置核实**：62 mosquitto 2.0.11 只监听 127.0.0.1（无 conf.d 规则）。HA 要发进来需 `/etc/mosquitto/conf.d/lan.conf`：`listener 1883 0.0.0.0` + `allow_anonymous true`（内网演示；回滚=删文件重启 mosquitto），模块有自动重连、重启 broker 无需重启 av-demo。**开匿名网段监听被权限分类器拦，留用户执行**。
 - **③ 真状态回读（软件侧完成，等真机）**：新模块 `modules/device_state/`（`modbus_ac.py` 纯协议：CRC16/查询帧/回包解析，只含功能码 03 读；`main.py` 10s 串行轮询 4 台 → `av/device/state/<key>` retain，读失败也发 `ok:false`）。`tests/test_modbus_ac.py` 8 过：**查询帧与 creator_cc 8/18 现场实测帧逐字节一致**（CRC 实现对上实物），假网关端到端。supervisor 按 `device_state.enabled` 拉起，expected_modules 两脚本同步。Node-RED：mqtt-in `av/device/state/+` → function（解 BaseModule 双层信封）→ 面板 `real{}`：ac 行按真状态亮、旁标 `21℃ · 制冷`，读不到显"状态未知"、真状态行 ico 加绿环。62 验证：module 对 211 轮询 → 4 台 `ok:false` → 面板四台"状态未知"；mosquitto_pub 模拟一条好状态 → "21℃ · 制冷"+亮（已清）。**211（USR-TCP232 空调网关）今日 62/Mac 均 ping 不通（8/18 通），真机验证等它回来**；继电器 CR-POWER8-SPM 查询帧待抓样本后加到同模块。62 现 14 模块含 device_state 常驻（轮询失败只记一次变化，不刷日志）。
+- **④ 字幕叠加页**：`/bigscreen?overlay=1&lines=N`（`html.overlay` 透明底、隐顶栏/待机层、`#flow` 贴底只留 N 段、半透明底框+文字描影）。62 部署后 Playwright `omit_background` 截图角点 alpha=0、段数=2、贴底 692/720。OBS 浏览器源直接用此 URL 叠在视频上。
+- **⑤ 湖森字幕**：`.253` 无路由→ 湖森 HDC910 主机实际在 **.64**（:80/:6000 通），62 `husion.host` 改 .64（此前 husion_distributed 一直 poll 失败）。拉取 app.js（6.7MB，需 Referer）静态分析：`subtitle` 88 处全是 3 语言包文案 + 图标，**无组件引用、无 `/api/wall/subtitle` 调用**——当前固件 web 不提供字幕功能。REST 路判死；hscmd TCP 字幕指令需厂家 PDF 样本。
 - **② 面板在线/离线（62 Node-RED）**：校正事实——面板灯/窗帘/空调全部经 `fire('m')` 发给中控主机 .20，单灯无 IP，"在线"粒度只能到主机 .20 与 PDU .21。实现：mqtt-in `creator/device/discovery/+`（ping_collector retain 公告，含 ip/online）→ function 汇 `{online:{ip:bool}}` → 喂 `中控面板` ui-template（`watch: msg`）。头部"主机 .20 在线/离线"标、主机离线整面板锁定+横幅、PDU .21 离线 LED 行灰。Playwright 模拟 retain 翻转验证：锁定/PDU 灰/恢复解锁全对；flows 快照回仓。单灯真状态留给 ③。
 ### 2026-08-18 — 门禁联动模块 door_access 落地（公司大门云眸远程开门）
 - **本次推进**：新增 `modules/door_access/`（云眸 token 缓存刷新 + 远程开门 + 门口 person 检测去抖 → av/door/visitor）；supervisor 按 `door_access.enabled` 条件拉起并桥接 door SSE channel；dashboard 右上角访客弹窗（开门按钮 + 结果状态行）；配置样例入 example yaml
