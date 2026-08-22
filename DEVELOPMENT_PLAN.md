@@ -152,7 +152,7 @@
 | # | 任务 | 前置 / 边界 | 量 | 状态 |
 |---|---|---|---|---|
 | ① | **246 HA 上总线**：HA MQTT Statestream → 我方 broker；反向 HA REST 控制节点 | 需 246 HA 登录（李楠）；broker 监听非回环要核 | 1.5h | ⏳ 不等登录的部分先做 |
-| ② | **面板在线/离线**：Node-RED 订 `creator/telemetry/+/online`，面板行按 online 灰/亮 | 只用已有遥测 | 半天 | ⏳ |
+| ② | **面板在线/离线** | 事实源改为 `creator/device/discovery/+`（retain，含 ip/online）；面板设备无独立 IP，粒度=主机 .20 / PDU .21 | 半天 | ✅ 8/22 |
 | ③ | **真状态回读** `state_poller`：空调 Modbus 03 → 继电器 CR-POWER8-SPM 查询帧 → `creator/state/<device>`；面板只反映 state | 只读帧、≤5s 轮询；放 creator_om 或 creator_cc 定一处 | 1–2 天 | ⏳ |
 | ④ | **OBS 字幕路**：`/bigscreen?overlay=1` + OBS 浏览器源 → HDMI 进分布式 TX | 随演示环境 P0 上屏 | 1 天 | ⏳ |
 | ⑤ | **湖森 `/api/wall/subtitle` 抓样本** → 通则 husion_distributed 加辅模式 | 62 现场抓包 | 1 天 | ⏳ |
@@ -195,6 +195,10 @@
 
 ## 9. 进度日志（8 月起；更早见 `ARCHIVE_2026Q2.md`）
 
+### 2026-08-22 — 阶段三立项 + 开发文件梳理 + ② 面板在线态
+- **开发文件整体梳理**：5 月期 §3.2 路线/§6/§7 看板/5 月日志归档到 `ARCHIVE_2026Q2.md`；§0/§2/§3/§6 按现状重写；§5 topic 表补全（segment/diarization/cmd/creator 遥测/规划 topic）；§7 换成阶段三看板。
+- **阶段三核实文档** `docs/探讨-跨模块跨系统信息共享-20260822.md`：246 = Debian + Home Assistant（:8123，李楠经 HA 接绿米）；62/5.6 broker 上 `creator/telemetry/*` 已与 `av/*` 同总线；空调 Modbus 03 查询帧、继电器 CR-POWER8-SPM 查询帧均已在 creator_cc 实测；Light-ASD（1.0M 参数）为视频辅助发言人候选。
+- **② 面板在线/离线（62 Node-RED）**：校正事实——面板灯/窗帘/空调全部经 `fire('m')` 发给中控主机 .20，单灯无 IP，"在线"粒度只能到主机 .20 与 PDU .21。实现：mqtt-in `creator/device/discovery/+`（ping_collector retain 公告，含 ip/online）→ function 汇 `{online:{ip:bool}}` → 喂 `中控面板` ui-template（`watch: msg`）。头部"主机 .20 在线/离线"标、主机离线整面板锁定+横幅、PDU .21 离线 LED 行灰。Playwright 模拟 retain 翻转验证：锁定/PDU 灰/恢复解锁全对；flows 快照回仓。单灯真状态留给 ③。
 ### 2026-08-18 — 门禁联动模块 door_access 落地（公司大门云眸远程开门）
 - **本次推进**：新增 `modules/door_access/`（云眸 token 缓存刷新 + 远程开门 + 门口 person 检测去抖 → av/door/visitor）；supervisor 按 `door_access.enabled` 条件拉起并桥接 door SSE channel；dashboard 右上角访客弹窗（开门按钮 + 结果状态行）；配置样例入 example yaml
 - **前置验证**（当日实测）：云眸 4 接口全链路通（token 7 天 / 事件查询 / 远程开门真开门，事件码 5/75 人脸过、5/21 开、5/22 关、3/1024 远程开、3/1029 心跳）；设备 E51574183 已绑 flyfish 账号；内网 ISAPI 备选路线卡在 isActivated=false + 无 admin 密码（192.168.2.88，DHCP 需改静态）
