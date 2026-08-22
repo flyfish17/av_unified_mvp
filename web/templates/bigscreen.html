@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN"{% if overlay %} class="overlay"{% endif %}>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -103,9 +103,24 @@
       0%, 100% { opacity: .35; }
       50%      { opacity: 1; }
     }
+    /* ── 字幕叠加模式（?overlay=1）：OBS 浏览器源叠在视频上 ── */
+    html.overlay, html.overlay body { background: transparent; }
+    body.overlay header, body.overlay #standby { display: none; }
+    body.overlay #flow {
+      position: fixed; left: 0; right: 0; bottom: 0; top: auto; height: auto;
+      padding: 0 4vw 3vh; overflow: hidden;
+      display: flex; flex-direction: column; justify-content: flex-end;
+    }
+    body.overlay .tx-para {
+      margin: 0 0 .4em; padding: .2em .6em; border: 0;
+      background: rgba(0,0,0,.55); border-radius: .25em;
+      text-shadow: 0 0 6px #000, 0 2px 4px #000;
+    }
+    body.overlay .tx-para .tx-meta { display: inline; margin-right: .5em; font-size: .7em; }
+    body.overlay .tx-para .tx-ts { display: none; }
   </style>
 </head>
-<body class="standby">
+<body class="standby{% if overlay %} overlay{% endif %}" data-overlay-lines="{{ overlay_lines|default(2) }}">
   <header>
     <div class="brand"><span class="conn-dot" id="conn"></span>{{ brand.name }} AI 实时转写</div>
     <div class="clock"><span class="date" id="date"></span><span class="time" id="time"></span></div>
@@ -123,7 +138,9 @@
     const PARA_ENDS_PUNCT = /[。！？!?]\s*$/;
     const MIC_COLORS = ["#e6a23c", "#4fc3f7", "#81c784", "#f48fb1",
                         "#ba68c8", "#ffd54f", "#4db6ac", "#ff8a65"];
-    const MAX_PARAS = 50;         // DOM 段落上限（超出移除最旧）
+    // 叠加模式只留最近 N 段（?lines=，默认 2）；全屏模式 50
+    const MAX_PARAS = document.body.classList.contains("overlay")
+      ? (parseInt(document.body.dataset.overlayLines, 10) || 2) : 50;
     const IDLE_MS   = 120000;     // 无新内容 2 分钟进入待机态
 
     const flow = document.getElementById("flow");

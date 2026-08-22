@@ -379,7 +379,14 @@ def index_bigscreen():
     """全屏转写大屏（底座线 R1c，公司演示环境 P0）：百寸电视纯展示面。
     数据复用 /events/transcript SSE + /api/mic/names 命名表，零新增后端逻辑；
     页面自包含（样式/JS 内联），不依赖 dashboard.js。"""
-    return _flask.render_template("bigscreen.html", brand=_brand())
+    # ?overlay=1 → 字幕叠加模式（阶段三 ④）：透明底、无顶栏、只显最近 N 段（?lines=2）贴底，
+    # 给 OBS 浏览器源叠在任意视频上 → HDMI/NDI 进分布式当一路信号源，品牌无关、不碰厂家 OSD 协议。
+    overlay = _flask.request.args.get("overlay") in ("1", "true", "yes")
+    try:
+        lines = max(1, min(6, int(_flask.request.args.get("lines", "2"))))
+    except ValueError:
+        lines = 2
+    return _flask.render_template("bigscreen.html", brand=_brand(), overlay=overlay, overlay_lines=lines)
 
 
 def _make_sse(channel: str):
