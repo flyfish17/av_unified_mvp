@@ -134,6 +134,10 @@ class AVSupervisor:
         if self.cfg.get("speaker_diarizer", {}).get("enabled"):
             self._managed_modules.append("modules.speaker_diarizer.main")
 
+        # 设备真状态回读（阶段三 ③）：空调 Modbus 只读轮询 → av/device/state/<key> retain；配置 device_state.enabled 才起
+        if self.cfg.get("device_state", {}).get("enabled"):
+            self._managed_modules.append("modules.device_state.main")
+
         self.mqtt = MQTTBridge(self.cfg.get("mqtt", {}))
         self._web_push = lambda *_: None
         # 转写留档（回流自 av_understanding_mac ab7e771）：final 逐条追加到 data/transcripts/<日期>.jsonl，

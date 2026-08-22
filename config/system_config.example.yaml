@@ -160,3 +160,12 @@ brand:
   name: CREATOR
   product: AI 视听理解平台
   logo: ""
+
+# ── 设备真状态回读（阶段三 ③）── 只读轮询真设备，发 av/device/state/<key>（retain），面板只反映 state 不自翻转
+# 当前：中央空调 ×4，Modbus RTU over TCP 经 USR-TCP232-304（协议事实源 creator_cc/docs/空调控制-协议记录.md）
+# 只发功能码 03 读帧，不含任何写；写仍在 creator_cc 的 live 开关后面。
+device_state:
+  enabled: false
+  interval: 10                      # 秒，整轮周期（4 台串行，RS485 半双工）
+  ac_gateway: { host: 192.168.5.211, port: 82 }
+  # ac 不填 = 公司演示环境 4 台默认表（key 与 Node-RED 面板 p 前缀一致）
