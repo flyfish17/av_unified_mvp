@@ -8,7 +8,8 @@
 
 # av_unified_mvp 开发计划
 
-> 历史回合见 `ARCHIVE_2026Q2.md` · 踩坑教训 `LESSONS_LEARNED.md` · Jetson 角色 `JETSON_FINAL_20260515.md` · 接续指南 `~/.claude/plans/morning-resume-20260515-md-functional-quail.md`
+> 历史回合见 `ARCHIVE_2026Q2.md` · 踩坑教训 `LESSONS_LEARNED.md` · **每次开工先读 `docs/DECISIONS.md`**（主 Claude↔终端决策同步点）· 两线对照 `docs/回流表-Mac线与3588线-20260821.md`
+> 2026-08-22 整体梳理：5 月期的阶段二路线/看板/日志已归档，本文只保留当前有效内容。
 
 ---
 
@@ -16,21 +17,16 @@
 
 | 项 | 值 |
 |---|---|
-| **当前阶段** | **阶段二 · 3588 主线落地**（5/18 启动）|
-| **当前主线** | 语音模块产品化（A 层 · 单机自洽） |
-| **阶段一固化** | Git tag `v1.0-stage1-mac-validated`（Mac 验证解耦订阅制完成）|
-| **销售获取** | `git checkout v1.0-stage1-mac-validated` → `./start.command`（>16GB Mac 即可）|
-| **当前 sprint branch** | `sprint/liaohe-3588-night-poc-20260511` |
-| **3588 边缘机** | `firefly@192.168.5.6`，仓库 `/home/firefly/av_unified_mvp/`，venv `/home/firefly/creator_ai_demo/venv/`（共享不动）|
-| **Mac mini .193** | `openclawMiniOld`，跑 escalate llm_engine 兜底（B 层多机协同雏形）|
-| **Jetson `.51`** | **独立支线**（视频深思 + 验证 CUDA 语音）；无 SSH，走 MQTT；单独 Claude 窗口 → `docs/handoffs/jetson-side-window-prompt.md` |
-| **Dashboard** | `http://192.168.5.6:5050` |
-| **下一步** | 见 §7.18 当前 sprint 看板 |
+| **仓库** | 3588 线 = 本仓（**只有 main**，形态分支已退役为 `archive/*` tag）；Mac 线 = 独立仓 `flyfish17/av_understanding_mac`（两线对照见回流表） |
+| **5.6 firefly** | **纪要产品机**（交总部测试）：`app_profile: meeting_asr` + `audio.source: net_multicast`（会议主机 8 路组播，话筒号分发言人），6 模块；`/home/firefly/av_unified_mvp`，systemd `av-demo`；刷版本 = `git archive main` rsync（不碰 config/node-red/data）+ SIGKILL 安全重启 |
+| **62 proembed** | **研发机 + 湖森视听 demo**：`full` + C920 单麦 + 单路视频 + NPU YOLO + 声纹发言人 + `brand: Husion湖森`；13 模块；`scripts/deploy-62.sh` 一键刷 HEAD |
+| **Mac Studio** | 研发/高算力；Mac 线演示跑 av_understanding_mac |
+| **形态切换** | `scripts/switch-profile.sh meeting_asr|full|--status`（重启切；语音输入随形态 C920/组播） |
+| **界面差异** | 全是开关/配置：☰ 导航、布局弹窗、视频墙单路/四分屏（与转写互斥）、声源下拉、`brand:`；**profile 只管起哪些模块** |
+| **入口** | `http://<ip>:5050`；全屏转写 `/bigscreen`；留档 `/api/transcript/today` |
+| **下一步** | §7 当前看板（阶段三 跨系统信息共享 ①-⑥ + 遗留） |
 
-**5 分钟接手三步**：
-1. 读本文 §1 + §3 + §7.18
-2. 看 `LESSONS_LEARNED.md` 已知坑
-3. 接续读 `~/.claude/plans/morning-resume-20260515-md-functional-quail.md`
+**接手三步**：读 `docs/DECISIONS.md` → 本文 §7 → `LESSONS_LEARNED.md`。
 
 ---
 
@@ -48,78 +44,31 @@
 
 ---
 
-## 2. 硬件矩阵（5/15 修订）
+## 2. 硬件矩阵（8/22 修订）
 
-| 硬件 | 场景定位 | 当前状态 |
+| 硬件 | 定位 | 状态 |
 |---|---|---|
-| **Mac / Mac mini** | 阶段一固化机 / escalate 兜底（.193）| ✅ stage1 tag |
-| **RK3588** | **阶段二主推**（涉密 / 国产化 / 一体机演示主力）| ✅ supervisor 11 模块稳定 |
-| **Jetson Orin Nano** | **独立支线** — 视频深思 + CUDA 语音验证 | ⏸ 主线不投，支线持续 |
+| **RK3588 `.6`** | 纪要产品机（CR-DIG7201-A），总部测试 | ✅ meeting_asr 常驻；等正确会议主机后真机组播验收 |
+| **RK3588 EVB `.62`（湖森 DNC）** | 研发机 + 湖森视听 demo | ✅ full，新功能在此验 |
+| **Mac Studio M3U** | 高算力/研发；可作纪要外放目标（`llm.summary.url` 热读） | ✅ |
+| **MacBook Pro M1Pro** | 轻量短会/验证 | — |
+| **Jetson `.51`** | 独立支线（视频深思），主线不投 | ⏸ |
+| **246 Debian + Home Assistant** | 绿米 Aqara 家居网关（李楠接通），待上总线 | ⏳ 本线 ① |
+| **109/3576 creator_cc** | 中控替代盒（另仓）；空调 Modbus 双向、继电器查询帧已实测 | 供本线 ③ 回读 |
 
-**硬件选型决策原则**：客户场景定，不预设。涉密走 3588，要 VLM 多路走 Mac mini，省钱走 Mac mini。**三套都跑同一份 av_unified_mvp 代码**，差异通过 env / config 切。
+**约束**：3588 NPU IOVA ~4GB（多 LLM 只能外放/串行）；full 形态多路视频与纪要互斥（单路可并行，62 实测 video_processor 48.7% CPU）。同一份代码跑所有机，差异全在 config。
 
 ---
 
-## 3. 两阶段开发框架
+## 3. 阶段框架
 
-### 3.1 阶段一 ✅ 已完成（Mac 验证解耦订阅制）
-
-- **固化形式**：Git tag `v1.0-stage1-mac-validated`（在 commit `5626b0c` 之上打）
-- **销售部署**：`git checkout v1.0-stage1-mac-validated` → `./start.command`（>16GB Mac 即可）
-- **交付物清单**：
-  - 解耦订阅式架构（MQTT 总线 + supervisor + R1-R6 演进完成）
-  - 10 模块独立可运行（audio / video / llm / keyframe / openvocab / husion / control / system_info / network_info / network_scanner）
-  - Node-RED 编排（121 节点 5 tabs，含 `av/control → creator :8932` 桥）
-  - Dashboard + 转写卡 + 纪要 + husion 5 场景一键演示
-  - 销售材料 3 份（`docs/sales/`）
-  - Mac mini .193 escalate 兜底（B 层多机协同雏形）
-- **历史 Subagent 报告**：`docs/reports/2026-05/`（5/11-5/14 共 16 份）
-- **历史接续文档**：`docs/handoffs/`（5/11-5/15 共 6 份 HANDOFF + RESUME）
-
-### 3.2 阶段二 🔵 当前（3588 主线落地，语音模块产品化）
-
-User 5/18 定调：「**当下代码作用发挥到最大并固化，找合适方式精进，不大拆大改**」
-
-**前置 gating**：✅ 已完成 — GitHub 调研报告 `docs/research/asr-punctuation-diarization-20260518.md`
-
-**P0.7 拍板结论（5/18 user 选）**：**新中间路径**（既非原路径 1 mock 版，也非路径 2 大改版）
-
-| 维度 | 路径 1 原 mock | **✅ 新中间路径（拍板）** | 路径 2 大改 |
-|---|---|---|---|
-| 工时 | ~1d | **1.5-2d**（含 spike）| 5-8d |
-| 标点 | LLM 后处理（云依赖） | **ct-punc int8 ONNX**（CPU 14ms / 句，离线） | 模型原生 ITN |
-| 说话人 | silero-vad 顺序编号（一眼假） | **silero-vad + CAM++ ONNX embedding 段级聚类**（DER ~20%，真聚类）| pyannote 真 online（DER 13%）|
-| 真 partial | ❌ | ❌（保留 sensevoice 不动）| ✅ paraformer-streaming 600ms |
-| 撞 video CPU 红线 | 0 | 0（新增组件全 CPU ms 级 ONNX）| 高（叠 pyannote 几乎必爆）|
-| 升级路径 | 必拆 | **平滑**（同在 sherpa-onnx 生态）| 已到顶 |
-| ASR 模型变动 | 无 | **不动 sensevoice RKNN** | 必换 paraformer |
-
-**新中间路径技术栈**：sherpa-onnx 1.13.2 (Apache-2.0) 一站式封装；新增 2 个独立 MQTT module（`punctuator/` + `speaker_tagger/`），audio_processor 零重构。
-
-**P0.9 spike gating（立项前置）**：CAM++ ONNX 在 3588 大核 CPU 实测延迟无文档数据，**必须先 spike**。spike 任务：在 3588 跑 ct-punc int8（预期 < 30ms）+ CAM++ + sklearn 聚类对 60s 双人对话压测，看 CPU% / 段延迟 / DER 主观感受。过线才正式起 module。结果 → `docs/research/spike-campp-ctpunc-3588-20260518.md`。
-
-**必备能力达成度（新路径下）**：
-
-| 能力 | 当前 | 新路径达成度 | 真大改才能升级 |
-|---|---|---|---|
-| **逐字 partial** | ❌ | ❌（推迟到阶段三换 paraformer-streaming，平滑过渡）| 换 ASR 模型 |
-| **标点** | ❌ | ✅ ct-punc 本地 ONNX（F1 工业级）| — |
-| **整句修正** | ❌ | ⚠️ 暂不实现（依赖 partial → final 重判路径）| 接 paraformer streaming |
-| **纪要** | ✅ 已有 | ✅ UI 提示 + 带标点显示 | — |
-| **说话人初步**（可编辑）| ❌ | ✅ 段级真聚类（不是 mock）| 上 pyannote 升 13% DER |
-
-### 3.3 后期规划（只技术储备，不实施）
-
-- **双工对讲 + 语意执行**（边听边说）— GitHub 持续关注（pipecat / livekit / nemo agent toolkit 等）
-- **知识库 + 问答** — 另立项目，**不在 av_unified_mvp**
-
-### 3.4 Jetson 支线（独立工作流）
-
-- **独立 Claude 窗口** + system prompt：`docs/handoffs/jetson-side-window-prompt.md`
-- 主任务：
-  1. 视频深思持续观察（偶发单路场景描述，无新投入）
-  2. **验证 Jetson CUDA 上语音模块运转** — user 记得效果不错，需出报告
-- 不污染主线 sprint branch；结果回报到 `docs/reports/2026-06+/`
+### 3.1 阶段一 ✅ Mac 验证解耦订阅制（tag `v1.0-stage1-mac-validated`）
+### 3.2 阶段二 ✅ 3588 主线落地（5/18–8/21）
+已落地：FunASR 2pass 实时转写（3588 docker / 62 脱 docker rootfs）· 纪要分段合并（ollama / rkllm NPU 1.7B，2 万字 8.9min）· 发言人两路（会议主机话筒号 / CAM++ 声纹，前端同构、可改名）· 全音频落盘导出 · 人名热词 + 缩写还原 · 转写 JSONL 留档 · ws 断联自愈 · `app_profile` + 一键切换 · 视频墙单路/四分屏互斥 · YOLO NPU（DFL fp16 溢出已修）· HDMI 开机信息屏 · 品牌配置化 · 门禁联动。5/18 的"新中间路径"规划已被实际落地取代，原文归档。
+### 3.3 阶段三 🔵 当前：跨模块 / 跨系统信息共享（8/22 立）
+把总线上已有的数据互相喂、把孤岛（Node-RED 真状态、246 HA）接上总线。核实与接法见 `docs/探讨-跨模块跨系统信息共享-20260822.md`，看板见 §7。
+### 3.4 只储备不实施
+双工对讲 · 知识库问答（另立项目）· 实时翻译（等涉外客户）· `video_analysis` profile（等样机，先验算力）。
 
 ---
 
@@ -154,9 +103,19 @@ User 5/18 定调：「**当下代码作用发挥到最大并固化，找合适�
 | `av/video/scene_analysis` | scene_analyzer (Jetson) | dashboard | VLM 场景描述 |
 | `av/video/openvocab` | openvocab_filter | dashboard | `hits[{class, conf}]` |
 | `av/llm/event` | llm_engine | Node-RED/web | `event_type, original_text, intent, command` |
-| `av/llm/escalate` | 3588 llm_engine | Jetson + Mac mini .193 | escalate 兜底 |
+| `av/llm/escalate` | 3588 llm_engine | 外放机 | escalate 兜底（雏形）|
 | `av/control` | Node-RED/llm_engine/web 按钮 | control_dispatcher / Node-RED `av/control (P0)` mqtt-in | `target, action, params` |
 | `av/control/dispatched` | control_dispatcher | web | 执行结果回传 |
+| `av/audio/command_punctuated` | audio_processor(2pass) / net_audio_capture / punctuator | supervisor→SSE transcript、留档 | `text, seq_id, ts, segment_id`；组播路径另有 `mic_id/physical_id/speaker` |
+| `av/audio/segment` | audio_processor（`speaker_diarizer.enabled`）| speaker_diarizer | `segment_id, audio_uri(file://), start_ms, end_ms` |
+| `av/audio/diarization` | speaker_diarizer | supervisor→SSE diarization、留档 update | `segment_id, speaker_id(S<n>), confidence` |
+| `av/audio/cmd` / `av/audio/net_cmd` | dashboard | audio_processor / net_audio_capture | `action: enable/disable`（声源切换）；net_cmd 另有 `cmd: set_mic_names` |
+| `av/video/cmd/<名>` | dashboard `/camera/<名>/enable|disable` | video_processor | 单路启停 |
+| `av/door/visitor` / `av/door/result` | door_access | web | 访客弹窗 / 开门结果 |
+| `creator/telemetry/<deviceId>/<prop>` | **creator_om** collectors（同一 broker） | alerting；本线 ② Node-RED | `header{source}, value, status, ts` |
+| （规划）`creator/state/<device>` | 本线 ③ state_poller | Node-RED 面板 / 语音 / 告警 | 真状态回读 |
+| （规划）`homeassistant/<domain>/<entity>/state` | 246 HA MQTT Statestream | 三方 | 本线 ① |
+| （规划）`av/audio/visual_speaker` | av_speaker_locator（Light-ASD） | 前端与声纹合并 | 本线 ⑥ |
 
 ### 公告 / 系统
 
@@ -171,60 +130,36 @@ User 5/18 定调：「**当下代码作用发挥到最大并固化，找合适�
 
 ---
 
-## 6. 语音模块能力实测（5/18 更新）
+## 6. 语音链路能力现状（8/22）
 
-| 能力 | Mac 端 | 3588 端 | 真实状态 |
-|---|---|---|---|
-| 转写 final | ✅ sensevoice | ✅ sensevoice RKNN | 工作正常 |
-| 逐字 partial | ❌ | ❌ | 模型本身不出 |
-| 标点（ITN）| ❌ | ❌ | 两端都 fallback 到 sensevoice（FunASR 2pass docker 未启）|
-| 整句修正 | ❌ | ❌ | 代码无任何 mode 实现 |
-| 纪要生成 | ✅ | ✅ | `web/server.py:286+` + `summaries/` 4 份 |
-| 多说话人 | ❌ | ❌ | 未接 SOND/cam++/pyannote |
-| LLM 意图 | ✅ qwen3.5:4b | ✅ NPU 1.5B + escalate 兜底 | 工作 |
-| 控制下发 | ✅ | ✅ | `av/control → Node-RED → creator :8932` |
-| Husion 5 场景 | ✅ | ✅ | dispatcher 内 husion REST adapter |
+| 能力 | 3588 线 | 备注 |
+|---|---|---|
+| 实时转写（partial + final，带标点）| ✅ FunASR 2pass ws | 单麦 / 8 路组播两路 |
+| 发言人 · 话筒号 | ✅ physical_id + 命名表 + 就地改名 | 会议主机形态 |
+| 发言人 · 声纹 | ✅ CAM++ 逐句嵌入 + 在线聚类，晚到切段，可改名 | 单麦形态；**C920 近讲两人实测待做** |
+| 人名/术语热词、缩写还原 | ✅ `config/glossary.yaml` / `asr_postprocess_rules.yaml` | 两路共用 |
+| 纪要 | ✅ 分段→合并，ollama / rkllm NPU | 外放：rkllm url 热读；ollama url 硬编码（遗留①）|
+| 留档 | ✅ `data/transcripts/<日期>.jsonl` + `/api/transcript/today` | alias 同文件 |
+| 原音导出 | ✅ `:5052`（mic / 组播 recorder）| |
+| 视频辅助发言人 | ⏳ 本线 ⑥ | |
 
 ---
 
-## 7. Sprint 看板
+## 7. 当前看板（7.22 · 阶段三 跨系统信息共享）
 
-### 7.15 历史看板（5/15，全部 ✅）
+> 每项做完在本表打勾并在 §9 记一条；阶段汇报按 ①②③ / ④⑤ / ⑥ 三批，不阻塞。
 
-P0：push 夜班 commit · 客户演示自检 · JETSON_FINAL 收尾 · DEVELOPMENT_PLAN 简化 · llm_engine 静默诊断
-P1：Node-RED ENOENT 修 · web_browser 评估
-P2：每机独立 broker / 语意扩展 / 知识库另立项目
-不做区：Jetson 模型替换 / round-robin / NPU Qwen3-4B / MCP / yolov8-world 深耕 / YOLO26n / av/control Node-RED 外露
+| # | 任务 | 前置 / 边界 | 量 | 状态 |
+|---|---|---|---|---|
+| ① | **246 HA 上总线**：HA MQTT Statestream → 我方 broker；反向 HA REST 控制节点 | 需 246 HA 登录（李楠）；broker 监听非回环要核 | 1.5h | ⏳ 不等登录的部分先做 |
+| ② | **面板在线/离线**：Node-RED 订 `creator/telemetry/+/online`，面板行按 online 灰/亮 | 只用已有遥测 | 半天 | ⏳ |
+| ③ | **真状态回读** `state_poller`：空调 Modbus 03 → 继电器 CR-POWER8-SPM 查询帧 → `creator/state/<device>`；面板只反映 state | 只读帧、≤5s 轮询；放 creator_om 或 creator_cc 定一处 | 1–2 天 | ⏳ |
+| ④ | **OBS 字幕路**：`/bigscreen?overlay=1` + OBS 浏览器源 → HDMI 进分布式 TX | 随演示环境 P0 上屏 | 1 天 | ⏳ |
+| ⑤ | **湖森 `/api/wall/subtitle` 抓样本** → 通则 husion_distributed 加辅模式 | 62 现场抓包 | 1 天 | ⏳ |
+| ⑥ | **Light-ASD POC**：62 跑 demo 验帧率 → yolov8n-face rknn → `av/audio/visual_speaker` → 前端与声纹合并 | 等会议室机位；先验算力 | 2–3 天 | ⏳ |
+| 可选 | DeepFilterNet 降噪 A/B（C920 远场） | 62 录音 | 半天 | ⏳ |
 
-### 7.18 当前看板（5/18 新阶段启动）
-
-| # | 任务 | 状态 |
-|---|---|---|
-| P0.1 | DEVELOPMENT_PLAN 重写 — 两阶段 + 战略定位 + §7.18 看板 + trade-off 表 | ✅ 本次 |
-| P0.2 | 根目录 30+ md 整理到 `docs/handoffs/` + `docs/reports/2026-05/` | ✅ 本次 |
-| P0.3 | `JETSON_FINAL_20260515.md` 措辞 "封板"→"独立支线" | ✅ 本次 |
-| P0.4 | Git tag `v1.0-stage1-mac-validated` + push origin | ✅ 本次 |
-| P0.5 | Jetson 独立窗口 system prompt → `docs/handoffs/jetson-side-window-prompt.md` | ✅ 本次 |
-| P0.6 | 接续 plan 文件更新反映新两阶段 | ✅ 本次 |
-| P0.7 | 必备能力实施方案 trade-off 拍板 → **新中间路径** | ✅ 5/18 |
-| P0.8 | GitHub 调研报告（`docs/research/asr-punctuation-diarization-20260518.md`）| ✅ 5/18 |
-| P0.9 | CAM++ + ct-punc 3588 spike — Phase A ✅ ct-punc 过线 / Phase B ⏸ 等双人录音 | 🟡 部分 |
-| P1.1 | `modules/punctuator/` — ct-punc int8 ONNX 标点后处理（端到端 + 真音频 30+ 条已验） | ✅ 5/18 |
-| **P1.3** | **Supervisor 订阅 punctuated topic + dashboard 重复 bug fix（streams=[]）** | ✅ 5/18 |
-| P1.2 | `modules/speaker_tagger/` — silero-vad 切片 + CAM++ embedding + 聚类 | ⏳ 等 Phase B 数据 |
-| P1.3b | 转写卡说话人 tag 显示（dashboard 改造）| ⏳ P1.2 后 |
-| P1.4 | 纪要 UI 提示 + 触发体验优化 | ⏳ |
-| P1.5 | 销售部署 README（`git checkout tag` 后 1 命令启动指南）| ⏳ |
-| P1.6 | Jetson CUDA 语音验证报告（独立窗口完成）| ⏳ |
-| P2.1a | video_processor YOLO 搬 NPU（`yolov8n_rknn_model`，config 一行切换）| ✅ 8/21 下午修复落地：DFL softmax fp16 溢出根因 → `scripts/export_yolo_rknn.py`；62 实况 15min 零异常、检出与 .pt 一致 |
-| P2.1b | video_processor 捕获侧减压：5 路软解 + 逐帧 JPEG 预编码疑为 CPU 大头（62 瞬时 ~600%，.pt/rknn 无明显差别）— RTSP 走子码流 / JPEG 只在有 MJPEG 客户端时编 / rkmpp 硬解 | ⏳ 先量化三者占比再动 |
-| P2.2 | 控制指令"离线"误判修复（dashboard.js 多 client_id 状态合并）| 接受 or 修 |
-
-**不做 / 仅技术储备**：双工对讲（持续 GitHub 关注） · 知识库 + 问答（另立项目）
-
-**5/18 真音频回归已知现状（不在 P1.1/P1.3 范围）**：
-- 冷启动丢字：点"开始转写"后头几句因 VAD RMS 阈值校准期被判 silence（`processor_arm.py` warmup 逻辑），后续连贯
-- 无逐字 partial：sensevoice offline 模型能力上限，已在 §3.2 trade-off 表标记"必大改"才能升级
+**遗留（不在本线，顺手清）**：① `web/server.py` ollama url 读 config ② detect 心跳洪泛/零目标排查 ③ P2.1b 捕获侧减压 ④ 5.6 若切 full：lite2 + rknn 模型 + meeting_camera + CAM++ 模型 ⑤ C920 两人声纹实测 ⑥ .62 启动脚本"等 426"兜底可简化 ⑦ Node-RED 面板标题"CREATOR · 演示中控"写死在 flows，不受 `brand:` 管。
 
 ---
 
@@ -245,61 +180,20 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 - 协议文档不可全信（厂家 PDF 错例多次），先抓真实流量
 
 ### 8.4 红线（不可越）
-- 不动 `audio_processor` / sensevoice 长跑样本（user 在收集）
 - 不动 `/home/firefly/creator_ai_demo/venv`（5.7G 共享 venv）
-- 不 force push / 不动 `main` 分支
-- 3588 上没 sudo 别试
+- 不 force push；**只有 main 一个分支**，差异全在 config，不再开形态分支
+- 3588 生产机动形态选窗口；5.6 重启走 SIGKILL 手法保 funasr
 - 不 SSH Jetson（无密码 + 红线）
 - 不动 `:11434` Jetson ollama
-- 不动 `:1880` 现有 Node-RED 部署 — 整理时先 cp 备份
+- `:1880` Node-RED 改 flows 先 cp 备份，走 admin API 热部署，改完快照回仓 `node-red/flows.json`
+- 产品化 = 加 profile/config，不复制代码；品牌 = `brand:` 配置 + 素材
+- 两仓互改后在对方仓 DEVELOPMENT_PLAN 记一行「待回流」（回流表纪律）
 - 不为子模块完美阻塞整体框架可运行性
 - destructive 命令前先确认；不"防御性编程"吞错
 
 ---
 
-## 9. 进度日志（近 10 天）
-
-更早进度见 `ARCHIVE_2026Q2.md`。
-
-### 2026-05-26 — ASR funasr 2pass D2 + 全链路端到端 + 全程实测调优
-
-**本次推进（一天完成 ASR 重构 + 6 个 commit + 2 个 tag 上 GitHub）：**
-- 晨：funasr 2pass docker arm64 镜像 save→scp→load 上 3588（3.0GB tar / 1.7GB 模型），server listen 10095 后 partial 1.71s / final 6.84s 实测通过 `funasr-2pass-d2-stable-20260526`
-- 切 audio_processor backend = funasr_2pass ws 客户端：**ap RSS 6.3GB → 104MB（净省 6 GB），系统 mem_avail 1.6GB → 7.4GB**；supervisor 重启 9 模块 30s 不可用窗口
-- 双标点 fix：funasr 自带 ITN 标点 + punctuator 二次加 punc → audio_processor 在 funasr backend 下直发 `av/audio/command_punctuated` 绕过 punctuator（commit `6544aca`）
-- 副作用补：llm_engine 订阅 hardcoded `av/audio/command` 导致意图链路收不到 → 按 backend 智能切订阅 topic（commit `34e8443`）
-- location filter 升级：支持 catalog `also_in` 共享路由（吧台窗帘 also_in=2FDiningTable 等）— `58103de`
-- 后置 rewrite 实施：LLM 1.5B 偷换地点时强制纠回 default_location 等价 cmd — `3d459ff`
-- **🚨 default_location + rewrite false positive 暴露**：user 跟同事聊"话筒维修返修工厂"被 LLM 误判 device_control 下发 `2FDiningTable_AirConditioner_TempDown` 真改空调 → 立即清空 default_location 进入 strict mode
-- Jetson 视觉深思链路修通：scene_analyzer 从 `~/av_unified_mvp_jetson/` 起（不是 `~/av_unified_mvp/`，main_jetson.py 才管），qwen2.5vl-Q4_K_M VLM 首次 35s / 后续 11-15s 出场景描述，dashboard 视觉深思 panel 真数据出现
-- 跨主机 escalate 链路实测：3588 拒（filter_rejected_whitelist）→ Mac mini ollama qwen3.5:4b 二次处理 → 回发 av/control 含 `escalated_from=3588`，correlation_id 正确传递
-- node-red 3 个销售 demo flow cherry-pick from origin (`d3a254c`)
-- dashboard 右下角 demo FAB 删除（外出演示对 mic 真说话不用按钮）— `5c767db`
-- tag `funasr-d2-with-vlm-strict-20260526` 打在 `5c767db` 作为今日稳定究极点
-- 全程 push GitHub 走 Mac LadderMac SOCKS5 9091（HTTP 9090 git SSL 不稳，3588 直连 push 卡死）
-
-**已完成验收准则（spike plan 8 项）：**
-- partial 延迟 1.71s ✓ / final 6.84s ✓ / RSS 切后 104MB ✓ / server RSS 3.44GB ✓ / 文本质量 ITN 标点准 ✓ / 段开头乱码消失 ✓
-- 回滚演练未做（理论 < 60s，config 备份在 `~/av_unified_mvp/config/system_config.yaml.snapshot-20260526-stable`）
-
-**未完成 / 已识别 backlog：**
-- iCloud → `~/code/` 仓库迁移仍未做（icloud-git-hazard 5/21 实锤过 `.git/objects` 静默清空）
-- LLM 误触发防护（入口 action-word gate / LLM 输出格式重设计为 `{device, action, location?}` 让 system 组装）— 解锁 default_location 安全恢复的前提
-- ASR funasr `hotwords` 偏置为空，可加 `'餐桌 30 灯带 20 窗帘 20 吧台 30 工程部 30 会议室 20'` 改善 "财神→餐桌" 错字
-- origin/sprint behind 8 commits 待处理（5/26 规则：丢 `eb93a26` `f08b2e3` `175f3ed` 三个语音相关；cherry-pick `58bc05b` 已做；其他 `4ea2e92` `aaa1e88` `82e9843` `c17ec53` 内容已实质包含或纯文档）
-- Jetson VLM keep_alive 未常驻，每次冷加载 11-14s — ollama config 调
-- 长跑 sustain：funasr backend 切换后 sustain_watch 自动跟新 ap_pid 4063857，RSS 漂移待 24h+ 复盘
-- 演示包 + 销售材料 P0 之外的迭代
-
-**下次接手所需上下文：**
-- **stable tag**：`funasr-d2-with-vlm-strict-20260526` → `5c767db`（GitHub 有，git checkout 即回滚）
-- **当前 feat 分支**：`feat/funasr-ws-backend-stable-20260526` tip `5c767db`，origin/sprint 不动
-- **config 当前关键**：`system.default_location: ''`（strict mode 防 false positive）；切回不安全的 default_location=2FDiningTable 必须先做 action-word gate
-- **Jetson scene_analyzer 启动方式**：`PYTHONPATH=/home/jetson/av_unified_mvp_jetson nohup python -m modules.scene_analyzer.main > /tmp/scene_analyzer.log 2>&1 &`
-- **3588 supervisor 重启方式**：`AV_LLM_BACKEND=rknn AV_ASR_BACKEND=funasr_2pass setsid nohup python main.py >> /tmp/main_supervisor.log 2>&1 < /dev/null &`
-- **memory 入口**：`project_funasr_d2_stable_20260526.md` 含完整命令 + 陷阱
-
----
+## 9. 进度日志（8 月起；更早见 `ARCHIVE_2026Q2.md`）
 
 ### 2026-08-18 — 门禁联动模块 door_access 落地（公司大门云眸远程开门）
 - **本次推进**：新增 `modules/door_access/`（云眸 token 缓存刷新 + 远程开门 + 门口 person 检测去抖 → av/door/visitor）；supervisor 按 `door_access.enabled` 条件拉起并桥接 door SSE channel；dashboard 右上角访客弹窗（开门按钮 + 结果状态行）；配置样例入 example yaml
@@ -342,7 +236,6 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 - **未完成项**：① ollama url 读 config；② detect 心跳洪泛/零目标排查；③ P2.1b；④ 5.6 若切 full 形态要用 NPU YOLO/声纹：装 lite2 + rknn 模型 + meeting_camera + CAM++ 模型（现 meeting_asr 不需要）；⑤ C920 两人实测声纹分离；⑥ ~~声纹发言人改名~~（16:55 已做：点 S<n> 标签内联改名 → `/api/speaker/alias` 落 TranscriptStore alias 行 + SSE 广播，多页同步、后续同人句直接显真名、纪要导出自动用真名；62 Playwright 验证过）；⑦ .62 启动脚本"等 426"兜底随 ws 自愈可简化。
 - **下次接手所需上下文**：62 导出 venv `~/rknn-export-venv`、产物 `~/yolo-rknn/`；pgrep 自匹配坑又踩一次（等待循环的 pgrep 模式匹配到自身、永不退出），见 memory `ssh-pkill-self-match-trap`。
 
-
 - 战略定位写入第一行："AI 技术底座 + A/B/C 三层次（架构 = 形态对应）"
 - §1.6 三步框架升级为 §3 两阶段框架
 - 阶段一打 `v1.0-stage1-mac-validated` tag 固化（销售 >16GB Mac checkout 即用）
@@ -352,46 +245,19 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 - 新增 §8 工程纪律（GitHub 调研报告 gating）
 - watcher 长测 763 samples / 62.7h 入仓 `data/longtest_20260515/`，零模块挂
 
-### 2026-05-15 — Jetson 封板 + DEVELOPMENT_PLAN 拆分日
-- 接收夜班 9.5h sustain 报告
-- 3588 supervisor.log 5/15 00:54 后冻结根因 = Claude 授权弹窗
-- 验证 llm_engine 健康（空房间静默 ≠ 死）
-- 战略方向修订：研发收回 3588 单机主线；视觉深思已积累不再深入
-- 修正：纪要生成已落地 / Mac mini .193 在用 / Jetson 跑 4 模块
-- push `c60a666` + 写 `JETSON_FINAL_20260515.md`
-- DEVELOPMENT_PLAN.md 简化拆分 200KB → 16KB + `LESSONS_LEARNED.md` + `ARCHIVE_2026Q2.md`
-
-### 2026-05-14 — GTM 战略转向（25+ commits 一天）
-- 演示包 + 销售内训材料 3 份
-- web_browser husion 真接入 + 256 API endpoint
-- control_dispatcher husion adapter + 5 场景
-- 视觉三层链路：keyframe + openvocab + scene_analyzer
-- commit 索引见 `ARCHIVE_2026Q2.md` §2
-
-### 2026-05-13 — 阶段 3 漏斗第 2 层 NPU + 集成验证
-- NPU LLM 1.5B 入仓 / av/control echo dispatcher / 3588 全栈起来
-
-### 2026-05-12 — 3588 NPU 路径打通（国产化破局）
-- 阶段 2 定调 / 三机部署收尾 / 默认地点解歧义
-
-### 2026-05-11 — 双线推进 + start.command RAM 自适应
-- Mac 假活 bug / Jetson Orin Nano 阶段 2 落地
-
-### 2026-05-09 — LLM 切 qwen3.5:4b
-- 内存省 4.2 GB + 反 hallucinate 兜底
-
----
-
 ## 10. 历史与归档指针
 
 | 文件 | 内容 |
 |---|---|
-| `ARCHIVE_2026Q2.md` | 5/3-5/13 进度索引、5/14 commit 索引、R1-R6 演进、已废弃方向 |
+| `ARCHIVE_2026Q2.md` | 5/3-5/13 进度索引、R1-R6 演进、已废弃方向；**8/22 追加**：原 §3.2 5/18 路线、原 §6、原 §7 看板、5 月日志 |
+| `docs/DECISIONS.md` | 主 Claude↔终端决策同步点（每次开工先读） |
+| `docs/回流表-Mac线与3588线-20260821.md` | 两线能力对照 + 防脱节纪律 |
+| `docs/探讨-跨模块跨系统信息共享-20260822.md` | 阶段三四方向核实与接法 |
+| `docs/deploy/dnc-replicate-install.md` | 湖森复刻 SOP（基准 = main + 金源 config） |
 | `LESSONS_LEARNED.md` | 踩坑 trap 速查、重大诊断教训、演示前 checklist、远期网络可观测性 |
 | `JETSON_FINAL_20260515.md` | Jetson 角色文档（5/18 标注更新为"独立支线"）|
 | `PLAN_R1_R6_subscription.md` | R1-R6 订阅式架构详细设计（仍有效）|
 | `docs/handoffs/` | 历史接续文档（OVERNIGHT_HANDOFF + MORNING_RESUME 共 6 份）|
-| `docs/handoffs/jetson-side-window-prompt.md` | Jetson 独立 Claude 窗口的 system prompt |
 | `docs/reports/2026-05/` | 5/11-5/14 Subagent 报告（共 16 份 OVERNIGHT_REPORT + NIGHT_REPORT）|
 | `docs/sales/` | 销售材料 3 份 |
 | `docs/roadmap/` | landscape 调研 + liaohe-3588 路线图 |
@@ -399,6 +265,5 @@ P2：每机独立 broker / 语意扩展 / 知识库另立项目
 | `summaries/*.json` | 会议纪要存档（5/9-5/11 共 4 份）|
 | `scripts/longtest_watcher.sh` | 13 维度 5min 采样 watcher |
 | `data/longtest_20260515/sample.jsonl` | 5/15-18 长测数据 763 samples / 62.7h |
-| `~/.claude/plans/morning-resume-20260515-md-functional-quail.md` | /clear 接续指南 |
 
 新归档（2026 Q3+）：另开 `ARCHIVE_2026Q3.md`，不再追加本文。
