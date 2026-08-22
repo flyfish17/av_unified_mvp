@@ -310,6 +310,66 @@ def _spk_store():
     return _SPK_STORE
 
 
+# ── Home Assistant 中转（阶段三①）：token 只在板上 config，Node-RED/前端/语音都经此调 HA，不各自持 token ──
+def _ha_cfg() -> dict:
+    import yaml
+    p = _PROJECT_ROOT / "config" / "system_config.yaml"
+    cfg = yaml.safe_load(open(p, encoding="utf-8")) if p.exists() else {}
+    ha = (cfg or {}).get("home_assistant") or {}
+    if not ha.get("url") or not ha.get("token"):
+        raise RuntimeError("config home_assistant.url/token 未配置")
+    return {"url": str(ha["url"]).rstrip("/"), "token": str(ha["token"]).strip()}
+
+
+def _ha_request(method: str, path: str, body: dict | None = None, timeout: float = 6.0):
+    import json as _json
+    import urllib.request
+    ha = _ha_cfg()
+    data = _json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        ha["url"] + path, data=data, method=method,
+        headers={"Authorization": "Bearer " + ha["token"], "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        raw = r.read()
+    return _json.loads(raw) if raw else None
+
+
+@_app.get("/api/ha/states")
+def ha_states():
+    """HA 实体快照（?domains=switch,light,cover,binary_sensor,sensor）；unavailable 也返回，前端决定显隐。"""
+    doms = set(filter(None, (_flask.request.args.get("domains") or "switch,light,cover,binary_sensor,sensor").split(",")))
+    try:
+        st = _ha_request("GET", "/api/states")
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}, 502
+    out = [{"entity_id": x["entity_id"], "state": x["state"],
+            "name": x["attributes"].get("friendly_name", x["entity_id"]),
+            "device_class": x["attributes"].get("device_class", ""),
+            "unit": x["attributes"].get("unit_of_measurement", "")}
+           for x in st if x["entity_id"].split(".")[0] in doms]
+    return {"ok": True, "count": len(out), "states": out}
+
+
+@_app.post("/api/ha/call")
+def ha_call():
+    """body: {"domain":"switch","service":"turn_on","entity_id":"switch.xxx"[, "data":{...}]}。
+    只放行 turn_on/turn_off/toggle/open_cover/close_cover/stop_cover。"""
+    b = _flask.request.get_json(force=True, silent=True) or {}
+    domain, service, eid = str(b.get("domain", "")), str(b.get("service", "")), str(b.get("entity_id", ""))
+    if service not in {"turn_on", "turn_off", "toggle", "open_cover", "close_cover", "stop_cover"}:
+        return {"ok": False, "error": f"service 不放行: {service}"}, 400
+    if not eid.startswith(domain + "."):
+        return {"ok": False, "error": "entity_id 与 domain 不符"}, 400
+    payload = {"entity_id": eid, **(b.get("data") or {})}
+    try:
+        res = _ha_request("POST", f"/api/services/{domain}/{service}", payload)
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}, 502
+    logger.info(f"[ha] {domain}.{service} {eid}")
+    return {"ok": True, "changed": [x.get("entity_id") for x in (res or [])]}
+
+
 @_app.get("/api/speaker/aliases")
 def speaker_aliases():
     return {"ok": True, "aliases": dict(_spk_store().aliases)}

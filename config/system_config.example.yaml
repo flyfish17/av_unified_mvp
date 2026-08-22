@@ -169,3 +169,7 @@ device_state:
   interval: 10                      # 秒，整轮周期（4 台串行，RS485 半双工）
   ac_gateway: { host: 192.168.5.211, port: 82 }
   # ac 不填 = 公司演示环境 4 台默认表（key 与 Node-RED 面板 p 前缀一致）
+# ── Home Assistant（246，阶段三①）── 反向控制用；token 只写板上 config（不进 git），此处留空
+home_assistant:
+  url: http://192.168.5.246:8123
+  token: ""
